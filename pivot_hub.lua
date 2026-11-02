@@ -210,8 +210,9 @@ function Core.animation_release(scope,deps)
         if p.early and p.late then p.ratio=(p.early+p.late)/2
         else
             local step=(code==1 or code==8) and .06 or (code==2 or code==7) and .04 or .02
-            p.ratio=math.max(.25,math.min(.85,pending.ratio+(early and step or -step)))
+            p.ratio=math.max(.25,math.min(p.ceiling or .85,pending.ratio+(early and step or -step)))
         end
+        p.ratio=math.max(.25,math.min(p.ceiling or .85,p.ratio))
         deps.report(late and "Late feedback / next release earlier" or "Early feedback / next release later")
     end
     local function release_time(track)
@@ -275,6 +276,10 @@ function Core.animation_release(scope,deps)
                 local attributes=deps.attributes()
                 if attributes and type(attributes.BaseAnimation)=="string" and attributes.BaseAnimation:lower():find("jumpshot",1,true) then
                     local p=profile(track,attributes.BaseAnimation)
+                    if track.Speed==0 and track.TimePosition<entry.release_time then
+                        p.ceiling=math.max(.25,math.min(.85,track.TimePosition/entry.release_time))
+                        p.ratio=math.min(p.ratio,p.ceiling)
+                    end
                     if track.TimePosition>=entry.release_time*p.ratio then release(track,"Shot phase") end
                 end
             end
