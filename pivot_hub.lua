@@ -1067,7 +1067,7 @@ connect(run_service.Heartbeat,function(dt)
     local lines={}; for index=math.max(1,#logs-9),#logs do lines[#lines+1]=logs[index] end
     log_label.Text=table.concat(lines,"\n"); elapsed=0; frames=0
 end)
-report("Ready / "..restored.." / calibrate your jumpshot in Gym.")
+report("Ready / "..restored)
 
 -- language: Lua, file: pivot_visuals.lua, runtime: Roblox client, target: C4 Practical Hub v2
 do
@@ -1085,8 +1085,8 @@ do
         object.Parent=parent; return object
     end
     local function rgb(r,g,b) return Color3.fromRGB(r,g,b) end
-    local theme={base=rgb(20,18,23),rail=rgb(24,21,28),panel=rgb(30,26,34),input=rgb(21,18,25),line=rgb(43,37,49),
-        text=rgb(231,224,236),muted=rgb(161,149,171),accent=rgb(193,166,213),selected=rgb(48,39,57),green=rgb(157,196,172)}
+    local theme={base=rgb(18,18,23),rail=rgb(22,21,28),panel=rgb(28,27,34),input=rgb(21,20,27),line=rgb(45,42,54),
+        text=rgb(236,232,243),muted=rgb(148,141,161),accent=rgb(190,170,222),selected=rgb(47,39,60),green=rgb(151,204,176)}
     local function corner(object,n)
         local c=object:FindFirstChildWhichIsA("UICorner") or make("UICorner",{},object); c.CornerRadius=UDim.new(0,n)
     end
@@ -1097,18 +1097,55 @@ do
     local function frame(parent,x,y,w,h,color)
         return make("Frame",{Position=UDim2.fromOffset(x,y),Size=UDim2.fromOffset(w,h),BackgroundColor3=color or theme.panel,BorderSizePixel=0},parent)
     end
+    local function animate(object,properties)
+        local service=game:GetService("TweenService")
+        if service then
+            local ok=pcall(function() service:Create(object,TweenInfo.new(.12,Enum.EasingStyle.Quad,Enum.EasingDirection.Out),properties):Play() end)
+            if ok then return end
+        end
+        for key,value in pairs(properties) do object[key]=value end
+    end
+    local function icon(parent,kind,x,y,color)
+        local root=frame(parent,x,y,20,20); root.Name="LineIcon"; root.BackgroundTransparency=1
+        local function line(a,b,c,d)
+            local dx,dy=c-a,d-b
+            local part=frame(root,(a+c)/2,(b+d)/2,math.sqrt(dx*dx+dy*dy),1.4,color)
+            part.AnchorPoint=Vector2.new(.5,.5); part.Rotation=math.deg(math.atan2(dy,dx)); corner(part,1)
+        end
+        local function ring(a,b,size)
+            local part=frame(root,a,b,size,size); part.BackgroundTransparency=1; corner(part,size/2); border(part,color)
+        end
+        if kind=="Diagnostics" then
+            line(2,9,10,2); line(10,2,18,9); line(4,8,4,17); line(4,17,16,17); line(16,17,16,8); line(8,17,8,12); line(8,12,12,12); line(12,12,12,17)
+        elseif kind=="Shot Lab" then
+            ring(4,4,12); ring(8,8,4); line(10,1,10,4); line(10,16,10,19); line(1,10,4,10); line(16,10,19,10)
+        elseif kind=="Combos" then
+            line(5,5,15,5); line(15,5,15,15); line(15,15,5,15)
+            for _,point in ipairs({{3,3},{13,3},{3,13}}) do local node=frame(root,point[1],point[2],4,4,color); corner(node,1) end
+        elseif kind=="Profiles" then
+            line(3,5,17,5); line(3,10,17,10); line(3,15,17,15)
+            for _,point in ipairs({{7,5},{13,10},{6,15}}) do local node=frame(root,point[1]-1,point[2]-2,3,4,color); corner(node,1) end
+        elseif kind=="Search" then ring(3,3,10); line(12,12,17,17)
+        else
+            for _,point in ipairs({{3,3},{12,3},{3,12},{12,12}}) do local node=frame(root,point[1],point[2],5,5); node.BackgroundTransparency=1; border(node,color); corner(node,1) end
+        end
+        return root
+    end
+    local function icon_color(root,color)
+        for _,part in ipairs(root:GetDescendants()) do if part:IsA("Frame") then part.BackgroundColor3=color elseif part:IsA("UIStroke") then part.Color=color end end
+    end
     local function label(parent,value,x,y,w,h,size,color)
         return make("TextLabel",{Text=value,Position=UDim2.fromOffset(x,y),Size=UDim2.fromOffset(w,h),BackgroundTransparency=1,
             TextColor3=color or theme.text,Font=Enum.Font.BuilderSans,TextSize=size or 12,TextXAlignment=Enum.TextXAlignment.Left,
             TextYAlignment=Enum.TextYAlignment.Center,TextWrapped=true,BorderSizePixel=0},parent)
     end
     local function small_button(parent,value,callback)
-        local b=make("TextButton",{Text=value,Size=UDim2.fromOffset(110,28),BackgroundColor3=theme.selected,BorderSizePixel=0,
+        local b=make("TextButton",{Text=value,Size=UDim2.fromOffset(110,28),BackgroundColor3=theme.panel,BorderSizePixel=0,
             TextColor3=theme.text,TextSize=11,Font=Enum.Font.BuilderSans,AutoButtonColor=false},parent)
-        corner(b,4)
+        corner(b,5)
         on(b.Activated,callback)
-        on(b.MouseEnter,function() b.BackgroundColor3=rgb(59,48,69) end)
-        on(b.MouseLeave,function() b.BackgroundColor3=theme.selected end)
+        on(b.MouseEnter,function() if not b:GetAttribute("RailItem") then animate(b,{BackgroundColor3=theme.selected}) end end)
+        on(b.MouseLeave,function() if not b:GetAttribute("RailItem") then animate(b,{BackgroundColor3=theme.panel}) end end)
         return b
     end
     local shell=gui:FindFirstChildWhichIsA("Frame")
@@ -1125,7 +1162,7 @@ do
     end
     assert(header and status and pages.Diagnostics,"Unsupported Pivot layout.")
     make("Folder",{Name="CompactVisuals"},gui)
-    shell.BackgroundColor3=theme.base; corner(shell,7); border(shell)
+    shell.BackgroundColor3=theme.base; corner(shell,10); border(shell)
     header.Text=""; header.Position=UDim2.fromOffset(68,0); header.Size=UDim2.new(1,-112,0,42)
     subtitle.Visible=false
     nav.Visible=false
@@ -1133,11 +1170,14 @@ do
     local rail_line=frame(shell,68,0,1,548,theme.line)
     local top_line=frame(shell,69,41,631,1,theme.line)
     local logo=label(shell,"PIVOT",9,12,50,26,13,theme.accent); logo.Font=Enum.Font.BuilderSansBold; logo.TextXAlignment=Enum.TextXAlignment.Center
-    local heading=label(shell,"Home  |  Practical Basketball",84,8,365,26,12)
+    local heading=label(shell,"Home  |  Practical Basketball",84,8,365,26,13); heading.Font=Enum.Font.BuilderSansMedium
     close.BackgroundColor3=theme.rail; close.TextColor3=theme.muted; close.TextSize=12; corner(close,4)
     local search=make("TextBox",{Text="",PlaceholderText="Search controls",PlaceholderColor3=theme.muted,Position=UDim2.fromOffset(484,10),Size=UDim2.fromOffset(166,23),
         ClearTextOnFocus=false,TextSize=11,TextColor3=theme.text,BackgroundColor3=theme.input,BorderSizePixel=0,Font=Enum.Font.BuilderSans},shell)
     corner(search,4)
+    search.TextXAlignment=Enum.TextXAlignment.Left
+    make("UIPadding",{PaddingLeft=UDim.new(0,26),PaddingRight=UDim.new(0,8)},search)
+    local search_symbol=icon(shell,"Search",487,12,theme.muted)
     local aliases={ ["SHOOT / configured hotkey"]="Shoot",["EARLY / hold 10 ms longer"]="Early  +10 ms",["GREEN / keep this timing"]="Green",["LATE / release 10 ms sooner"]="Late  -10 ms",
         ["TOGGLE MANUAL CAPTURE / hold and release E"]="Capture manual timing",["APPLY MEDIAN OF CAPTURED RELEASES"]="Use captured median",["CLEAR CAPTURE SAMPLES"]="Clear samples",
         ["VALIDATE SEQUENCE"]="Validate sequence",["RUN SEQUENCE / configured hotkey"]="Run combo",["SAVE SELECTED SLOT"]="Save profile",["LOAD SELECTED SLOT"]="Load profile",
@@ -1148,11 +1188,11 @@ do
         ["Shot hotkey / F1-F12 or RightShift"]={"Shoot key","F1-F12 or RightShift","shot"},["Combo hotkey / unique; F8 is reserved"]={"Combo key","Unique key; F8 reserved","combo"},["Menu hotkey / unique; F8 is reserved"]={"Menu key","Unique key; F8 reserved","menu"},
     }
     local function decorate_button(b)
-        actions[b.Text]=b; b.TextTransparency=1; b.AutoButtonColor=false; b.BackgroundColor3=theme.selected; b.Size=UDim2.new(1,-6,0,30); corner(b,4)
+        actions[b.Text]=b; b.TextTransparency=1; b.AutoButtonColor=false; b.BackgroundColor3=theme.panel; b.Size=UDim2.new(1,-6,0,30); corner(b,5)
         local display=label(b,aliases[b.Text] or b.Text,8,0,100,30,11); display.Size=UDim2.new(1,-16,1,0); display.TextXAlignment=Enum.TextXAlignment.Center
         on(b:GetPropertyChangedSignal("Text"),function() display.Text=aliases[b.Text] or b.Text:gsub(" / click to cycle"," / select") end)
-        on(b.MouseEnter,function() b.BackgroundColor3=rgb(59,48,69) end)
-        on(b.MouseLeave,function() b.BackgroundColor3=theme.selected end)
+        on(b.MouseEnter,function() animate(b,{BackgroundColor3=theme.selected}) end)
+        on(b.MouseLeave,function() animate(b,{BackgroundColor3=theme.panel}) end)
     end
     for name,page in pairs(pages) do
         page.ScrollBarThickness=2; page.ScrollBarImageColor3=theme.accent
@@ -1175,7 +1215,10 @@ do
                         on(box.Focused,function() outline.Color=theme.accent end); on(box.FocusLost,function() outline.Color=theme.line end)
                         fields[d[3]]=box; rows[#rows+1]={name=d[1],description=d[2],page=name,row=row}
                     elseif names[child.Text] or name=="Diagnostics" then child.Visible=false
-                    else child.TextSize=11; child.TextColor3=theme.muted; child.TextYAlignment=Enum.TextYAlignment.Top end
+                    else
+                        if child.Text:find("Calibrate against live shot feedback",1,true) then child.Text="Manual shot lab  /  F6 action"; child.Size=UDim2.new(1,-6,0,22) end
+                        child.TextSize=11; child.TextColor3=theme.muted; child.TextYAlignment=Enum.TextYAlignment.Top
+                    end
                 elseif child:IsA("TextButton") then decorate_button(child); if name=="Diagnostics" then child.Visible=false end end
             end
         end
@@ -1190,7 +1233,7 @@ do
     group({"SAVE SELECTED SLOT","LOAD SELECTED SLOT"})
     local home=pages.Diagnostics
     home:FindFirstChildWhichIsA("UIListLayout"):Destroy()
-    local account=frame(home,0,0,0,94); account.Size=UDim2.new(1,-6,0,94); corner(account,4)
+    local account=frame(home,0,0,0,94); account.Size=UDim2.new(1,-6,0,94); corner(account,7); border(account)
     local portrait=frame(account,14,18,56,56,theme.selected); corner(portrait,28); border(portrait,theme.accent)
     local name=player.DisplayName or player.Name
     local initial=label(portrait,tostring(name):sub(1,1):upper(),0,0,56,56,23,theme.accent); initial.TextXAlignment=Enum.TextXAlignment.Center
@@ -1199,20 +1242,20 @@ do
         local image=make("ImageLabel",{Image=thumbnail,BackgroundTransparency=1,Position=UDim2.fromOffset(3,3),Size=UDim2.fromOffset(50,50)},portrait); corner(image,25); initial.Visible=false
     end)
     label(account,"Welcome back,",84,16,230,16,10,theme.muted)
-    local display_name=label(account,name,84,33,230,21,15); display_name.Font=Enum.Font.BuilderSansBold; display_name.TextTruncate=Enum.TextTruncate.AtEnd; display_name.TextWrapped=false
+    local display_name=label(account,name,84,32,230,23,18); display_name.Font=Enum.Font.BuilderSansBold; display_name.TextTruncate=Enum.TextTruncate.AtEnd; display_name.TextWrapped=false
     label(account,"@"..player.Name,84,56,230,16,10,theme.muted)
     local badge=frame(account,0,14,96,24,theme.selected); badge.Position=UDim2.new(1,-110,0,14); corner(badge,12); border(badge)
-    local badge_text=label(badge,"PIVOT / v4",0,0,96,24,11,theme.accent); badge_text.TextXAlignment=Enum.TextXAlignment.Center
+    local badge_text=label(badge,"Connected",0,0,96,24,10,theme.green); badge_text.TextXAlignment=Enum.TextXAlignment.Center
     local session_label=label(account,"Local session",0,49,96,16,10,theme.muted); session_label.Position=UDim2.new(1,-110,0,49)
-    local stats=frame(home,0,102,0,54); stats.Size=UDim2.new(1,-6,0,54); corner(stats,4)
+    local stats=frame(home,0,102,0,54); stats.Size=UDim2.new(1,-6,0,54); corner(stats,7)
     local stat_values={}
-    for index,title in ipairs({"Players","Session","FPS","Ping","Release"}) do
+    for index,title in ipairs({"Players","Session","FPS","Ping","Enabled"}) do
         local cell=frame(stats,0,0,0,54); cell.Position=UDim2.new((index-1)/5,0,0,0); cell.Size=UDim2.new(.2,0,1,0); cell.BackgroundTransparency=1
         local caption=label(cell,title,10,8,100,16,10,theme.muted); caption.Size=UDim2.new(1,-14,0,16)
-        local value=label(cell,"--",10,27,100,18,12); value.Size=UDim2.new(1,-14,0,18); stat_values[title]=value
+        local value=label(cell,"--",10,26,100,20,15); value.Font=Enum.Font.BuilderSansMedium; value.Size=UDim2.new(1,-14,0,20); stat_values[title]=value
         if index>1 then local line=frame(cell,0,9,1,36,theme.line) end
     end
-    local server=frame(home,0,164,0,108); server.Size=UDim2.new(1,-6,0,108); corner(server,4)
+    local server=frame(home,0,164,0,108); server.Size=UDim2.new(1,-6,0,108); corner(server,7)
     label(server,"Practical Basketball",14,12,240,20,13)
     label(server,"Current Roblox session",14,33,240,17,10,theme.muted)
     local place_text=label(server,"Place  "..string.format("%.0f",game.PlaceId),14,59,270,17,10,theme.muted)
@@ -1224,14 +1267,15 @@ do
     end
     local copy_place=small_button(server,"Copy place ID",function() copy(string.format("%.0f",game.PlaceId)) end)
     local copy_server=small_button(server,"Copy server ID",function() copy(game.JobId or "") end)
+    border(copy_place); border(copy_server)
     local runtime=frame(home,0,280,0,52); runtime.Size=UDim2.new(1,-6,0,52); corner(runtime,4)
-    label(runtime,"Input runtime",14,8,240,18,12)
+    label(runtime,"Quick controls",14,8,240,18,12)
     local native=type(keypress)=="function" and type(keyrelease)=="function"
-    local runtime_text=label(runtime,native and "Native keyboard functions available" or "Virtual input / checked when an action runs",14,27,500,16,10,theme.muted); runtime_text.Size=UDim2.new(1,-28,0,16)
+    local runtime_text=label(runtime,"Right Shift  Menu     F8  Stop all",14,27,500,16,10,theme.muted); runtime_text.Size=UDim2.new(1,-28,0,16)
     local bottom=frame(home,0,340,0,60); bottom.Size=UDim2.new(1,-6,0,60); bottom.BackgroundTransparency=1
     local storage=frame(bottom,0,0,0,60); storage.Size=UDim2.new(.5,-4,1,0); corner(storage,4)
     label(storage,"Profiles",12,9,180,18,12)
-    local storage_text=label(storage,type(writefile)=="function" and "3 slots / disk persistence" or "3 slots / current session",12,30,250,17,10,theme.muted); storage_text.Size=UDim2.new(1,-24,0,17)
+    local storage_text=label(storage,"3 profile slots",12,30,250,17,10,theme.muted); storage_text.Size=UDim2.new(1,-24,0,17)
     local report_card=frame(bottom,0,0,0,60); report_card.Position=UDim2.new(.5,4,0,0); report_card.Size=UDim2.new(.5,-4,1,0); corner(report_card,4)
     local export=actions["COPY SHOT HISTORY + LOG"]; export.Parent=report_card; export.Visible=true; export.Position=UDim2.fromOffset(10,14); export.Size=UDim2.new(1,-20,0,32)
     home.AutomaticCanvasSize=Enum.AutomaticSize.None; home.CanvasSize=UDim2.fromOffset(0,410)
@@ -1250,19 +1294,31 @@ do
         result.Size=UDim2.new(1,-6,0,34); result_buttons[#result_buttons+1]={button=result,entry=entry}
     end
     local no_results=label(result_page,"No matching controls.",0,0,300,32,12,theme.muted)
+    local function add_search(title,description,callback)
+        local result=small_button(result_page,title.."  /  Modules",callback)
+        result.Size=UDim2.new(1,-6,0,34)
+        result_buttons[#result_buttons+1]={button=result,entry={name=title,description=description,page="Modules"}}
+    end
     show=function(name)
         selected=name; result_page.Visible=false; if PivotUI and PivotUI.hide_extra then PivotUI.hide_extra() end
         for key,page in pairs(pages) do page.Visible=key==name end
         heading.Text=({Diagnostics="Home",["Shot Lab"]="Main",Combos="Combos",Profiles="Settings",Modules="Modules"})[name].."  |  Practical Basketball"
-        for key,item in pairs(rail_items) do item.button.BackgroundColor3=key==name and theme.selected or theme.rail; item.icon.TextColor3=key==name and theme.accent or theme.muted; item.label.TextColor3=item.icon.TextColor3 end
+        for key,item in pairs(rail_items) do
+            local active=key==name; item.button.BackgroundColor3=active and theme.selected or theme.rail
+            icon_color(item.icon,active and theme.accent or theme.muted); item.label.TextColor3=active and theme.accent or theme.muted
+            if item.indicator then item.indicator.Visible=active end
+        end
     end
     for index,entry in ipairs({{"Diagnostics","Home","⌂"},{"Shot Lab","Main","≡"},{"Combos","Combos","⋮"},{"Profiles","Settings","⚙"}}) do
         local name,caption,glyph=entry[1],entry[2],entry[3]
         local b=small_button(shell,caption,function() search.Text=""; show(name) end)
+        b:SetAttribute("RailItem",true)
         b.Position=UDim2.fromOffset(9,54+(index-1)*62); b.Size=UDim2.fromOffset(50,54); b.TextTransparency=1; b.BackgroundColor3=theme.rail
-        local icon=label(b,glyph,0,3,50,28,22,theme.muted); icon.TextXAlignment=Enum.TextXAlignment.Center
+        local symbol=icon(b,name,15,8,theme.muted)
         local text=label(b,caption,0,33,50,16,10,theme.muted); text.TextXAlignment=Enum.TextXAlignment.Center
-        rail_items[name]={button=b,icon=icon,label=text}
+        local indicator=frame(b,0,17,2,18,theme.accent); corner(indicator,1)
+        rail_items[name]={button=b,icon=symbol,label=text,indicator=indicator}
+        on(b.MouseEnter,function() if selected~=name then b.BackgroundColor3=theme.panel end end)
         on(b.MouseLeave,function() b.BackgroundColor3=selected==name and theme.selected or theme.rail end)
     end
     for _,button in ipairs(nav:GetChildren()) do
@@ -1297,6 +1353,7 @@ do
         rail.Size=UDim2.new(0,68,1,0); rail_line.Size=UDim2.new(0,1,1,0); top_line.Size=UDim2.new(1,-69,0,1)
         local narrow=w<560
         search.Visible=not narrow; search.Position=UDim2.new(1,-214,0,10)
+        search_symbol.Visible=not narrow; search_symbol.Position=UDim2.new(1,-211,0,12)
         heading.Size=UDim2.new(1,-(narrow and 128 or 308),0,26)
         close.Position=UDim2.new(1,-35,0,10); close.Size=UDim2.fromOffset(23,23)
         for _,page in pairs(pages) do page.Position=UDim2.fromOffset(84,52); page.Size=UDim2.new(1,-96,1,-118) end
@@ -1338,11 +1395,13 @@ do
         local count,max="--",tostring(players.MaxPlayers or "--"); pcall(function() count=tostring(#players:GetPlayers()) end)
         stat_values.Players.Text=count.."/"..max
         local ping="--"; pcall(function() ping=tostring(math.floor(player:GetNetworkPing()*1000+.5)).."ms" end); stat_values.Ping.Text=ping
-        local hold,lead=tonumber(fields.hold.Text),tonumber(fields.lead.Text)
-        stat_values.Release.Text=hold and lead and tostring(math.max(50,math.min(2000,hold-lead))).."ms" or "--"
+        local active=0
+        if PivotModules then for _ in pairs(PivotModules.registry.active) do active=active+1 end end
+        stat_values.Enabled.Text=tostring(active)
+        runtime_text.Text=tostring(fields.menu.Text).."  Menu     F8  Stop all"
         elapsed=0; frames=0
     end)
-    PivotUI={theme=theme,label=label,button=small_button,pages=pages,rail_items=rail_items,show=show,heading=heading,search=search,cancel=cancel,actions=actions}
+    PivotUI={theme=theme,label=label,button=small_button,pages=pages,rail_items=rail_items,show=show,heading=heading,search=search,cancel=cancel,actions=actions,icon=icon,icon_color=icon_color,animate=animate,add_search=add_search}
     on(gui.Destroying,function() for _,c in ipairs(connections) do c:Disconnect() end end)
 end
 
@@ -1352,19 +1411,21 @@ do
     PivotModules=engine
     local theme=ui.theme
     local function paint_switch(button,on)
+        if button:GetAttribute("On")==on then return end
         button:SetAttribute("On",on)
         local track=button:FindFirstChild("Track"); local knob=track and track:FindFirstChild("Knob")
         if not knob then return end
-        track.BackgroundColor3=on and theme.accent or theme.line
-        knob.BackgroundColor3=on and theme.base or theme.muted
-        knob.Position=UDim2.fromOffset(on and 18 or 2,2)
+        ui.animate(track,{BackgroundColor3=on and theme.accent or theme.line})
+        ui.animate(knob,{BackgroundColor3=on and theme.base or theme.muted,Position=UDim2.fromOffset(on and 20 or 2,2)})
+        local row=button.Parent
+        if row and row.Name:sub(1,10)=="ModuleRow_" then row.BackgroundColor3=theme.selected; row.BackgroundTransparency=on and .4 or 1 end
     end
     local function switch(parent,callback)
         local button=make("TextButton",{Name="Toggle",Text="",AutoButtonColor=false,BackgroundTransparency=1,BorderSizePixel=0,Size=UDim2.fromOffset(44,26)},parent)
-        local track=make("Frame",{Name="Track",Position=UDim2.fromOffset(6,5),Size=UDim2.fromOffset(32,16),BorderSizePixel=0},button)
-        make("UICorner",{CornerRadius=UDim.new(0,8)},track)
-        local knob=make("Frame",{Name="Knob",Size=UDim2.fromOffset(12,12),BorderSizePixel=0},track)
-        make("UICorner",{CornerRadius=UDim.new(0,6)},knob)
+        local track=make("Frame",{Name="Track",Position=UDim2.fromOffset(4,4),Size=UDim2.fromOffset(36,18),BorderSizePixel=0},button)
+        make("UICorner",{CornerRadius=UDim.new(0,9)},track)
+        local knob=make("Frame",{Name="Knob",Size=UDim2.fromOffset(14,14),BorderSizePixel=0},track)
+        make("UICorner",{CornerRadius=UDim.new(0,7)},knob)
         connect(button.Activated,callback); paint_switch(button,false)
         return button
     end
@@ -1493,17 +1554,19 @@ do
             for _,definition in ipairs(engine.definitions) do
                 if definition.category==category then
                     local id=definition.id
-                    local row=own(make("Frame",{Name="ModuleRow_"..id,Position=UDim2.fromOffset(0,y),Size=UDim2.new(1,-6,0,32),BackgroundTransparency=1,BorderSizePixel=0},page))
-                    local title=ui.label(row,definition.title,4,0,300,30,11,theme.text); title.Size=UDim2.new(1,-91,0,30)
+                    local row=own(make("Frame",{Name="ModuleRow_"..id,Position=UDim2.fromOffset(0,y),Size=UDim2.new(1,-6,0,36),BackgroundTransparency=1,BorderSizePixel=0},page))
+                    make("UICorner",{CornerRadius=UDim.new(0,5)},row)
+                    local title=ui.label(row,definition.title,10,0,300,36,12,theme.text); title.Size=UDim2.new(1,-101,0,36)
                     local detail=ui.button(row,expanded==id and "−" or "+",function() if expanded==id then expanded=nil else expanded=id end; rebuild() end)
-                    detail.Name="Details"; detail.Position=UDim2.new(1,-79,0,4); detail.Size=UDim2.fromOffset(24,24); detail.BackgroundTransparency=1
+                    detail.Name="Details"; detail.Position=UDim2.new(1,-79,0,6); detail.Size=UDim2.fromOffset(24,24); detail.BackgroundTransparency=1
                     buttons[id]=switch(row,function()
                         if engine.registry.active[id] then engine.registry:disable(id) else local ok,err=engine.registry:enable(id,engine.settings); if not ok then report(tostring(err)) end end
                         update_buttons()
                     end)
-                    buttons[id].Position=UDim2.new(1,-48,0,3)
-                    local separator=make("Frame",{Position=UDim2.new(0,4,1,-1),Size=UDim2.new(1,-8,0,1),BackgroundColor3=theme.line,BorderSizePixel=0},row)
-                    y=y+34
+                    buttons[id].Position=UDim2.new(1,-48,0,5)
+                    connect(row.MouseEnter,function() row.BackgroundColor3=theme.panel; row.BackgroundTransparency=.25 end)
+                    connect(row.MouseLeave,function() row.BackgroundColor3=theme.selected; row.BackgroundTransparency=engine.registry.active[id] and .4 or 1 end)
+                    y=y+39
                     if expanded==id then
                         text(definition.description,10,theme.muted,40).TextWrapped=true
                         for _,entry in ipairs(options[id] or {}) do field(entry[1],entry[2]) end
@@ -1521,9 +1584,11 @@ do
         ui.search.Text=""; ui.show("Modules"); rebuild()
     end)
     rail.Name="ModulesNav"; rail.Position=UDim2.fromOffset(9,302); rail.Size=UDim2.fromOffset(50,54); rail.TextTransparency=1; rail.BackgroundColor3=theme.rail
-    local glyph=ui.label(rail,"⊞",0,3,50,28,22,theme.muted); glyph.TextXAlignment=Enum.TextXAlignment.Center
+    rail:SetAttribute("RailItem",true)
+    local glyph=ui.icon(rail,"Modules",15,8,theme.muted)
     local caption=ui.label(rail,"Modules",0,33,50,16,10,theme.muted); caption.TextXAlignment=Enum.TextXAlignment.Center
-    ui.pages.Modules=page; ui.rail_items.Modules={button=rail,icon=glyph,label=caption}
+    local indicator=make("Frame",{Position=UDim2.fromOffset(0,17),Size=UDim2.fromOffset(2,18),BackgroundColor3=theme.accent,BorderSizePixel=0,Visible=false},rail)
+    ui.pages.Modules=page; ui.rail_items.Modules={button=rail,icon=glyph,label=caption,indicator=indicator}
     connect(rail.MouseLeave,function() rail.BackgroundColor3=page.Visible and theme.selected or theme.rail end)
     ui.hide_extra=function() page.Visible=false end
     connect(gui.Destroying,function() engine:close() end)
@@ -1537,6 +1602,12 @@ do
     end
     local elapsed=0
     connect(run_service.Heartbeat,function(dt) elapsed=elapsed+dt; if elapsed>.2 then elapsed=0; update_buttons() end end)
+    for _,definition in ipairs(engine.definitions) do
+        local id,section=definition.id,definition.category
+        ui.add_search(definition.title,definition.description,function()
+            ui.search.Text=""; category=section; expanded=id; choosing=false; ui.show("Modules"); page.CanvasPosition=Vector2.new(0,0); rebuild()
+        end)
+    end
     rebuild()
 end
 
