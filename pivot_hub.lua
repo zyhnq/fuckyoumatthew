@@ -189,7 +189,31 @@ function Core.bounded(value,minimum,maximum)
     return value
 end
 function Core.animation_release(scope,deps)
-    local state={watched={},sent={},metadata=setmetatable({},{__mode="k"}),closed=false}
+    local state={watched={},sent={},metadata=setmetatable({},{__mode="k"}),profiles=deps.profiles or {},pending={},closed=false}
+    local function profile(track,name)
+        local animation=track.Animation
+        local key=name.."/"..tostring(animation and animation.AnimationId or "")
+        if not state.profiles[key] then state.profiles[key]={ratio=.60} end
+        return state.profiles[key]
+    end
+    function state:feedback(code)
+        code=tonumber(code)
+        if not code or code%1~=0 or code<1 or code>8 or #self.pending==0 then return end
+        local pending=table.remove(self.pending,1)
+        local p=pending.profile; local early=code<=3; local late=code>=6
+        if early then p.early=math.max(p.early or .25,pending.ratio)
+        elseif late then p.late=math.min(p.late or .85,pending.ratio)
+        else deps.report(code==5 and "Perfect release / keeping timing" or "Good release / keeping timing"); return end
+        if p.early and p.late and p.early>=p.late then
+            if early then p.late=nil else p.early=nil end
+        end
+        if p.early and p.late then p.ratio=(p.early+p.late)/2
+        else
+            local step=(code==1 or code==8) and .06 or (code==2 or code==7) and .04 or .02
+            p.ratio=math.max(.25,math.min(.85,pending.ratio+(early and step or -step)))
+        end
+        deps.report(late and "Late feedback / next release earlier" or "Early feedback / next release later")
+    end
     local function release_time(track)
         if state.metadata[track]==nil then
             local ok,time=pcall(function() return track:GetTimeOfKeyframe("Release") end)
@@ -214,10 +238,15 @@ function Core.animation_release(scope,deps)
         local shot,name=eligible(track); if not shot then return end
         local entry=state.watched[track]; if not entry or entry.shot~=shot then return end
         local jumpshot=name:lower():find("jumpshot",1,true)~=nil
-        if marker=="Pause" or (jumpshot and marker~="Hold pose") then return end
+        if marker=="Pause" or (jumpshot and marker~="Shot phase") then return end
         state.sent={[shot]=true}
         local ok,err=pcall(deps.release)
         if not ok then state.error=tostring(err); state.closed=true; deps.failed(state.error); return end
+        if jumpshot then
+            local p=profile(track,name)
+            if #state.pending>=8 then table.remove(state.pending,1) end
+            state.pending[#state.pending+1]={profile=p,ratio=p.ratio}
+        end
         deps.report("Animation release / "..name.." / "..marker)
     end
     local function disconnect(track)
@@ -242,9 +271,12 @@ function Core.animation_release(scope,deps)
                 entry.connections[#entry.connections+1]=track:GetMarkerReachedSignal("Release"):Connect(function() release(track,"Release") end)
             end
             local entry=self.watched[track]
-            if entry and entry.release_time and track.Speed==0 and type(track.TimePosition)=="number" and track.TimePosition>0 and track.TimePosition<entry.release_time then
+            if entry and entry.release_time and type(track.TimePosition)=="number" and track.TimePosition>0 then
                 local attributes=deps.attributes()
-                if attributes and type(attributes.BaseAnimation)=="string" and attributes.BaseAnimation:lower():find("jumpshot",1,true) then release(track,"Hold pose") end
+                if attributes and type(attributes.BaseAnimation)=="string" and attributes.BaseAnimation:lower():find("jumpshot",1,true) then
+                    local p=profile(track,attributes.BaseAnimation)
+                    if track.TimePosition>=entry.release_time*p.ratio then release(track,"Shot phase") end
+                end
             end
             if entry and entry.release_time and type(track.TimePosition)=="number" and track.TimePosition>=entry.release_time then release(track,"Release keyframe") end
             if entry then entry.position=track.TimePosition end
@@ -623,16 +655,28 @@ local function create_pivot_modules(ctx)
                 return false
             end,
             release=function() shoot:Fire({Shoot=false}) end,
+            feedback=function(scope,callback)
+                local service=services.InterfaceService
+                local signal=service and service.ShowFeedback
+                if not signal or type(signal.Connect)~="function" then return false end
+                local connection=signal:Connect(function(model,_,timing)
+                    if model==value.data.model then callback(tonumber(timing)) end
+                end)
+                scope:defer(function() connection:Disconnect() end); return true
+            end,
         }
     end
-    add("meter_release","Auto Green","Shooting","Experimental shot-pose release for keyboard/controller. No meter or calibration. Green results unverified.",{start=function(scope)
+    Engine.release_profiles={}
+    add("meter_release","Auto Green","Shooting","Earlier animation release with automatic Early/Late correction. Keyboard/controller. Live green timing remains experimental.",{start=function(scope)
         character()
         local adapter=shooting_adapter()
         adapter.paused=function() return input:GetFocusedTextBox()~=nil or ctx.runner.current~=nil end
         adapter.report=ctx.report
         adapter.failed=function(err) registry:disable("meter_release"); ctx.report("Auto release stopped / "..err) end
+        adapter.profiles=Engine.release_profiles
         local state=Core.animation_release(scope,adapter)
-        state:step(); assert(not state.error,state.error); ctx.report("Auto release armed / keyboard + controller")
+        local feedback=adapter.feedback(scope,function(code) state:feedback(code) end)
+        state:step(); assert(not state.error,state.error); ctx.report(feedback and "Auto release on / automatic feedback correction" or "Auto release on / feedback correction unavailable")
         return state
     end,step=function(_,state) state:step() end})
     local function feedback_hook(scope)
