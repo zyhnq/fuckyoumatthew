@@ -189,7 +189,14 @@ function Core.bounded(value,minimum,maximum)
     return value
 end
 function Core.animation_release(scope,deps)
-    local state={watched={},sent={},closed=false}
+    local state={watched={},sent={},metadata=setmetatable({},{__mode="k"}),closed=false}
+    local function release_time(track)
+        if state.metadata[track]==nil then
+            local ok,time=pcall(function() return track:GetTimeOfKeyframe("Release") end)
+            state.metadata[track]=ok and Core.bounded(time,.0001,30) or false
+        end
+        return state.metadata[track] or nil
+    end
     local function eligible(track)
         if state.closed or deps.paused() or not deps.held() then return nil end
         local attributes=deps.attributes()
@@ -198,13 +205,16 @@ function Core.animation_release(scope,deps)
         local name=attributes.BaseAnimation
         if not shot or type(name)~="string" or name=="" or state.sent[shot] then return nil end
         local animation=track.Animation
-        if track.Name~=name and (not animation or animation.Name~=name) then return nil end
+        local named=track.Name==name or animation and animation.Name==name
+        local generic=track.Name=="Animation" and animation and animation.Name=="Animation" and release_time(track)~=nil
+        if not named and not generic then return nil end
         return shot,name
     end
     local function release(track,marker)
         local shot,name=eligible(track); if not shot then return end
         local entry=state.watched[track]; if not entry or entry.shot~=shot then return end
-        if marker=="Pause" and not name:lower():find("jumpshot",1,true) then return end
+        local jumpshot=name:lower():find("jumpshot",1,true)~=nil
+        if marker=="Pause" or (jumpshot and marker~="Hold pose") then return end
         state.sent={[shot]=true}
         local ok,err=pcall(deps.release)
         if not ok then state.error=tostring(err); state.closed=true; deps.failed(state.error); return end
@@ -228,13 +238,14 @@ function Core.animation_release(scope,deps)
             local prior=self.watched[track]
             if prior and shot and prior.shot~=shot and track.TimePosition<=(prior.position or 0) then disconnect(track) end
             if shot and not self.watched[track] then
-                local entry={connections={},shot=shot}; self.watched[track]=entry
-                entry.connections[#entry.connections+1]=track:GetMarkerReachedSignal("Pause"):Connect(function() release(track,"Pause") end)
+                local entry={connections={},shot=shot,release_time=release_time(track)}; self.watched[track]=entry
                 entry.connections[#entry.connections+1]=track:GetMarkerReachedSignal("Release"):Connect(function() release(track,"Release") end)
-                local ok,time=pcall(function() return track:GetTimeOfKeyframe("Release") end)
-                if ok then entry.release_time=Core.bounded(time,.0001,30) end
             end
             local entry=self.watched[track]
+            if entry and entry.release_time and track.Speed==0 and type(track.TimePosition)=="number" and track.TimePosition>0 and track.TimePosition<entry.release_time then
+                local attributes=deps.attributes()
+                if attributes and type(attributes.BaseAnimation)=="string" and attributes.BaseAnimation:lower():find("jumpshot",1,true) then release(track,"Hold pose") end
+            end
             if entry and entry.release_time and type(track.TimePosition)=="number" and track.TimePosition>=entry.release_time then release(track,"Release keyframe") end
             if entry then entry.position=track.TimePosition end
         end
@@ -595,21 +606,33 @@ local function create_pivot_modules(ctx)
         local value=assert(current(),"Enter a court first")
         local animator=value.Animation and value.Animation.Animator
         assert(animator,"Character animator unavailable")
+        local devices={keyboard}
+        local gamepad_module=input_module:FindFirstChild("Gamepad")
+        if gamepad_module then
+            local ok,gamepad=pcall(require,gamepad_module)
+            if ok and type(gamepad.IsActionDown)=="function" then devices[#devices+1]=gamepad end
+        end
         return {
             attributes=function() local c=current(); return c and c.data and c.data.Attributes end,
             tracks=function() assert(current()==value,"Character changed"); return animator:GetPlayingAnimationTracks() end,
-            held=function() return keyboard:IsActionDown("Shoot") end,
+            held=function()
+                for _,device in ipairs(devices) do
+                    local ok,down=pcall(device.IsActionDown,device,"Shoot")
+                    if ok and down then return true end
+                end
+                return false
+            end,
             release=function() shoot:Fire({Shoot=false}) end,
         }
     end
-    add("meter_release","Auto Green","Shooting","Experimental animation release. One switch; no meter, calibration or latency setting. Green results unverified.",{start=function(scope)
+    add("meter_release","Auto Green","Shooting","Experimental shot-pose release for keyboard/controller. No meter or calibration. Green results unverified.",{start=function(scope)
         character()
         local adapter=shooting_adapter()
         adapter.paused=function() return input:GetFocusedTextBox()~=nil or ctx.runner.current~=nil end
         adapter.report=ctx.report
         adapter.failed=function(err) registry:disable("meter_release"); ctx.report("Auto release stopped / "..err) end
         local state=Core.animation_release(scope,adapter)
-        state:step(); assert(not state.error,state.error); ctx.report("Auto release armed / watching shot animation markers")
+        state:step(); assert(not state.error,state.error); ctx.report("Auto release armed / keyboard + controller")
         return state
     end,step=function(_,state) state:step() end})
     local function feedback_hook(scope)
