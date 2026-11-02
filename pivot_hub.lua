@@ -185,8 +185,63 @@ function Core.module_registry(report)
 end
 function Core.bounded(value,minimum,maximum)
     value=tonumber(value)
-    if not value or value~=value or value<minimum or value>maximum then return nil end
+    if not value or value~=value or value==math.huge or value==-math.huge or value<minimum or value>maximum then return nil end
     return value
+end
+function Core.animation_release(scope,deps)
+    local state={watched={},sent={},closed=false}
+    local function eligible(track)
+        if state.closed or deps.paused() or not deps.held() then return nil end
+        local attributes=deps.attributes()
+        if not attributes or attributes.Action~="Shooting" or attributes.ReleasedShot~=false then return nil end
+        local shot=Core.bounded(attributes.ShotStartTime,0,math.huge)
+        local name=attributes.BaseAnimation
+        if not shot or type(name)~="string" or name=="" or state.sent[shot] then return nil end
+        local animation=track.Animation
+        if track.Name~=name and (not animation or animation.Name~=name) then return nil end
+        return shot,name
+    end
+    local function release(track,marker)
+        local shot,name=eligible(track); if not shot then return end
+        local entry=state.watched[track]; if not entry or entry.shot~=shot then return end
+        if marker=="Pause" and not name:lower():find("jumpshot",1,true) then return end
+        state.sent={[shot]=true}
+        local ok,err=pcall(deps.release)
+        if not ok then state.error=tostring(err); state.closed=true; deps.failed(state.error); return end
+        deps.report("Animation release / "..name.." / "..marker)
+    end
+    local function disconnect(track)
+        local entry=state.watched[track]; if not entry then return end
+        state.watched[track]=nil
+        for _,connection in ipairs(entry.connections) do connection:Disconnect() end
+    end
+    scope:defer(function()
+        state.closed=true
+        local tracks={}; for track in pairs(state.watched) do tracks[#tracks+1]=track end
+        for _,track in ipairs(tracks) do disconnect(track) end
+    end)
+    function state:step()
+        local tracks=deps.tracks(); local present={}
+        for _,track in ipairs(tracks) do
+            present[track]=true
+            local shot=eligible(track)
+            local prior=self.watched[track]
+            if prior and shot and prior.shot~=shot and track.TimePosition<=(prior.position or 0) then disconnect(track) end
+            if shot and not self.watched[track] then
+                local entry={connections={},shot=shot}; self.watched[track]=entry
+                entry.connections[#entry.connections+1]=track:GetMarkerReachedSignal("Pause"):Connect(function() release(track,"Pause") end)
+                entry.connections[#entry.connections+1]=track:GetMarkerReachedSignal("Release"):Connect(function() release(track,"Release") end)
+                local ok,time=pcall(function() return track:GetTimeOfKeyframe("Release") end)
+                if ok then entry.release_time=Core.bounded(time,.0001,30) end
+            end
+            local entry=self.watched[track]
+            if entry and entry.release_time and type(track.TimePosition)=="number" and track.TimePosition>=entry.release_time then release(track,"Release keyframe") end
+            if entry then entry.position=track.TimePosition end
+        end
+        local gone={}; for track in pairs(self.watched) do if not present[track] then gone[#gone+1]=track end end
+        for _,track in ipairs(gone) do disconnect(track) end
+    end
+    return state
 end
 function Core.validate_recording(source)
     if type(source)~="table" or type(source.steps)~="table" or #source.steps<1 or #source.steps>64 then return nil,"Recording must contain 1-64 steps" end
@@ -219,8 +274,8 @@ end
 
 local function create_pivot_modules(ctx)
     local Engine={settings={walk_speed=20,jump_power=50,fly_speed=32,spin_speed=90,fov=85,time=14,range=34,esp_distance=300,
-        guard_distance=4,guard_range=25,block_range=12,steal_range=5,steal_key="",spectate="",meter="Auto",meter_target="",meter_tolerance=.012,
-        on_ball_speed=20,off_ball_speed=20,guard_target="",jump_key="Space",rebound_range=8,team_check=true},ranges={walk_speed={4,60},jump_power={10,120},fly_speed={4,100},spin_speed={10,360},fov={40,110},time={0,24},range={5,60},esp_distance={30,1000},guard_distance={2,10},guard_range={5,60},block_range={3,18},steal_range={2,8},meter_tolerance={.001,.08},on_ball_speed={4,60},off_ball_speed={4,60},rebound_range={3,15}},definitions={},recording={version=1,steps={}}}
+        guard_distance=4,guard_range=25,block_range=12,steal_range=5,steal_key="",spectate="",
+        on_ball_speed=20,off_ball_speed=20,guard_target="",jump_key="Space",rebound_range=8,team_check=true},ranges={walk_speed={4,60},jump_power={10,120},fly_speed={4,100},spin_speed={10,360},fov={40,110},time={0,24},range={5,60},esp_distance={30,1000},guard_distance={2,10},guard_range={5,60},block_range={3,18},steal_range={2,8},on_ball_speed={4,60},off_ball_speed={4,60},rebound_range={3,15}},definitions={},recording={version=1,steps={}}}
     local registry=Core.module_registry(ctx.report); Engine.registry=registry
     local players,input,run=ctx.players,ctx.input,ctx.run
     local lighting=game:GetService("Lighting")
@@ -521,49 +576,42 @@ local function create_pivot_modules(ctx)
         assert(subject,"Target camera subject unavailable"); local camera=camera_service(); scope:set(camera,"CameraSubject",subject); scope:set(camera,"CameraType",Enum.CameraType.Custom)
         return subject
     end,step=function(_,subject) assert(subject.Parent,"Spectate target left") end,interval=.5})
-    local function find_meter(s)
-        local model=rig(); if not model then return nil end
-        local found={}
-        for _,obj in ipairs(model:GetDescendants()) do
-            if obj:IsA("BillboardGui") and obj.Name:find("Meter",1,true) and obj.Enabled and (s.meter=="Auto" or obj.Name==s.meter) then
-                local fill=obj:FindFirstChild("Meter_Fill"); local gradient=fill and fill:FindFirstChild("FillGradient")
-                if gradient and gradient:IsA("UIGradient") then found[#found+1]=gradient end
-            end
-        end
-        if #found==1 then return found[1] end
+    local function shooting_adapter()
+        local scripts=assert(ctx.player:FindFirstChild("PlayerScripts"),"PlayerScripts unavailable")
+        local aero=assert(scripts:FindFirstChild("Aero"),"Game client not loaded")
+        local controllers=assert(aero:FindFirstChild("Controllers"),"Game controllers unavailable")
+        local modules=assert(aero:FindFirstChild("Modules"),"Game modules unavailable")
+        local components=assert(modules:FindFirstChild("Components"),"Input components unavailable")
+        local input_module=assert(components:FindFirstChild("Input"),"Input component unavailable")
+        local player_module=assert(controllers:FindFirstChild("Player"),"Player controller unavailable")
+        local keyboard_module=assert(input_module:FindFirstChild("Keyboard"),"Keyboard component unavailable")
+        -- These are the same cached, initialized modules identified in the live capture.
+        local controller=require(player_module); local keyboard=require(keyboard_module)
+        assert(type(controller.GetCharacter)=="function" and type(keyboard.IsActionDown)=="function","Game shooting API changed")
+        local services=keyboard.Services
+        local shoot=services and services.InputService and services.InputService.Shoot
+        assert(shoot and type(shoot.Fire)=="function","Game shoot endpoint unavailable")
+        local function current() return controller:GetCharacter() end
+        local value=assert(current(),"Enter a court first")
+        local animator=value.Animation and value.Animation.Animator
+        assert(animator,"Character animator unavailable")
+        return {
+            attributes=function() local c=current(); return c and c.data and c.data.Attributes end,
+            tracks=function() assert(current()==value,"Character changed"); return animator:GetPlayingAnimationTracks() end,
+            held=function() return keyboard:IsActionDown("Shoot") end,
+            release=function() shoot:Fire({Shoot=false}) end,
+        }
     end
-    local function meter_value(gradient)
-        local angle=math.rad(gradient.Rotation); return gradient.Offset.X*math.cos(angle)+gradient.Offset.Y*math.sin(angle)
-    end
-    Engine.last_release=nil
-    ctx.connect(input.InputEnded,function(event)
-        if event.KeyCode==Enum.KeyCode.E and not ctx.runner.current then
-            local gradient=find_meter(Engine.settings)
-            if gradient then Engine.last_release={value=meter_value(gradient),meter=gradient.Parent.Parent.Name}; ctx.report("Captured meter release / "..string.format("%.4f",Engine.last_release.value)) end
-        end
-    end)
-    add("meter_release","Auto Green","Shooting","Releases E at a learned gradient position; capture a successful release first. Makes are not guaranteed.",{start=function(scope,s)
-        assert(Core.bounded(s.meter_target,-2,2),"Capture and apply a successful release target first")
-        assert(find_meter(s),"Select the active meter name; Auto requires exactly one enabled meter")
-        local state={armed=false,previous=nil,started=0}
-        local began=input.InputBegan:Connect(function(event,processed)
-            if event.KeyCode==Enum.KeyCode.E and not processed and not input:GetFocusedTextBox() and not ctx.runner.current then
-                state.armed=true; state.previous=nil; state.started=os.clock()
-            end
-        end)
-        local ended=input.InputEnded:Connect(function(event) if event.KeyCode==Enum.KeyCode.E then state.armed=false end end)
-        scope:defer(function() began:Disconnect(); ended:Disconnect(); if state.armed then pcall(emit,"E",false) end end)
+    add("meter_release","Auto Green","Shooting","Experimental animation release. One switch; no meter, calibration or latency setting. Green results unverified.",{start=function(scope)
+        character()
+        local adapter=shooting_adapter()
+        adapter.paused=function() return input:GetFocusedTextBox()~=nil or ctx.runner.current~=nil end
+        adapter.report=ctx.report
+        adapter.failed=function(err) registry:disable("meter_release"); ctx.report("Auto release stopped / "..err) end
+        local state=Core.animation_release(scope,adapter)
+        state:step(); assert(not state.error,state.error); ctx.report("Auto release armed / watching shot animation markers")
         return state
-    end,step=function(_,state,s)
-        if not state.armed then return end
-        if input:GetFocusedTextBox() or os.clock()-state.started>2.5 then emit("E",false); state.armed=false; return end
-        local gradient=find_meter(s); if not gradient then return end
-        local value=meter_value(gradient); local target=tonumber(s.meter_target)
-        if state.previous and os.clock()-state.started>.05 and (math.abs(value-target)<=s.meter_tolerance or (state.previous-target)*(value-target)<=0) and math.abs(value-state.previous)>.00001 then
-            state.armed=false; emit("E",false); ctx.report("Meter target crossed / released E")
-        end
-        state.previous=value
-    end})
+    end,step=function(_,state) state:step() end})
     local function feedback_hook(scope)
         local model=character(); local part=model:FindFirstChild("HumanoidRootPart"); local feedback=part and part:FindFirstChild("ShotFeedback"); local value=feedback and feedback:FindFirstChild("ReleaseTiming")
         assert(value and value:IsA("TextLabel"),"Observed shot-feedback label unavailable")
@@ -573,8 +621,7 @@ local function create_pivot_modules(ctx)
     add("shot_feedback","Live shot feedback","Shooting","Reads the observed ReleaseTiming label",{start=feedback_hook})
     add("hide_meters","Hide local meter graphics","Visuals","Restores the local meter Enabled states on disable",{start=function(scope)
         local model=character(); for _,obj in ipairs(model:GetDescendants()) do if obj:IsA("BillboardGui") and obj.Name:find("Meter",1,true) then scope:set(obj,"Enabled",false) end end
-    end,conflicts={"meter_release"}})
-    registry.definitions.meter_release.conflicts={"hide_meters"}
+    end})
     Engine.emit=emit; Engine.held=held
     function Engine:stop()
         self.registry:stop_all(); for _,owner in pairs(held) do release_owned(owner) end
@@ -1359,7 +1406,7 @@ do
             action("Load module settings",function() assert(type(readfile)=="function","Disk read unavailable"); local raw=readfile("pivot_module_settings.json"); assert(#raw<=16384,"Settings exceed size limit"); apply_settings(http:JSONDecode(raw)); rebuild(); report("Loaded settings / all modules off") end)
             action("Disable every module / restore values",function() cancel(); engine:stop(); update_buttons(); report("All modules disabled") end)
         else
-            local options={meter_release={{"meter","Meter name"},{"meter_target","Release target"},{"meter_tolerance","Tolerance"}},speed={{"walk_speed","Client walk speed"}},split_speed={{"on_ball_speed","On-ball speed"},{"off_ball_speed","Off-ball speed"}},jump={{"jump_power","Jump power"}},fly={{"fly_speed","Flight speed"}},spin={{"spin_speed","Degrees / second"}},guard={{"guard_target","Target username"},{"guard_distance","Guard spacing"},{"guard_range","Activation range"}},block={{"guard_target","Target username"},{"block_range","Activation range"},{"jump_key","Jump / block key"}},rebound={{"rebound_range","Activation range"},{"jump_key","Jump key"}},range_circle={{"range","Range / studs"}},time={{"time","Time / 0-24"}},fov={{"fov","Field of view"}},spectate={{"spectate","Target username"}}}
+            local options={speed={{"walk_speed","Client walk speed"}},split_speed={{"on_ball_speed","On-ball speed"},{"off_ball_speed","Off-ball speed"}},jump={{"jump_power","Jump power"}},fly={{"fly_speed","Flight speed"}},spin={{"spin_speed","Degrees / second"}},guard={{"guard_target","Target username"},{"guard_distance","Guard spacing"},{"guard_range","Activation range"}},block={{"guard_target","Target username"},{"block_range","Activation range"},{"jump_key","Jump / block key"}},rebound={{"rebound_range","Activation range"},{"jump_key","Jump key"}},range_circle={{"range","Range / studs"}},time={{"time","Time / 0-24"}},fov={{"fov","Field of view"}},spectate={{"spectate","Target username"}}}
             for _,definition in ipairs(engine.definitions) do
                 if definition.category==category then
                     local id=definition.id
@@ -1377,9 +1424,6 @@ do
                     if expanded==id then
                         text(definition.description,10,theme.muted,40).TextWrapped=true
                         for _,entry in ipairs(options[id] or {}) do field(entry[1],entry[2]) end
-                        if id=="meter_release" then action("Use last manual release",function()
-                            assert(engine.last_release,"Shoot manually with an enabled meter first"); engine.settings.meter_target=string.format("%.5f",engine.last_release.value); engine.settings.meter=engine.last_release.meter; rebuild(); report("Applied captured release / check its game feedback")
-                        end) end
                         if id=="guard" then action("Use nearest rim as defensive goal",function() engine:select_defensive_rim() end) end
                         y=y+7
                     end
@@ -1412,3 +1456,4 @@ do
     connect(run_service.Heartbeat,function(dt) elapsed=elapsed+dt; if elapsed>.2 then elapsed=0; update_buttons() end end)
     rebuild()
 end
+
