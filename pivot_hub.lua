@@ -238,12 +238,11 @@ function Core.animation_release(scope,deps)
     local function release(track,marker)
         local shot,name=eligible(track); if not shot then return end
         local entry=state.watched[track]; if not entry or entry.shot~=shot then return end
-        local jumpshot=name:lower():find("jumpshot",1,true)~=nil
-        if marker=="Pause" or (jumpshot and marker~="Shot phase") then return end
+        if marker=="Pause" or (entry.release_time and marker~="Shot phase") then return end
         state.sent={[shot]=true}
         local ok,err=pcall(deps.release)
         if not ok then state.error=tostring(err); state.closed=true; deps.failed(state.error); return end
-        if jumpshot then
+        if entry.release_time then
             local p=profile(track,name)
             if #state.pending>=8 then table.remove(state.pending,1) end
             state.pending[#state.pending+1]={profile=p,ratio=p.ratio}
@@ -274,7 +273,7 @@ function Core.animation_release(scope,deps)
             local entry=self.watched[track]
             if entry and entry.release_time and type(track.TimePosition)=="number" and track.TimePosition>0 then
                 local attributes=deps.attributes()
-                if attributes and type(attributes.BaseAnimation)=="string" and attributes.BaseAnimation:lower():find("jumpshot",1,true) then
+                if attributes and type(attributes.BaseAnimation)=="string" then
                     local p=profile(track,attributes.BaseAnimation)
                     if track.Speed==0 and track.TimePosition<entry.release_time then
                         p.ceiling=math.max(.25,math.min(.85,track.TimePosition/entry.release_time))
