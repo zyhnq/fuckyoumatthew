@@ -193,7 +193,13 @@ function Core.animation_release(scope,deps)
     local function profile(track,name)
         local animation=track.Animation
         local key=name.."/"..tostring(animation and animation.AnimationId or "")
-        if not state.profiles[key] then state.profiles[key]={ratio=.60} end
+        if not state.profiles[key] then
+            local attributes=deps.attributes()
+            local initial=.60
+            if attributes and attributes.Action=="Dunking" then initial=.36 end
+            if name=="InsideHandLayup1R" then initial=.70 end
+            state.profiles[key]={ratio=initial}
+        end
         return state.profiles[key]
     end
     function state:feedback(code)
@@ -225,7 +231,7 @@ function Core.animation_release(scope,deps)
     local function eligible(track)
         if state.closed or deps.paused() or not deps.held() then return nil end
         local attributes=deps.attributes()
-        if not attributes or attributes.Action~="Shooting" or attributes.ReleasedShot~=false then return nil end
+        if not attributes or (attributes.Action~="Shooting" and attributes.Action~="Dunking") or attributes.ReleasedShot~=false then return nil end
         local shot=Core.bounded(attributes.ShotStartTime,0,math.huge)
         local name=attributes.BaseAnimation
         if not shot or type(name)~="string" or name=="" or state.sent[shot] then return nil end
@@ -259,7 +265,7 @@ function Core.animation_release(scope,deps)
         local tracks={}; for track in pairs(state.watched) do tracks[#tracks+1]=track end
         for _,track in ipairs(tracks) do disconnect(track) end
     end)
-    function state:step()
+    function state:step(dt)
         local tracks=deps.tracks(); local present={}
         for _,track in ipairs(tracks) do
             present[track]=true
@@ -279,7 +285,11 @@ function Core.animation_release(scope,deps)
                         p.ceiling=math.max(.25,math.min(.85,track.TimePosition/entry.release_time))
                         p.ratio=math.min(p.ratio,p.ceiling)
                     end
-                    if track.TimePosition>=entry.release_time*p.ratio then release(track,"Shot phase") end
+                    local position=track.TimePosition
+                    if attributes.Action=="Dunking" and type(track.Speed)=="number" and track.Speed>0 then
+                        position=position+track.Speed*math.min(1/60,math.max(0,tonumber(dt) or 0))
+                    end
+                    if position>=entry.release_time*p.ratio then release(track,"Shot phase") end
                 end
             end
             if entry and entry.release_time and type(track.TimePosition)=="number" and track.TimePosition>=entry.release_time then release(track,"Release keyframe") end
@@ -642,19 +652,21 @@ local function create_pivot_modules(ctx)
         local value=assert(current(),"Enter a court first")
         local animator=value.Animation and value.Animation.Animator
         assert(animator,"Character animator unavailable")
-        local devices={keyboard}
+        local devices={{component=keyboard,actions={"Shoot","Jump"}}}
         local gamepad_module=input_module:FindFirstChild("Gamepad")
         if gamepad_module then
             local ok,gamepad=pcall(require,gamepad_module)
-            if ok and type(gamepad.IsActionDown)=="function" then devices[#devices+1]=gamepad end
+            if ok and type(gamepad.IsActionDown)=="function" then devices[#devices+1]={component=gamepad,actions={"Shoot","JumpClutch"}} end
         end
         return {
             attributes=function() local c=current(); return c and c.data and c.data.Attributes end,
             tracks=function() assert(current()==value,"Character changed"); return animator:GetPlayingAnimationTracks() end,
             held=function()
                 for _,device in ipairs(devices) do
-                    local ok,down=pcall(device.IsActionDown,device,"Shoot")
-                    if ok and down then return true end
+                    for _,action in ipairs(device.actions) do
+                        local ok,down=pcall(device.component.IsActionDown,device.component,action)
+                        if ok and down then return true end
+                    end
                 end
                 return false
             end,
@@ -682,7 +694,7 @@ local function create_pivot_modules(ctx)
         local feedback=adapter.feedback(scope,function(code) state:feedback(code) end)
         state:step(); assert(not state.error,state.error); ctx.report(feedback and "Auto release on / automatic feedback correction" or "Auto release on / feedback correction unavailable")
         return state
-    end,step=function(_,state) state:step() end})
+    end,step=function(_,state,_,dt) state:step(dt) end})
     local function feedback_hook(scope)
         local model=character(); local part=model:FindFirstChild("HumanoidRootPart"); local feedback=part and part:FindFirstChild("ShotFeedback"); local value=feedback and feedback:FindFirstChild("ReleaseTiming")
         assert(value and value:IsA("TextLabel"),"Observed shot-feedback label unavailable")
