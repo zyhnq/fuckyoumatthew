@@ -130,6 +130,10 @@ function Core.scope()
         end
         properties[key].applied=value; object[key]=value
     end
+    function self:restore(object,key)
+        local saved=self.changes[object] and self.changes[object][key]
+        if saved then if object[key]==saved.applied then object[key]=saved.original end; saved.applied=saved.original end
+    end
     function self:close()
         if self.closed then return end
         self.closed=true
@@ -190,6 +194,7 @@ function Core.bounded(value,minimum,maximum)
 end
 function Core.animation_release(scope,deps)
     local state={watched={},sent={},metadata=setmetatable({},{__mode="k"}),profiles=deps.profiles or {},pending={},closed=false}
+    local function telemetry(event) if deps.telemetry then pcall(deps.telemetry,event) end end
     local function profile(track,name)
         local animation=track.Animation
         local key=name.."/"..tostring(animation and animation.AnimationId or "")
@@ -203,10 +208,11 @@ function Core.animation_release(scope,deps)
         return state.profiles[key]
     end
     function state:feedback(code)
-        if deps.calibrate and not deps.calibrate() then self.pending={}; return end
         code=tonumber(code)
         if not code or code%1~=0 or code<1 or code>8 or #self.pending==0 then return end
         local pending=table.remove(self.pending,1)
+        telemetry({kind="feedback",code=code,shot=pending.shot,name=pending.name,ratio=pending.ratio,locked=pending.profile.perfect})
+        if deps.calibrate and not deps.calibrate() then return end
         local p=pending.profile; local early=code<=3; local late=code>=6
         if early then p.early=math.max(p.early or .25,pending.ratio)
         elseif late then p.late=math.min(p.late or .85,pending.ratio)
@@ -214,7 +220,7 @@ function Core.animation_release(scope,deps)
             if code==5 then
                 p.perfect=true; p.good_center=nil; p.good_attempt=0
                 deps.report("Perfect release / keeping timing")
-            elseif p.dunk and not p.perfect then
+            elseif (deps.refine_good and deps.refine_good() or not deps.refine_good and p.dunk) and not p.perfect then
                 p.good_center=p.good_center or pending.ratio
                 p.good_attempt=(p.good_attempt or 0)+1
                 local attempt=p.good_attempt
@@ -223,7 +229,7 @@ function Core.animation_release(scope,deps)
                 local maximum=math.min(p.ceiling or .85,(p.late or .86)-.001)
                 if minimum<=maximum then p.ratio=math.max(minimum,math.min(maximum,p.good_center+offset)) end
                 if attempt>=6 then p.good_attempt=0 end
-                deps.report("Good dunk / testing a nearby release phase")
+                deps.report("Good release / testing a nearby release phase")
             else deps.report("Good release / keeping timing") end
             return
         end
@@ -272,8 +278,12 @@ function Core.animation_release(scope,deps)
         if entry.release_time then
             local p=profile(track,name)
             if #state.pending>=8 then table.remove(state.pending,1) end
-            state.pending[#state.pending+1]={profile=p,ratio=p.ratio}
+            state.pending[#state.pending+1]={profile=p,ratio=p.ratio,shot=shot,name=name,time=os.clock()}
         end
+        if state.observed and state.observed.id==shot then state.observed.sent=true end
+        local event={kind="release",shot=shot,name=name,ratio=entry.release_time and profile(track,name).ratio or nil,position=track.TimePosition,speed=track.Speed}
+        if deps.snapshot then local ok,details=pcall(deps.snapshot); if ok then event.details=details end end
+        telemetry(event)
         deps.report("Animation release / "..name.." / "..marker)
     end
     local function disconnect(track)
@@ -287,6 +297,22 @@ function Core.animation_release(scope,deps)
         for _,track in ipairs(tracks) do disconnect(track) end
     end)
     function state:step(dt)
+        local attributes=deps.attributes()
+        local active=attributes and (attributes.Action=="Shooting" or attributes.Action=="Dunking") and attributes.ReleasedShot==false
+        local id=active and Core.bounded(attributes.ShotStartTime,0,math.huge)
+        if self.observed and self.observed.id~=id then
+            if not self.observed.sent then telemetry({kind="skip",shot=self.observed.id,name=self.observed.name,reason=self.observed.reason or "Shot ended before the release target"}) end
+            self.observed=nil
+        end
+        if id and not self.observed then self.observed={id=id,name=attributes.BaseAnimation,sent=self.sent[id]==true} end
+        if self.observed and not self.observed.sent then
+            self.observed.name=attributes.BaseAnimation
+            self.observed.reason=deps.paused() and "Shot paused while editing controls" or not deps.held() and "Shoot input released before the target" or "No matching shot animation or Release keyframe"
+        end
+        for i=#self.pending,1,-1 do
+            local pending=self.pending[i]
+            if pending.time and os.clock()-pending.time>8 then table.remove(self.pending,i); telemetry({kind="unconfirmed",shot=pending.shot,name=pending.name}) end
+        end
         local tracks=deps.tracks(); local present={}
         for _,track in ipairs(tracks) do
             present[track]=true
@@ -298,6 +324,7 @@ function Core.animation_release(scope,deps)
                 entry.connections[#entry.connections+1]=track:GetMarkerReachedSignal("Release"):Connect(function() release(track,"Release") end)
             end
             local entry=self.watched[track]
+            if entry and self.observed and entry.shot==self.observed.id and not self.observed.sent and deps.held() and not deps.paused() then self.observed.reason=entry.release_time and "Shot ended before the release target" or "Release keyframe was unavailable" end
             if entry and not entry.release_time then entry.release_time=release_time(track) end
             if entry and entry.release_time and type(track.TimePosition)=="number" and track.TimePosition>0 then
                 local attributes=deps.attributes()
@@ -347,15 +374,27 @@ function Core.validate_module_settings(source,defaults,ranges)
         elseif type(value)=="string" then
             if type(incoming)~="string" or #incoming>100 then return nil,"Invalid setting: "..key end
         elseif type(value)=="boolean" and type(incoming)~="boolean" then return nil,"Invalid setting: "..key end
+        if type(incoming)=="string" and (key:match("_color$") or key=="ui_accent" or key=="sky_tint" or key=="sky_decay") and not Core.hex_color(incoming) then return nil,"Invalid color: "..key end
         result[key]=incoming
     end
     return result
 end
 
+function Core.hex_color(value)
+    if type(value)~="string" then return nil end
+    local hex=value:match("^#?(%x%x%x%x%x%x)$"); if not hex then return nil end
+    return Color3.fromRGB(tonumber(hex:sub(1,2),16),tonumber(hex:sub(3,4),16),tonumber(hex:sub(5,6),16))
+end
+
 local function create_pivot_modules(ctx)
     local Engine={settings={walk_speed=20,jump_power=50,fly_speed=32,spin_speed=90,fov=85,time=14,range=34,esp_distance=300,
         guard_distance=4,guard_range=25,block_range=12,steal_range=5,steal_key="",spectate="",
-        on_ball_speed=20,off_ball_speed=20,guard_target="",jump_key="Space",rebound_range=8,team_check=true,guard_sprint=false,ball_handler_only=false,guard_strength=1,block_delay=0,shot_range=34,glide_speed=20,ankle_range=8,ankle_delay=1.2,ankle_combo="ZX",custom_combo="Z X C",combo_delay=110,combo_bind="F5",meter_style="Vertical",auto_calibrate=true,ping_compensation=false,ping_factor=.5,takeover_threshold=100,theme_mode="Graphite"},ranges={guard_strength={.5,2},block_delay={0,.5},shot_range={5,60},glide_speed={4,60},ankle_range={2,20},ankle_delay={.5,5},combo_delay={20,500},ping_factor={0,1},takeover_threshold={1,100},walk_speed={4,60},jump_power={10,120},fly_speed={4,100},spin_speed={10,360},fov={40,110},time={0,24},range={5,60},esp_distance={30,1000},guard_distance={2,10},guard_range={5,60},block_range={3,18},steal_range={2,8},on_ball_speed={4,60},off_ball_speed={4,60},rebound_range={3,15}},definitions={},recording={version=1,steps={}}}
+        on_ball_speed=20,off_ball_speed=20,guard_target="",jump_key="Space",rebound_range=8,team_check=true,guard_sprint=false,ball_handler_only=false,guard_strength=1,block_delay=0,shot_range=34,glide_speed=20,ankle_range=8,ankle_delay=1.2,ankle_combo="ZX",custom_combo="Z X C",combo_delay=110,combo_bind="F5",meter_style="Vertical",auto_calibrate=true,ping_compensation=false,ping_factor=.5,takeover_threshold=100,theme_mode="Graphite",crosshair_shape="Cross",crosshair_color="#E6E8ED",crosshair_size=6,crosshair_gap=4,crosshair_thickness=2,crosshair_opacity=1,
+        ball_trail_color="#AAC8FF",ball_trail_lifetime=.35,ball_trail_width=.6,ball_trail_opacity=.7,player_trail_color="#C6CFFF",player_trail_lifetime=.3,player_trail_width=.7,player_trail_opacity=.5,
+        ball_color="#D1D6E0",ball_material="SmoothPlastic",ball_reflectance=0,ball_remove_texture=true,court_color="#444C60",court_line_color="#E6E8ED",court_material="SmoothPlastic",court_reflectance=0,court_part_name="CourtFloor",court_color_lines=true,
+        outline_color="#C0C9DC",outline_fill_color="#C0C9DC",outline_opacity=1,outline_fill_opacity=0,outline_through_walls=false,sky_preset="Night",sky_asset="",sky_tint="#8799BB",sky_decay="#283650",sky_stars=3000,sky_density=.22,sky_haze=.5,
+        model_preset="Tung Tung",model_asset="",model_height=6,model_offset=0,model_rotation=0,model_follow_pose=false,model_hide_avatar=true,
+        theme_custom=false,ui_accent="#C0C9DC",ui_font_size=14,ui_rounding=6,ui_opacity=1,refine_good=true,shot_hud=true},ranges={crosshair_size={2,24},crosshair_gap={0,20},crosshair_thickness={1,6},crosshair_opacity={.1,1},ball_trail_lifetime={.05,2},ball_trail_width={.1,4},ball_trail_opacity={.05,1},player_trail_lifetime={.05,2},player_trail_width={.1,4},player_trail_opacity={.05,1},ball_reflectance={0,1},court_reflectance={0,1},outline_opacity={0,1},outline_fill_opacity={0,1},sky_stars={0,5000},sky_density={0,.6},sky_haze={0,5},model_height={2,12},model_offset={-6,6},model_rotation={0,360},ui_font_size={14,20},ui_rounding={0,14},ui_opacity={.2,1},guard_strength={.5,2},block_delay={0,.5},shot_range={5,60},glide_speed={4,60},ankle_range={2,20},ankle_delay={.5,5},combo_delay={20,500},ping_factor={0,1},takeover_threshold={1,100},walk_speed={4,60},jump_power={10,120},fly_speed={4,100},spin_speed={10,360},fov={40,110},time={0,24},range={5,60},esp_distance={30,1000},guard_distance={2,10},guard_range={5,60},block_range={3,18},steal_range={2,8},on_ball_speed={4,60},off_ball_speed={4,60},rebound_range={3,15}},definitions={},recording={version=1,steps={}}}
     local registry=Core.module_registry(ctx.report); Engine.registry=registry
     local players,input,run=ctx.players,ctx.input,ctx.run
     local lighting=game:GetService("Lighting")
@@ -736,6 +775,12 @@ local function create_pivot_modules(ctx)
                 return ok and math.max(0,math.min(.25,ping*Engine.settings.ping_factor)) or 0
             end,
             calibrate=function() return Engine.settings.auto_calibrate end,
+            refine_good=function() return Engine.settings.refine_good end,
+            snapshot=function()
+                local c=current(); local a=c and c.data and c.data.Attributes or {}; local movement=c and c.Movement and c.Movement.lastMoveDirection; local offset=a.meterOffset
+                return {movement=movement and movement.Magnitude,shot_speed=a.ShotSpeed,meter_x=offset and offset.X,meter_y=offset and offset.Y,animation=a.BaseAnimation}
+            end,
+            telemetry=function(event) if Engine.record_shot then Engine:record_shot(event) end end,
             held=function()
                 if Engine.auto_shoot_held then return true end
                 for _,device in ipairs(devices) do
@@ -768,6 +813,7 @@ local function create_pivot_modules(ctx)
         adapter.failed=function(err) registry:disable("meter_release"); ctx.report("Auto release stopped / "..err) end
         adapter.profiles=Engine.release_profiles
         local state=Core.animation_release(scope,adapter)
+        if Engine.attach_shot_hud then Engine:attach_shot_hud(scope) end
         local feedback=adapter.feedback(scope,function(code) state:feedback(code) end)
         state:step(); assert(not state.error,state.error); ctx.report(feedback and "Auto release on / automatic feedback correction" or "Auto release on / feedback correction unavailable")
         return state
@@ -939,6 +985,238 @@ local function create_pivot_modules(ctx)
             if gradient and packet and packet.greenGradient then gradient.Transparency=packet.greenGradient.Transparency end
         end
     end,conflicts={"hide_meters"}})
+
+-- Local cosmetics. No gameplay remotes are used by these modules.
+    local function cosmetic_color(value) return assert(Core.hex_color(value),"Enter a six-digit color such as #A8C8FF") end
+    local function new_local(scope,class,parent)
+        local object=Instance.new(class); object.Parent=parent; scope:defer(function() object:Destroy() end); return object
+    end
+    local function material(name)
+        local allowed={SmoothPlastic=true,Plastic=true,Neon=true,Metal=true,Wood=true,WoodPlanks=true,Concrete=true,Glass=true}
+        assert(allowed[name],"Choose a supported material"); return Enum.Material[name]
+    end
+    add("crosshair","Custom crosshair","Cosmetics","Dot, cross or ring with size, spacing, thickness and color controls",{start=function(scope)
+        local frame=new_local(scope,"Frame",ctx.gui); frame.Name="PivotCrosshair"; frame.AnchorPoint=Vector2.new(.5,.5); frame.Position=UDim2.fromScale(.5,.5); frame.BackgroundTransparency=1; frame.Size=UDim2.fromOffset(1,1)
+        local parts={}; for i=1,4 do local part=Instance.new("Frame"); part.BorderSizePixel=0; part.Parent=frame; parts[i]=part end
+        local ring=Instance.new("Frame"); ring.BackgroundTransparency=1; ring.AnchorPoint=Vector2.new(.5,.5); ring.Parent=frame
+        local round=Instance.new("UICorner"); round.CornerRadius=UDim.new(1,0); round.Parent=ring
+        local stroke=Instance.new("UIStroke"); stroke.Parent=ring
+        local dot=Instance.new("Frame"); dot.AnchorPoint=Vector2.new(.5,.5); dot.BorderSizePixel=0; dot.Parent=frame
+        local dot_round=Instance.new("UICorner"); dot_round.CornerRadius=UDim.new(1,0); dot_round.Parent=dot
+        return {parts=parts,ring=ring,stroke=stroke,dot=dot}
+    end,step=function(_,state,s)
+        local color=cosmetic_color(s.crosshair_color); local size=s.crosshair_size; local thickness=s.crosshair_thickness; local gap=s.crosshair_gap
+        local shape=s.crosshair_shape; assert(shape=="Dot" or shape=="Cross" or shape=="Ring","Unknown crosshair shape")
+        state.dot.Visible=shape=="Dot"; state.dot.Size=UDim2.fromOffset(thickness*2,thickness*2); state.dot.BackgroundColor3=color; state.dot.BackgroundTransparency=1-s.crosshair_opacity
+        state.ring.Visible=shape=="Ring"; state.ring.Size=UDim2.fromOffset(size*2,size*2); state.stroke.Color=color; state.stroke.Thickness=thickness; state.stroke.Transparency=1-s.crosshair_opacity
+        for i,part in ipairs(state.parts) do
+            part.Visible=shape=="Cross"; part.BackgroundColor3=color; part.BackgroundTransparency=1-s.crosshair_opacity; part.AnchorPoint=Vector2.new(.5,.5)
+            local horizontal=i<=2; local sign=i%2==1 and -1 or 1
+            part.Position=UDim2.fromOffset(horizontal and sign*(gap+size/2) or 0,horizontal and 0 or sign*(gap+size/2))
+            part.Size=UDim2.fromOffset(horizontal and size or thickness,horizontal and thickness or size)
+        end
+    end,interval=.05})
+    local function trail_module(id,title,ball)
+        add(id,title,"Cosmetics","Local trail with adjustable color, lifetime, width and opacity",{start=function(scope)
+            local state={items={}}; scope:defer(function() for _,entry in pairs(state.items) do for _,object in ipairs(entry) do object:Destroy() end end end); return state
+        end,step=function(_,state,s)
+            local prefix=ball and "ball_trail_" or "player_trail_"; local parts={}
+            if ball then
+                for _,item in ipairs(candidates("balls")) do parts[#parts+1]=item.object end
+                local own=held_ball(rig()); if own then parts[#parts+1]=own end
+            else local part=root(); if part then parts[1]=part end end
+            local seen={}; local color=cosmetic_color(s[prefix.."color"])
+            for _,part in ipairs(parts) do
+                if not seen[part] then
+                    seen[part]=true
+                    local entry=state.items[part]
+                    if not entry then
+                        local a=Instance.new("Attachment"); a.Name="PivotTrailA"; a.Position=Vector3.new(-.25,0,0); a.Parent=part
+                        local b=Instance.new("Attachment"); b.Name="PivotTrailB"; b.Position=Vector3.new(.25,0,0); b.Parent=part
+                        local trail=Instance.new("Trail"); trail.Name="PivotTrail"; trail.Attachment0=a; trail.Attachment1=b; trail.FaceCamera=true; trail.MinLength=.03; trail.Parent=part
+                        entry={a,b,trail}; state.items[part]=entry
+                    end
+                    local trail=entry[3]; trail.Color=ColorSequence.new(color); trail.Transparency=NumberSequence.new(1-s[prefix.."opacity"]); trail.Lifetime=s[prefix.."lifetime"]; trail.WidthScale=NumberSequence.new(s[prefix.."width"])
+                end
+            end
+            for part,entry in pairs(state.items) do if not seen[part] then for _,object in ipairs(entry) do object:Destroy() end; state.items[part]=nil end end
+        end,interval=.1})
+    end
+    trail_module("ball_trail","Ball trail",true)
+    trail_module("player_trail","Player trail",false)
+    add("ball_appearance","Ball appearance","Cosmetics","Changes local ball color and material; optional texture removal",{start=function() return {} end,step=function(scope,_,s)
+        local color=cosmetic_color(s.ball_color); local chosen=material(s.ball_material); local parts={}
+        for _,item in ipairs(candidates("balls")) do parts[#parts+1]=item.object end
+        local own=held_ball(rig()); if own then parts[#parts+1]=own end
+        for _,part in ipairs(parts) do
+            scope:set(part,"Color",color); scope:set(part,"Material",chosen); scope:set(part,"Reflectance",s.ball_reflectance)
+            if s.ball_remove_texture then
+                if part:IsA("MeshPart") then scope:set(part,"TextureID","") end
+                for _,object in ipairs(part:GetDescendants()) do
+                    if object:IsA("SpecialMesh") then scope:set(object,"TextureId","")
+                    elseif object:IsA("Decal") or object:IsA("Texture") then scope:set(object,"Transparency",1) end
+                end
+            else
+                if part:IsA("MeshPart") then scope:restore(part,"TextureID") end
+                for _,object in ipairs(part:GetDescendants()) do
+                    if object:IsA("SpecialMesh") then scope:restore(object,"TextureId")
+                    elseif object:IsA("Decal") or object:IsA("Texture") then scope:restore(object,"Transparency") end
+                end
+            end
+        end
+    end,interval=.2})
+    local function court_parts(s)
+        local surfaces,lines={},{}
+        local roots={}; for _,name in ipairs({"Map","Courts","Court"}) do local object=workspace:FindFirstChild(name); if object then roots[#roots+1]=object end end
+        local seen={}
+        for _,folder in ipairs(roots) do
+            for _,part in ipairs(folder:GetDescendants()) do
+                if part:IsA("BasePart") and not seen[part] then
+                    seen[part]=true; local name=part.Name:lower(); local parent=part.Parent; local in_court=false
+                    while parent and parent~=workspace do if parent.Name:lower():find("court",1,true) then in_court=true; break end; parent=parent.Parent end
+                    local selected=s.court_part_name~="" and part.Name:lower()==s.court_part_name:lower()
+                    if selected or name=="courtfloor" or name=="courtsurface" or name=="playingsurface" or (name=="floor" and in_court) then surfaces[#surfaces+1]=part
+                    elseif in_court and (name:find("line",1,true) or name=="paint" or name=="key") then lines[#lines+1]=part end
+                end
+            end
+        end
+        return surfaces,lines
+    end
+    local function apply_court(scope,_,s)
+        local surfaces,lines=court_parts(s); assert(#surfaces>0,"Court surface not found; enter its exact part name in details")
+        local color=cosmetic_color(s.court_color); local line_color=cosmetic_color(s.court_line_color); local chosen=material(s.court_material)
+        for _,part in ipairs(surfaces) do scope:set(part,"Color",color); scope:set(part,"Material",chosen); scope:set(part,"Reflectance",s.court_reflectance) end
+        for _,part in ipairs(lines) do if s.court_color_lines then scope:set(part,"Color",line_color) else scope:restore(part,"Color") end end
+    end
+    add("court_appearance","Court appearance","Cosmetics","Colors named court surfaces and separate line parts; baked textures cannot be recolored separately",{start=function(scope,s) apply_court(scope,nil,s) end,step=apply_court,interval=1})
+    add("self_outline","Player outline","Cosmetics","Outline and optional fill around your local character",{start=function(scope)
+        character(); return new_local(scope,"Highlight",workspace)
+    end,step=function(_,object,s)
+        object.Adornee=rig(); object.OutlineColor=cosmetic_color(s.outline_color); object.FillColor=cosmetic_color(s.outline_fill_color); object.OutlineTransparency=1-s.outline_opacity; object.FillTransparency=1-s.outline_fill_opacity
+        object.DepthMode=s.outline_through_walls and Enum.HighlightDepthMode.AlwaysOnTop or Enum.HighlightDepthMode.Occluded
+    end,interval=.1})
+    add("sky","Custom sky","Cosmetics","Galaxy, night, sunset, daytime or a custom sky asset; tint and atmosphere controls",{start=function(scope,s)
+        local source
+        for _,object in ipairs(lighting:GetChildren()) do if object:IsA("Sky") then source=object; break end end
+        local sky
+        if s.sky_preset=="Galaxy" or s.sky_preset=="Custom" then
+            local asset=s.sky_preset=="Galaxy" and "10542194896" or s.sky_asset
+            asset=tostring(asset):match("^%s*(%d+)%s*$"); assert(asset and #asset<=18,"Enter a numeric sky model asset ID")
+            local objects=game:GetObjects("rbxassetid://"..asset)
+            for _,object in ipairs(objects) do
+                if not sky then
+                    local found=object:IsA("Sky") and object or object:FindFirstChildWhichIsA("Sky",true)
+                    if found then sky=found:Clone() end
+                end
+                object:Destroy()
+            end
+            assert(sky,"Asset contains no Sky object")
+        else sky=source and source:Clone() or Instance.new("Sky") end
+        for _,child in ipairs(sky:GetChildren()) do child:Destroy() end
+        sky.Name="PivotSky"
+        for _,object in ipairs(lighting:GetChildren()) do if object:IsA("Sky") or object:IsA("Atmosphere") then scope:set(object,"Parent",nil) end end
+        sky.Parent=lighting; scope:defer(function() sky:Destroy() end)
+        local atmosphere=new_local(scope,"Atmosphere",lighting); atmosphere.Name="PivotAtmosphere"
+        return {sky=sky,atmosphere=atmosphere}
+    end,step=function(scope,state,s)
+        local preset=s.sky_preset; assert(preset=="Night" or preset=="Sunset" or preset=="Day" or preset=="Galaxy" or preset=="Custom","Unknown sky preset")
+        scope:set(lighting,"ClockTime",(preset=="Night" or preset=="Galaxy" or preset=="Custom") and 0 or preset=="Sunset" and 18.2 or 13)
+        scope:set(lighting,"Ambient",cosmetic_color(s.sky_tint)); scope:set(lighting,"OutdoorAmbient",cosmetic_color(s.sky_tint))
+        state.sky.CelestialBodiesShown=true; state.sky.StarCount=s.sky_stars; state.sky.SunAngularSize=12; state.sky.MoonAngularSize=9
+        state.atmosphere.Color=cosmetic_color(s.sky_tint); state.atmosphere.Decay=cosmetic_color(s.sky_decay); state.atmosphere.Density=s.sky_density; state.atmosphere.Haze=s.sky_haze; state.atmosphere.Glare=preset=="Sunset" and .4 or 0
+    end,interval=.2,conflicts={"time","fullbright","atmosphere"}})
+    for _,id in ipairs({"time","fullbright","atmosphere"}) do
+        local definition=registry.definitions[id]; definition.conflicts=definition.conflicts or {}; definition.conflicts[#definition.conflicts+1]="sky"
+    end
+    local model_presets={["Tung Tung"]="138151705692565",Sasuke="361481267"}
+    add("custom_model","Custom player model","Cosmetics","Local cosmetic model; scripts are stripped. Compatible body parts can follow your pose",{start=function(scope,s)
+        local asset=model_presets[s.model_preset] or s.model_asset
+        asset=tostring(asset):match("^%s*(%d+)%s*$"); assert(asset and #asset<=18,"Enter a numeric Roblox model asset ID")
+        local objects=game:GetObjects("rbxassetid://"..asset); assert(type(objects)=="table" and #objects>0,"Model asset could not be loaded")
+        local model=Instance.new("Model"); model.Name="PivotCosmeticModel"; scope:defer(function() model:Destroy() end)
+        -- Objects remain outside the data model until all executable descendants are removed.
+        for _,object in ipairs(objects) do
+            scope:defer(function() object:Destroy() end)
+            local candidates_to_check={object}; for _,descendant in ipairs(object:GetDescendants()) do candidates_to_check[#candidates_to_check+1]=descendant end
+            for _,descendant in ipairs(candidates_to_check) do
+                if descendant:IsA("LuaSourceContainer") or descendant:IsA("Script") or descendant:IsA("LocalScript") or descendant:IsA("ModuleScript") or descendant:IsA("RemoteEvent") or descendant:IsA("RemoteFunction") or descendant:IsA("ClickDetector") or descendant:IsA("ProximityPrompt") then descendant:Destroy() end
+            end
+            if object.Parent or object:IsA("BasePart") or object:IsA("Model") or object:IsA("Folder") then
+                if not object:IsA("LuaSourceContainer") and not object:IsA("Script") and not object:IsA("LocalScript") and not object:IsA("ModuleScript") then object.Parent=model end
+            end
+        end
+        local parts={}; local first
+        for _,part in ipairs(model:GetDescendants()) do
+            if part:IsA("BasePart") then
+                assert(#parts<500,"Model exceeds 500 cosmetic parts")
+                part.Anchored=true; part.CanCollide=false; part.CanTouch=false; part.CanQuery=false; part.Massless=true; parts[#parts+1]=part; first=first or part
+            elseif part:IsA("Humanoid") then part.DisplayDistanceType=Enum.HumanoidDisplayDistanceType.None end
+        end
+        assert(first,"Asset contains no displayable parts"); model.PrimaryPart=first
+        local size=model:GetExtentsSize(); assert(size.Y>.01,"Invalid model dimensions")
+        model:ScaleTo(s.model_height/size.Y); model.Parent=workspace
+        local current=assert(root(),"Enter a court first"); model:PivotTo(current.CFrame)
+        return {model=model,parts=parts,source=rig(),height=s.model_height}
+    end,step=function(scope,state,s)
+        local source=rig(); local part=root(); assert(source and part,"Character unavailable")
+        if s.model_height~=state.height then state.model:ScaleTo(state.model:GetScale()*s.model_height/state.height); state.height=s.model_height end
+        state.model:PivotTo(part.CFrame*CFrame.new(0,s.model_offset,0)*CFrame.Angles(0,math.rad(s.model_rotation),0))
+        if s.model_follow_pose then
+            for _,cosmetic in ipairs(state.parts) do
+                local original=source:FindFirstChild(cosmetic.Name,true)
+                if original and original:IsA("BasePart") and original.Name~="HumanoidRootPart" then cosmetic.CFrame=original.CFrame end
+            end
+        end
+        for _,original in ipairs(source:GetDescendants()) do if original:IsA("BasePart") then if s.model_hide_avatar then scope:set(original,"LocalTransparencyModifier",1) else scope:restore(original,"LocalTransparencyModifier") end end end
+    end})
+
+    Engine.cosmetic_fields={
+        crosshair={{"crosshair_color","Color / #RRGGBB"},{"crosshair_size","Size"},{"crosshair_gap","Gap"},{"crosshair_thickness","Thickness"},{"crosshair_opacity","Opacity"}},
+        ball_trail={{"ball_trail_color","Color / #RRGGBB"},{"ball_trail_lifetime","Lifetime / seconds"},{"ball_trail_width","Width"},{"ball_trail_opacity","Opacity"}},
+        player_trail={{"player_trail_color","Color / #RRGGBB"},{"player_trail_lifetime","Lifetime / seconds"},{"player_trail_width","Width"},{"player_trail_opacity","Opacity"}},
+        ball_appearance={{"ball_color","Color / #RRGGBB"},{"ball_reflectance","Reflectance"}},
+        court_appearance={{"court_color","Floor / #RRGGBB"},{"court_line_color","Lines / #RRGGBB"},{"court_reflectance","Reflectance"},{"court_part_name","Exact surface part name"}},
+        self_outline={{"outline_color","Outline / #RRGGBB"},{"outline_fill_color","Fill / #RRGGBB"},{"outline_opacity","Outline opacity"},{"outline_fill_opacity","Fill opacity"}},
+        sky={{"sky_asset","Custom sky model asset ID"},{"sky_tint","Sky tint / #RRGGBB"},{"sky_decay","Atmosphere / #RRGGBB"},{"sky_stars","Star count"},{"sky_density","Atmosphere density"},{"sky_haze","Haze"}},
+        custom_model={{"model_asset","Custom model asset ID"},{"model_height","Model height / studs"},{"model_offset","Height offset"},{"model_rotation","Rotation"}}
+    }
+    Engine.cosmetic_choices={
+        crosshair={{"crosshair_shape","Shape",{"Dot","Cross","Ring"}}},
+        ball_appearance={{"ball_material","Material",{"SmoothPlastic","Plastic","Neon","Metal","Glass"}}},
+        court_appearance={{"court_material","Material",{"SmoothPlastic","Wood","WoodPlanks","Concrete","Neon"}}},
+        sky={{"sky_preset","Sky preset",{"Night","Galaxy","Sunset","Day","Custom"}}},
+        custom_model={{"model_preset","Model",{"Tung Tung","Sasuke","Custom"}}}
+    }
+    Engine.cosmetic_toggles={ball_appearance={{"ball_remove_texture","Remove ball texture"}},court_appearance={{"court_color_lines","Color separate line parts"}},self_outline={{"outline_through_walls","Show through walls"}},custom_model={{"model_hide_avatar","Hide your normal avatar"},{"model_follow_pose","Follow matching body parts"}}}
+
+    Engine.shot_stats={total=0,perfect=0,good=0,early=0,late=0,skipped=0,releases=0,unconfirmed=0,last="Waiting for a shot",history={}}
+    function Engine:record_shot(event)
+        local stats=self.shot_stats; local kind=event.kind
+        if kind=="feedback" then
+            stats.total=stats.total+1
+            if event.code==5 then stats.perfect=stats.perfect+1; stats.last="Perfect · timing retained"
+            elseif event.code==4 then stats.good=stats.good+1; stats.last=event.locked and "Good · keeping established timing" or self.settings.refine_good and "Good · refining nearby timing" or "Good"
+            elseif event.code<=3 then stats.early=stats.early+1; stats.last="Early · next release later"
+            else stats.late=stats.late+1; stats.last="Late · next release earlier" end
+            if not self.settings.auto_calibrate and event.code~=5 then stats.last=(event.code<=3 and "Early" or event.code>=6 and "Late" or "Good").." · auto correct off" end
+        elseif kind=="skip" then stats.skipped=stats.skipped+1; stats.last=event.reason
+        elseif kind=="release" then stats.releases=stats.releases+1; stats.last="Released · awaiting game feedback"
+        elseif kind=="unconfirmed" then stats.unconfirmed=stats.unconfirmed+1; stats.last="No feedback received for an auto release" end
+        local entry={kind=kind,code=event.code,shot=event.shot,name=event.name,reason=event.reason,ratio=event.ratio,position=event.position,speed=event.speed,details=event.details,time=os.clock()}
+        stats.history[#stats.history+1]=entry; if #stats.history>100 then table.remove(stats.history,1) end
+    end
+    function Engine:attach_shot_hud(scope)
+        local label=Instance.new("TextLabel"); label.Name="PivotShotStats"; label.AnchorPoint=Vector2.new(1,0); label.Position=UDim2.new(1,-20,0,20); label.Size=UDim2.fromOffset(290,84)
+        label.BackgroundColor3=Color3.fromRGB(24,26,30); label.BackgroundTransparency=.15; label.BorderSizePixel=0; label.TextColor3=Color3.fromRGB(230,232,237); label.Font=Enum.Font.SourceSans; label.TextSize=18; label.TextWrapped=true; label.Parent=ctx.gui
+        local corner=Instance.new("UICorner"); corner.CornerRadius=UDim.new(0,6); corner.Parent=label
+        scope:defer(function() label:Destroy() end)
+        local function update()
+            local stats=self.shot_stats; local rate=stats.total>0 and string.format("%.1f%%",stats.perfect/stats.total*100) or "--"
+            label.Visible=self.settings.shot_hud
+            label.Text="Perfect rate: "..rate.."  ("..stats.perfect.."/"..stats.total..")\n"..stats.last.."\nSkipped: "..stats.skipped.." · Unconfirmed: "..stats.unconfirmed
+        end
+        update(); local connection=run.Heartbeat:Connect(update); scope:defer(function() connection:Disconnect() end)
+    end
 
     Engine.emit=emit; Engine.held=held
     function Engine:stop()
@@ -1673,7 +1951,33 @@ do
         end
         for key,value in pairs(next_theme) do theme[key]=value end
     end
-    PivotUI={theme=theme,label=label,button=small_button,pages=pages,rail_items=rail_items,show=show,heading=heading,search=search,cancel=cancel,actions=actions,icon=icon,icon_color=icon_color,animate=animate,add_search=add_search,layout_nav=layout_nav,set_theme=set_theme}
+    local function edit_theme(settings)
+        local custom=settings.theme_custom
+        if custom then
+            local next_accent=assert((function() local h=settings.ui_accent:match("^#?(%x%x%x%x%x%x)$"); if h then return rgb(tonumber(h:sub(1,2),16),tonumber(h:sub(3,4),16),tonumber(h:sub(5,6),16)) end end)(),"Invalid accent color")
+            local previous=theme.accent
+            for _,object in ipairs(gui:GetDescendants()) do
+                for _,property in ipairs({"BackgroundColor3","TextColor3","Color"}) do pcall(function() if object[property]==previous then object[property]=next_accent end end) end
+            end
+            theme.accent=next_accent
+        end
+        for _,object in ipairs(gui:GetDescendants()) do
+            if object:IsA("TextLabel") or object:IsA("TextButton") or object:IsA("TextBox") then
+                local base=object:GetAttribute("PivotBaseText")
+                if not base then base=object.TextSize or 14; object:SetAttribute("PivotBaseText",base) end
+                object.TextSize=base+(custom and settings.ui_font_size-14 or 0)
+            elseif object:IsA("UICorner") then
+                local owner=object.Parent
+                if owner and (owner==shell or owner.Name:sub(1,6)=="Group_" or owner:IsA("TextButton") and owner.BackgroundTransparency==0) then
+                    local base=object:GetAttribute("PivotBaseCorner")
+                    if not base then base=object.CornerRadius.Offset; object:SetAttribute("PivotBaseCorner",base) end
+                    object.CornerRadius=UDim.new(0,custom and settings.ui_rounding or base)
+                end
+            end
+        end
+        shell.BackgroundTransparency=custom and 1-settings.ui_opacity or 0
+    end
+    PivotUI={theme=theme,label=label,button=small_button,pages=pages,rail_items=rail_items,show=show,heading=heading,search=search,cancel=cancel,actions=actions,icon=icon,icon_color=icon_color,animate=animate,add_search=add_search,layout_nav=layout_nav,set_theme=set_theme,edit_theme=edit_theme}
     on(gui.Destroying,function() for _,c in ipairs(connections) do c:Disconnect() end end)
 end
 
@@ -1702,7 +2006,7 @@ do
         return button
     end
     local page=make("ScrollingFrame",{Name="PivotModules",Position=UDim2.fromOffset(20,112),Size=UDim2.new(1,-34,1,-174),BackgroundTransparency=1,BorderSizePixel=0,ScrollBarThickness=2,Visible=false,CanvasSize=UDim2.fromOffset(0,0)},window)
-    local tabs={"All","Shooting","Dribbling","Player","Defense","Visuals","World","Camera","Recorder","Options"}
+    local tabs={"All","Shooting","Dribbling","Cosmetics","Player","Defense","Visuals","World","Camera","Recorder","Options"}
     local category="All"; local rows={}; local fields={}; local y=0
     local container=page
     local collapsed={}
@@ -1737,7 +2041,7 @@ do
                 local fraction=math.max(0,math.min(1,(position.X-slider.AbsolutePosition.X)/width))
                 local value=range[1]+fraction*(range[2]-range[1])
                 value=range[2]<=5 and math.floor(value*100+.5)/100 or math.floor(value+.5)
-                engine.settings[key]=value; box.Text=tostring(value); fill.Size=UDim2.new((value-range[1])/(range[2]-range[1]),0,1,0)
+                engine.settings[key]=value; box.Text=tostring(value); if key:match("^ui_") then ui.edit_theme(engine.settings) end; fill.Size=UDim2.new((value-range[1])/(range[2]-range[1]),0,1,0)
             end
             connect(slider.InputBegan,function(event)
                 if event.UserInputType==Enum.UserInputType.MouseButton1 or event.UserInputType==Enum.UserInputType.Touch then dragging=event; update(event.Position) end
@@ -1757,7 +2061,11 @@ do
             local original=engine.settings[key]; local value=box.Text
             if type(original)=="number" then local range=engine.ranges[key]; value=Core.bounded(value,range[1],range[2]); if not value then box.Text=tostring(original); report("Value outside allowed range: "..key); return end end
             if #box.Text>100 then box.Text=tostring(original); return end
+            if type(value)=="string" and (key:match("_color$") or key=="ui_accent" or key=="sky_tint" or key=="sky_decay") and not Core.hex_color(value) then box.Text=tostring(original); report("Use #RRGGBB for colors"); return end
             engine.settings[key]=value
+            if key:match("^ui_") then ui.edit_theme(engine.settings) end
+            if key=="sky_asset" and engine.settings.sky_preset=="Custom" and engine.registry.active.sky then engine.registry:disable("sky"); local ok,err=engine.registry:enable("sky",engine.settings); if not ok then report(tostring(err)) end end
+            if key=="model_asset" and engine.settings.model_preset=="Custom" and engine.registry.active.custom_model then engine.registry:disable("custom_model"); local ok,err=engine.registry:enable("custom_model",engine.settings); if not ok then report(tostring(err)) end end
         end)
     end
     local buttons={}; local rebuild
@@ -1780,6 +2088,8 @@ do
             local current=1; for i,value in ipairs(values) do if value==engine.settings[key] then current=i end end
             engine.settings[key]=values[current%#values+1]
             if key=="theme_mode" then ui.set_theme(engine.settings[key]) end
+            if key=="sky_preset" and engine.registry.active.sky then engine.registry:disable("sky"); local ok,err=engine.registry:enable("sky",engine.settings); if not ok then report(tostring(err)) end end
+            if key=="model_preset" and engine.registry.active.custom_model then engine.registry:disable("custom_model"); local ok,err=engine.registry:enable("custom_model",engine.settings); if not ok then report(tostring(err)) end end
             rebuild()
         end)
     end
@@ -1858,6 +2168,10 @@ do
         elseif category=="Options" then
             text("Settings load without enabling modules.",11,theme.muted)
             choice("theme_mode","Theme",{"Graphite","Slate","Light"})
+            toggle_action("Theme editor",function() return engine.settings.theme_custom end,function(on) engine.settings.theme_custom=on; if not on then ui.set_theme(engine.settings.theme_mode) end; ui.edit_theme(engine.settings); rebuild() end)
+            if engine.settings.theme_custom then
+                field("ui_accent","Accent / #RRGGBB"); field("ui_font_size","Text size"); field("ui_rounding","Corner radius"); field("ui_opacity","Menu opacity")
+            end
             field("esp_distance","Overlay distance / studs")
             toggle_action("Team filter",function() return engine.settings.team_check end,function(on) engine.settings.team_check=on end)
             action("Copy module settings",function() export(settings_data()) end)
@@ -1866,7 +2180,7 @@ do
             action("Disable every module / restore values",function() cancel(); engine:stop(); update_buttons(); report("All modules disabled") end)
         else
             local options={auto_shoot={{"shot_range","Shoot range / studs"}},rim_range={{"shot_range","Shoot range / studs"}},dribble_glide={{"glide_speed","Glide speed"}},auto_ankle={{"ankle_range","Ankle break range"},{"ankle_delay","Attempt interval / seconds"},{"ankle_combo","Dribble inputs"}},dribble_macros={{"custom_combo","Custom combo"},{"combo_delay","Combo delay / ms"},{"combo_bind","Combo keybind / F1–F12"}},auto_takeover={{"takeover_threshold","Takeover threshold"}},speed={{"walk_speed","Client walk speed"}},split_speed={{"on_ball_speed","On-ball speed"},{"off_ball_speed","Off-ball speed"}},jump={{"jump_power","Jump power"}},fly={{"fly_speed","Flight speed"}},spin={{"spin_speed","Degrees / second"}},guard={{"guard_target","Target username"},{"guard_distance","Guard spacing"},{"guard_range","Activation range"},{"guard_strength","Guard strength"}},block={{"guard_target","Target username"},{"block_range","Activation range"},{"block_delay","Block delay / seconds"},{"jump_key","Jump / block key"}},rebound={{"rebound_range","Activation range"},{"jump_key","Jump key"}},range_circle={{"range","Range / studs"}},time={{"time","Time / 0-24"}},fov={{"fov","Field of view"}},spectate={{"spectate","Target username"}}}
-            local groups=category=="All" and {"Shooting","Defense","Dribbling","Player","Visuals","Camera","World"} or {category}
+            local groups=category=="All" and {"Shooting","Defense","Dribbling","Cosmetics","Player","Visuals","Camera","World"} or {category}
             local columns=category=="All" and window.Size.X.Offset>=620 and 2 or 1
             local heights={46,46}
             for _,group in ipairs(groups) do
@@ -1900,8 +2214,14 @@ do
                     if expanded==id then
                         text(definition.description,12,theme.muted,60).TextWrapped=true
                         for _,entry in ipairs(options[id] or {}) do field(entry[1],entry[2]) end
+                        for _,entry in ipairs((engine.cosmetic_choices or {})[id] or {}) do choice(entry[1],entry[2],entry[3]) end
+                        for _,entry in ipairs((engine.cosmetic_fields or {})[id] or {}) do field(entry[1],entry[2]) end
+                        for _,entry in ipairs((engine.cosmetic_toggles or {})[id] or {}) do local key=entry[1]; toggle_action(entry[2],function() return engine.settings[key] end,function(on) engine.settings[key]=on end) end
                         if id=="meter_release" then
-                            toggle_action("Auto calibrate",function() return engine.settings.auto_calibrate end,function(on) engine.settings.auto_calibrate=on end)
+                            toggle_action("Auto correct",function() return engine.settings.auto_calibrate end,function(on) engine.settings.auto_calibrate=on end)
+                            toggle_action("Refine Good results",function() return engine.settings.refine_good end,function(on) engine.settings.refine_good=on end)
+                            toggle_action("Perfect rate HUD",function() return engine.settings.shot_hud end,function(on) engine.settings.shot_hud=on end)
+                            action("Copy release diagnostics",function() export(engine.shot_stats) end)
                             toggle_action("Ping compensation",function() return engine.settings.ping_compensation end,function(on) engine.settings.ping_compensation=on end)
                             field("ping_factor","Ping compensation strength")
                         elseif id=="meter_style" then choice("meter_style","Meter style",{"Vertical","Rocket","Bat","Funnel","Hoop","Roblox","None"})
@@ -1924,7 +2244,7 @@ do
             y=math.max(heights[1],columns==2 and heights[2] or 0)
 
         end
-        page.CanvasSize=UDim2.fromOffset(0,y+8); update_buttons()
+        page.CanvasSize=UDim2.fromOffset(0,y+8); update_buttons(); ui.edit_theme(engine.settings)
     end
     section_button=ui.button(page,"All modules  ▾",function() choosing=not choosing; page.CanvasPosition=Vector2.new(0,0); rebuild() end)
     section_button.Name="ModuleCategory"; section_button.Position=UDim2.fromOffset(0,0); section_button.Size=UDim2.fromOffset(142,28)
