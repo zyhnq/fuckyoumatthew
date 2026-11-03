@@ -2373,6 +2373,7 @@ do
     local container=page
     local collapsed={}
     local expanded,choosing,section_button,record_tools,court_alignment
+    local character_open=false
     local auxiliary={}; local capture_switch
     local function clear()
         for _,object in ipairs(rows) do object:Destroy() end; rows={}; fields={}; auxiliary={}; y=46
@@ -2608,20 +2609,27 @@ do
                 local divider=make("Frame",{Position=UDim2.fromOffset(0,32),Size=UDim2.new(1,0,0,1),BackgroundColor3=theme.line,BorderSizePixel=0},card)
                 divider.Visible=not collapsed[group]
                 container=card; y=38
-                if not collapsed[group] and group=="Character" and category=="Character" then
-                    local grid=window.Size.X.Offset>=620 and 3 or 2
-                    for i,entry in ipairs(engine.characters) do
-                        local item=ui.button(card,entry.name,function()
-                            local ok,err=pcall(function() engine:select_character(entry.name) end); if not ok then report(tostring(err)) end
-                            rebuild()
-                        end)
-                        item.Name="Character_"..entry.name
-                        item.Position=UDim2.new(((i-1)%grid)/grid,8,0,38+math.floor((i-1)/grid)*34)
-                        item.Size=UDim2.new(1/grid,-16,0,28)
-                        item.BackgroundColor3=engine.settings.model_preset==entry.name and theme.selected or theme.input
-                        item.TextColor3=engine.settings.model_preset==entry.name and theme.accent or theme.text
+                if not collapsed[group] and group=="Character" then
+                    local selector=action("Character  /  "..engine.settings.model_preset..(character_open and "  ▴" or "  ▾"),function() character_open=not character_open; rebuild() end)
+                    selector.Name="CharacterDropdown"
+                    if character_open then
+                        local menu=make("ScrollingFrame",{Name="CharacterOptions",Position=UDim2.fromOffset(6,y),Size=UDim2.new(1,-12,0,168),CanvasSize=UDim2.fromOffset(0,#engine.characters*30),ScrollBarThickness=3,ScrollBarImageColor3=theme.accent,BackgroundColor3=theme.input,BorderSizePixel=0},card)
+                        make("UICorner",{CornerRadius=UDim.new(0,4)},menu)
+                        for i,entry in ipairs(engine.characters) do
+                            local item=ui.button(menu,entry.name,function()
+                                local ok,err=pcall(function() engine:select_character(entry.name) end); if not ok then report(tostring(err)) end
+                                character_open=false
+                                if engine.settings.model_preset=="Custom" then expanded="custom_model" end
+                                rebuild()
+                            end)
+                            item.Name="Character_"..entry.name; item.Position=UDim2.fromOffset(4,(i-1)*30); item.Size=UDim2.new(1,-12,0,28)
+                            item.TextXAlignment=Enum.TextXAlignment.Left
+                            make("UIPadding",{PaddingLeft=UDim.new(0,8)},item)
+                            item.BackgroundColor3=engine.settings.model_preset==entry.name and theme.selected or theme.input
+                            item.TextColor3=engine.settings.model_preset==entry.name and theme.accent or theme.text
+                        end
+                        y=y+176
                     end
-                    y=38+math.ceil(#engine.characters/grid)*34+4
                     local active=engine.registry.active.custom_model
                     text("Selected: "..engine.settings.model_preset.." · "..(active and active.state.rig_label or "Enable Character skin to load"),12,theme.muted,38)
                 end
@@ -2647,7 +2655,7 @@ do
                         text(definition.description,12,theme.muted,60).TextWrapped=true
                         for _,entry in ipairs(options[id] or {}) do field(entry[1],entry[2]) end
                         for _,entry in ipairs((engine.cosmetic_choices or {})[id] or {}) do choice(entry[1],entry[2],entry[3]) end
-                        for _,entry in ipairs((engine.cosmetic_fields or {})[id] or {}) do field(entry[1],entry[2]) end
+                        for _,entry in ipairs((engine.cosmetic_fields or {})[id] or {}) do if entry[1]~="model_asset" or engine.settings.model_preset=="Custom" then field(entry[1],entry[2]) end end
                         for _,entry in ipairs((engine.cosmetic_toggles or {})[id] or {}) do local key=entry[1]; toggle_action(entry[2],function() return engine.settings[key] end,function(on) engine.settings[key]=on end) end
                         if id=="meter_release" then
                             toggle_action("Auto correct",function() return engine.settings.auto_calibrate end,function(on) engine.settings.auto_calibrate=on end)
