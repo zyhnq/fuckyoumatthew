@@ -1371,22 +1371,114 @@ local function create_pivot_modules(ctx)
     for _,id in ipairs({"time","fullbright","atmosphere"}) do
         local definition=registry.definitions[id]; definition.conflicts=definition.conflicts or {}; definition.conflicts[#definition.conflicts+1]="sky"
     end
-    local model_presets={["Tung Tung"]="138151705692565",Sasuke="361481267"}
-    add("custom_model","Custom player model","Cosmetics","Isolated viewport costume with no world physics; matching parts can copy your pose. Single meshes use run/jump motion",{start=function(scope,s)
+    Engine.characters={
+        {name="Tung Tung",asset="138151705692565"},{name="Sasuke",asset="361481267"},
+        {name="Gojo",asset="17831020168"},{name="Naruto",asset="17834725125"},{name="Itachi",asset="17834706994"},
+        {name="Sukuna",asset="17831030739"},{name="Goku",asset="137907999221430"},{name="Luffy",asset="9645978594"},
+        {name="Saitama",asset="8223087561"},{name="Sonic",asset="96290299914524"},{name="Shadow",asset="8301293499"},
+        {name="Spider-Man",asset="93697227789268"},{name="SpongeBob",asset="9727402003"},{name="Shrek",asset="5191546948"},
+        {name="LeBron",asset="14515350167"},{name="Michael Jordan",asset="11456119979"},{name="Custom",asset=false}
+    }
+    local model_presets={}
+    for _,entry in ipairs(Engine.characters) do model_presets[entry.name]=entry.asset end
+    function Engine:select_character(name)
+        local found=false; for _,entry in ipairs(self.characters) do if entry.name==name then found=true; break end end
+        assert(found,"Unknown character")
+        local previous=self.settings.model_preset
+        self.settings.model_preset=name
+        if registry.active.custom_model then
+            registry:disable("custom_model")
+            if name=="Custom" and not tostring(self.settings.model_asset):match("^%s*%d+%s*$") then ctx.report("Enter a custom model asset ID, then enable Character skin"); return true end
+            local ok,err=registry:enable("custom_model",self.settings)
+            if not ok then self.settings.model_preset=previous; ctx.report("Character could not load: "..tostring(err)); return false end
+        end
+        return true
+    end
+    local function rig_key(name) return tostring(name):lower():gsub("mixamorig",""):gsub("[^%w]","") end
+    local bone_alias={hips="rootjoint",pelvis="rootjoint",spine="waist",spine1="waist",spine2="waist",head="neck",leftarm="leftshoulder",rightarm="rightshoulder",leftforearm="leftelbow",rightforearm="rightelbow",lefthand="leftwrist",righthand="rightwrist",leftupleg="lefthip",rightupleg="righthip",leftleg="leftknee",rightleg="rightknee",leftfoot="leftankle",rightfoot="rightankle"}
+    local function capture_character_rig(objects)
+        local joints,bones={},{}
+        for _,object in ipairs(objects) do
+            if object:IsA("Bone") then bones[#bones+1]=object
+            elseif object:IsA("JointInstance") or object:IsA("Motor6D") or object:IsA("Weld") or object:IsA("ManualWeld") then
+                if object.Part0 and object.Part1 then joints[#joints+1]={name=rig_key(object.Name),part0=object.Part0,part1=object.Part1,c0=object.C0 or CFrame.new(),c1=object.C1 or CFrame.new(),transform=object:IsA("Motor6D") and object.Transform or CFrame.new(),motor=object:IsA("Motor6D")} end
+            elseif object:IsA("WeldConstraint") and object.Part0 and object.Part1 then
+                joints[#joints+1]={name=rig_key(object.Name),part0=object.Part0,part1=object.Part1,c0=object.Part0.CFrame:ToObjectSpace(object.Part1.CFrame),c1=CFrame.new(),transform=CFrame.new(),motor=false}
+            end
+        end
+        return joints,bones
+    end
+    local function scaled_joint(frame,factor) return CFrame.new(frame.Position*factor)*frame.Rotation end
+    function Engine:pose_character(state,source)
+        if state.pose_source~=source then
+            state.pose_source=source; state.source_joints={}
+            for _,object in ipairs(source:GetDescendants()) do if object:IsA("Motor6D") then state.source_joints[rig_key(object.Name)]=object end end
+        end
+        local mapped=state.source_joints
+        local function transform_for(name,c0,fallback)
+            local key=bone_alias[name] or name
+            local joint=mapped[name] or mapped[key] or (key=="rootjoint" and mapped.root)
+            if not joint then return fallback end
+            local pose=joint.Transform or CFrame.new()
+            local source_basis=(joint.C0 or CFrame.new()).Rotation
+            local target_basis=c0.Rotation
+            return target_basis:Inverse()*source_basis*pose*source_basis:Inverse()*target_basis
+        end
+        local placed={[state.model.PrimaryPart]=true}; local count=0
+        if state.motor_count==0 and #state.bones==0 then
+            local aliases={Torso="UpperTorso",["Left Arm"]="LeftUpperArm",["Right Arm"]="RightUpperArm",["Left Leg"]="LeftUpperLeg",["Right Leg"]="RightUpperLeg"}
+            for _,cosmetic in ipairs(state.parts) do
+                local original=source:FindFirstChild(cosmetic.Name,true) or aliases[cosmetic.Name] and source:FindFirstChild(aliases[cosmetic.Name],true)
+                if original and original:IsA("BasePart") and original.Name~="HumanoidRootPart" then cosmetic.CFrame=original.CFrame; placed[cosmetic]=true end
+            end
+        end
+        for _=1,16 do
+            local progress=false
+            for _,joint in ipairs(state.joints) do
+                local p0,p1=joint.part0,joint.part1
+                local c0=scaled_joint(joint.c0,state.rig_scale); local c1=scaled_joint(joint.c1,state.rig_scale)
+                local transform=joint.motor and transform_for(joint.name,c0,joint.transform or CFrame.new()) or joint.transform
+                if placed[p0] and not placed[p1] then p1.CFrame=p0.CFrame*c0*transform*c1:Inverse(); placed[p1]=true; progress=true; count=count+1
+                elseif placed[p1] and not placed[p0] then p0.CFrame=p1.CFrame*c1*transform:Inverse()*c0:Inverse(); placed[p0]=true; progress=true; count=count+1 end
+            end
+            if not progress then break end
+        end
+        for _,bone in ipairs(state.bones) do bone.Transform=transform_for(rig_key(bone.Name),bone.CFrame,CFrame.new()) end
+
+        state.mapped_parts=count
+    end
+
+    add("custom_model","Character skin","Character","Isolated character renderer. Joint and bone rigs follow the player pose; static meshes use motion fallback",{start=function(scope,s)
+        assert(model_presets[s.model_preset] or s.model_preset=="Custom","Unknown character preset")
         local asset=model_presets[s.model_preset] or s.model_asset
         asset=tostring(asset):match("^%s*(%d+)%s*$"); assert(asset and #asset<=18,"Enter a numeric Roblox model asset ID")
         local objects=game:GetObjects("rbxassetid://"..asset); assert(type(objects)=="table" and #objects>0,"Model asset could not be loaded")
         local model=Instance.new("Model"); model.Name="PivotCosmeticModel"; scope:defer(function() model:Destroy() end)
+        local captured_joints,captured_bones={},{}
         -- Objects remain outside the data model until all executable descendants are removed.
         for _,object in ipairs(objects) do
             scope:defer(function() object:Destroy() end)
             local candidates_to_check={object}; for _,descendant in ipairs(object:GetDescendants()) do candidates_to_check[#candidates_to_check+1]=descendant end
+            local joints,bones=capture_character_rig(candidates_to_check)
+            for _,joint in ipairs(joints) do captured_joints[#captured_joints+1]=joint end
+            for _,bone in ipairs(bones) do captured_bones[#captured_bones+1]=bone end
             for _,descendant in ipairs(candidates_to_check) do
-                if descendant:IsA("Humanoid") or descendant:IsA("AnimationController") or descendant:IsA("JointInstance") or descendant:IsA("Motor6D") or descendant:IsA("WeldConstraint") or descendant:IsA("Constraint") or descendant:IsA("BodyMover") or descendant:IsA("BodyVelocity") or descendant:IsA("BodyPosition") or descendant:IsA("BodyGyro") or descendant:IsA("BodyForce") or descendant:IsA("LuaSourceContainer") or descendant:IsA("Script") or descendant:IsA("LocalScript") or descendant:IsA("ModuleScript") or descendant:IsA("RemoteEvent") or descendant:IsA("RemoteFunction") or descendant:IsA("ClickDetector") or descendant:IsA("ProximityPrompt") then descendant:Destroy() end
+                if descendant:IsA("Sound") or descendant:IsA("ParticleEmitter") or descendant:IsA("Beam") or descendant:IsA("Trail") or descendant:IsA("Light") or descendant:IsA("PointLight") or descendant:IsA("SpotLight") or descendant:IsA("SurfaceLight") or descendant:IsA("Fire") or descendant:IsA("Smoke") or descendant:IsA("Sparkles") or descendant:IsA("Weld") or descendant:IsA("ManualWeld") or descendant:IsA("Humanoid") or descendant:IsA("AnimationController") or descendant:IsA("JointInstance") or descendant:IsA("Motor6D") or descendant:IsA("WeldConstraint") or descendant:IsA("Constraint") or descendant:IsA("BodyMover") or descendant:IsA("BodyVelocity") or descendant:IsA("BodyPosition") or descendant:IsA("BodyGyro") or descendant:IsA("BodyForce") or descendant:IsA("LuaSourceContainer") or descendant:IsA("Script") or descendant:IsA("LocalScript") or descendant:IsA("ModuleScript") or descendant:IsA("RemoteEvent") or descendant:IsA("RemoteFunction") or descendant:IsA("ClickDetector") or descendant:IsA("ProximityPrompt") then descendant:Destroy() end
             end
             if object.Parent or object:IsA("BasePart") or object:IsA("Model") or object:IsA("Folder") then
                 if not object:IsA("LuaSourceContainer") and not object:IsA("Script") and not object:IsA("LocalScript") and not object:IsA("ModuleScript") then object.Parent=model end
             end
+        end
+        local appearance_owners={}
+        for _,object in ipairs(model:GetDescendants()) do
+            if (object:IsA("Shirt") or object:IsA("Pants") or object:IsA("ShirtGraphic") or object:IsA("BodyColors")) and object.Parent and object.Parent:IsA("Model") then appearance_owners[object.Parent]=true end
+        end
+        for owner in pairs(appearance_owners) do
+            local humanoid=Instance.new("Humanoid"); humanoid.Name="PivotAppearanceHumanoid"
+            humanoid.AutoRotate=false; humanoid.PlatformStand=true; humanoid.BreakJointsOnDeath=false; humanoid.RequiresNeck=false; humanoid.DisplayDistanceType=Enum.HumanoidDisplayDistanceType.None
+            pcall(function() humanoid.EvaluateStateMachine=false end); pcall(function() humanoid.AutomaticScalingEnabled=false end)
+            pcall(function() humanoid.RigType=owner:FindFirstChild("UpperTorso") and Enum.HumanoidRigType.R15 or Enum.HumanoidRigType.R6 end)
+            humanoid.Parent=owner
         end
         local parts={}; local first
         for _,part in ipairs(model:GetDescendants()) do
@@ -1395,27 +1487,37 @@ local function create_pivot_modules(ctx)
                 part.Anchored=true; part.CanCollide=false; part.CanTouch=false; part.CanQuery=false; part.Massless=true; parts[#parts+1]=part; first=first or part
             elseif part:IsA("Humanoid") then part.DisplayDistanceType=Enum.HumanoidDisplayDistanceType.None end
         end
-        assert(first,"Asset contains no displayable parts"); model.PrimaryPart=first
+        assert(first,"Asset contains no displayable parts"); model.PrimaryPart=model:FindFirstChild("HumanoidRootPart",true) or model:FindFirstChild("Torso",true) or first
+        local joints,bones={},{}; local motors=0
+        for _,joint in ipairs(captured_joints) do
+            if joint.part0:IsDescendantOf(model) and joint.part1:IsDescendantOf(model) then joints[#joints+1]=joint; if joint.motor then motors=motors+1 end end
+        end
+        for _,bone in ipairs(captured_bones) do if bone:IsDescendantOf(model) then bones[#bones+1]=bone end end
         local size=model:GetExtentsSize(); assert(size.Y>.01,"Invalid model dimensions")
-        model:ScaleTo(s.model_height/size.Y)
+        local rig_scale=s.model_height/size.Y
+        model:ScaleTo(rig_scale)
         local viewport=new_local(scope,"ViewportFrame",ctx.gui); viewport.Name="PivotModelViewport"; viewport.Size=UDim2.fromScale(1,1); viewport.BackgroundTransparency=1; viewport.BorderSizePixel=0; viewport.ZIndex=0; viewport.Active=false
         viewport.Ambient=Color3.fromRGB(180,180,180); viewport.LightColor=Color3.fromRGB(255,255,255); viewport.LightDirection=Vector3.new(-1,-1,-1)
         local world=Instance.new("WorldModel"); world.Name="PivotModelWorld"; world.Parent=viewport
         local camera=Instance.new("Camera"); camera.Parent=viewport; viewport.CurrentCamera=camera
         model.Parent=world
+        local state
         local binding="PivotCostumeCamera"
         run:BindToRenderStep(binding,Enum.RenderPriority.Last.Value+2,function()
             local current_camera=workspace.CurrentCamera
             if current_camera then camera.CFrame=current_camera.CFrame; camera.FieldOfView=current_camera.FieldOfView end
+            if state and s.model_follow_pose and rig() then Engine:pose_character(state,rig()) end
         end)
         scope:defer(function() run:UnbindFromRenderStep(binding) end)
         local current=assert(root(),"Enter a court first"); model:PivotTo(current.CFrame)
-        return {model=model,parts=parts,source=rig(),height=s.model_height,viewport=viewport,camera=camera,last_position=current.Position,phase=0,speed=0}
+        local rig_type=motors>0 and (model:FindFirstChild("UpperTorso",true) and "R15 joint rig" or model:FindFirstChild("Torso",true) and "R6 joint rig" or "Joint rig") or #bones>0 and "Bone rig" or "Static / welded model"
+        state={model=model,parts=parts,source=rig(),height=s.model_height,viewport=viewport,camera=camera,last_position=current.Position,phase=0,speed=0,joints=joints,bones=bones,motor_count=motors,rig_scale=rig_scale,rig_label=rig_type.." · "..motors.." animated joints / "..#bones.." bones"}
+        return state
     end,step=function(scope,state,s,dt)
         local source=rig(); local part=root(); assert(source and part,"Character unavailable")
         local camera=camera_service(); state.camera.CFrame=camera.CFrame; state.camera.FieldOfView=camera.FieldOfView
         state.viewport.Visible=true
-        if s.model_height~=state.height then state.model:ScaleTo(state.model:GetScale()*s.model_height/state.height); state.height=s.model_height end
+        if s.model_height~=state.height then local factor=s.model_height/state.height; state.model:ScaleTo(state.model:GetScale()*factor); state.rig_scale=state.rig_scale*factor; state.height=s.model_height end
         dt=math.max(.001,tonumber(dt) or 1/60)
         local delta=part.Position-state.last_position; state.last_position=part.Position
         local speed=math.min(40,Vector3.new(delta.X,0,delta.Z).Magnitude/dt)
@@ -1426,13 +1528,7 @@ local function create_pivot_modules(ctx)
         local bob=s.model_motion and not airborne and math.sin(state.phase*2)*.09*amount or 0
         local lean=s.model_motion and -math.min(.12,state.speed*.004) or 0
         state.model:PivotTo(part.CFrame*CFrame.new(0,s.model_offset+bob,0)*CFrame.Angles(lean,math.rad(s.model_rotation),0))
-        if s.model_follow_pose then
-            for _,cosmetic in ipairs(state.parts) do
-                local aliases={Torso="UpperTorso",["Left Arm"]="LeftUpperArm",["Right Arm"]="RightUpperArm",["Left Leg"]="LeftUpperLeg",["Right Leg"]="RightUpperLeg"}
-                local original=source:FindFirstChild(cosmetic.Name,true) or aliases[cosmetic.Name] and source:FindFirstChild(aliases[cosmetic.Name],true)
-                if original and original:IsA("BasePart") and original.Name~="HumanoidRootPart" then cosmetic.CFrame=original.CFrame end
-            end
-        end
+        if s.model_follow_pose then Engine:pose_character(state,source) end
         for _,original in ipairs(source:GetDescendants()) do if original:IsA("BasePart") then if s.model_hide_avatar then scope:set(original,"LocalTransparencyModifier",1) else scope:restore(original,"LocalTransparencyModifier") end end end
     end})
 
@@ -1451,9 +1547,9 @@ local function create_pivot_modules(ctx)
         ball_appearance={{"ball_material","Material",{"SmoothPlastic","Plastic","Neon","Metal","Glass"}}},
         court_appearance={{"court_material","Material",{"SmoothPlastic","Wood","WoodPlanks","Concrete","Neon"}}},
         sky={{"sky_preset","Sky preset",{"Night","Galaxy","Sunset","Day","Custom"}}},
-        custom_model={{"model_preset","Model",{"Tung Tung","Sasuke","Custom"}}}
+        custom_model={}
     }
-    Engine.cosmetic_toggles={ball_appearance={{"ball_remove_texture","Remove ball texture"},{"ball_glow","Neon glow"}},court_appearance={{"court_color_lines","Customize court markings"},{"court_remove_texture","Remove floor textures"},{"court_three_enabled","Custom three-point color"},{"court_free_enabled","Custom free-throw color"},{"court_rebuild_markings","Rebuild baked markings"}},self_outline={{"outline_through_walls","Show through walls"}},custom_model={{"model_motion","Run / jump motion"},{"model_hide_avatar","Hide your normal avatar"},{"model_follow_pose","Follow matching body parts"}}}
+    Engine.cosmetic_toggles={ball_appearance={{"ball_remove_texture","Remove ball texture"},{"ball_glow","Neon glow"}},court_appearance={{"court_color_lines","Customize court markings"},{"court_remove_texture","Remove floor textures"},{"court_three_enabled","Custom three-point color"},{"court_free_enabled","Custom free-throw color"},{"court_rebuild_markings","Rebuild baked markings"}},self_outline={{"outline_through_walls","Show through walls"}},custom_model={{"model_motion","Run / jump motion"},{"model_hide_avatar","Hide your normal avatar"},{"model_follow_pose","Follow player pose"}}}
 
     Engine.shot_stats={total=0,perfect=0,good=0,early=0,late=0,skipped=0,releases=0,unconfirmed=0,last="Waiting for a shot",history={}}
     function Engine:record_shot(event)
@@ -2211,7 +2307,7 @@ do
             for _,property in ipairs({"BackgroundColor3","TextColor3","ScrollBarImageColor3","Color"}) do
                 pcall(function()
                     local color=object[property]
-                    for key,value in pairs(theme) do if color==value then object[property]=next_theme[key]; break end end
+                    for key,value in pairs(theme) do if color==value and not object:GetAttribute("PivotFixedColor") then object[property]=next_theme[key]; break end end
                 end)
             end
         end
@@ -2223,7 +2319,7 @@ do
             local next_accent=assert((function() local h=settings.ui_accent:match("^#?(%x%x%x%x%x%x)$"); if h then return rgb(tonumber(h:sub(1,2),16),tonumber(h:sub(3,4),16),tonumber(h:sub(5,6),16)) end end)(),"Invalid accent color")
             local previous=theme.accent
             for _,object in ipairs(gui:GetDescendants()) do
-                for _,property in ipairs({"BackgroundColor3","TextColor3","Color"}) do pcall(function() if object[property]==previous then object[property]=next_accent end end) end
+                for _,property in ipairs({"BackgroundColor3","TextColor3","Color"}) do pcall(function() if object[property]==previous and not object:GetAttribute("PivotFixedColor") then object[property]=next_accent end end) end
             end
             theme.accent=next_accent
         end
@@ -2272,7 +2368,7 @@ do
         return button
     end
     local page=make("ScrollingFrame",{Name="PivotModules",Position=UDim2.fromOffset(20,112),Size=UDim2.new(1,-34,1,-174),BackgroundTransparency=1,BorderSizePixel=0,ScrollBarThickness=2,Visible=false,CanvasSize=UDim2.fromOffset(0,0)},window)
-    local tabs={"All","Shooting","Dribbling","Cosmetics","Player","Defense","Visuals","World","Camera","Recorder","Options"}
+    local tabs={"All","Shooting","Dribbling","Cosmetics","Character","Player","Defense","Visuals","World","Camera","Recorder","Options"}
     local category="All"; local rows={}; local fields={}; local y=0
     local container=page
     local collapsed={}
@@ -2289,7 +2385,9 @@ do
         local object=own(ui.button(container,value,function() local ok,err=pcall(callback); if not ok then report(tostring(err)) end end))
         object.Position=UDim2.fromOffset(0,y); object.Size=UDim2.new(1,-6,0,30); y=y+36; return object
     end
+    local rebuild,color_expanded
     local function field(key,caption)
+        local color_sync
         local row=own(make("Frame",{Position=UDim2.fromOffset(0,y),Size=UDim2.new(1,-6,0,36),BackgroundColor3=theme.panel,BorderSizePixel=0},container))
         local label=ui.label(row,caption,10,8,220,20,11,theme.muted); label.Size=UDim2.new(.6,-14,0,20)
         local box=make("TextBox",{Name="Module_"..key,Text=tostring(engine.settings[key]),ClearTextOnFocus=false,Font=Enum.Font.RobotoMono,TextSize=14,TextColor3=theme.text,BackgroundColor3=theme.input,BorderSizePixel=0,Position=UDim2.new(.6,0,0,4),Size=UDim2.new(.4,-6,0,28)},row)
@@ -2323,18 +2421,69 @@ do
                 local value=Core.bounded(box.Text,range[1],range[2]); if value then fill.Size=UDim2.new((value-range[1])/(range[2]-range[1]),0,1,0) end
             end)
         end
+        local color_key=key:match("_color$") or key=="ui_accent" or key=="sky_tint" or key=="sky_decay"
+        local color=color_key and type(engine.settings[key])=="string" and Core.hex_color(engine.settings[key])
+        if color then
+            local swatch=make("TextButton",{Name="ColorSwatch_"..key,Text="",AutoButtonColor=false,Size=UDim2.fromOffset(24,24),Position=UDim2.new(1,-140,0,6),BackgroundColor3=color,BorderSizePixel=0},row)
+            swatch:SetAttribute("PivotFixedColor",true); make("UICorner",{CornerRadius=UDim.new(0,4)},swatch)
+            label.Size=UDim2.new(1,-156,0,20); box.Position=UDim2.new(1,-108,0,4); box.Size=UDim2.fromOffset(102,28)
+            connect(swatch.Activated,function() color_expanded=color_expanded==key and nil or key; rebuild() end)
+            if color_expanded==key then
+                row.Size=UDim2.new(1,-6,0,164); y=y+128
+                local hex=engine.settings[key]:gsub("#","")
+                local values={tonumber(hex:sub(1,2),16),tonumber(hex:sub(3,4),16),tonumber(hex:sub(5,6),16)}
+                local tracks,numbers={},{}
+                local function apply()
+                    local value=string.format("#%02X%02X%02X",values[1],values[2],values[3])
+                    engine.settings[key]=value; box.Text=value; swatch.BackgroundColor3=Core.hex_color(value)
+                    for i,fill in ipairs(tracks) do fill.Size=UDim2.new(values[i]/255,0,1,0); numbers[i].Text=tostring(values[i]) end
+                    if key=="ui_accent" then ui.edit_theme(engine.settings) end
+                end
+                local palette={"#FFFFFF","#242830","#FF5050","#FFA04D","#65D99A","#6CA6FF","#B79AFF","#F58BC4"}
+                for i,value in ipairs(palette) do
+                    local chip=make("TextButton",{Name="ColorPreset_"..key.."_"..i,Text="",AutoButtonColor=false,BackgroundColor3=Core.hex_color(value),BorderSizePixel=0,Position=UDim2.new((i-1)/8,6,0,42),Size=UDim2.new(1/8,-8,0,22)},row)
+                    chip:SetAttribute("PivotFixedColor",true); make("UICorner",{CornerRadius=UDim.new(0,4)},chip)
+                    connect(chip.Activated,function() local h=value:sub(2); for channel=1,3 do values[channel]=tonumber(h:sub(channel*2-1,channel*2),16) end; apply() end)
+                end
+                for channel,caption in ipairs({"R","G","B"}) do
+                    ui.label(row,caption,10,76+(channel-1)*26,20,20,12,theme.muted)
+                    local number=ui.label(row,tostring(values[channel]),0,76+(channel-1)*26,32,20,12,theme.text); number.Position=UDim2.new(1,-40,0,76+(channel-1)*26); numbers[channel]=number
+                    local slider=make("TextButton",{Name="ColorRGB_"..key.."_"..caption,Text="",AutoButtonColor=false,Position=UDim2.fromOffset(34,84+(channel-1)*26),Size=UDim2.new(1,-84,0,7),BackgroundColor3=theme.line,BorderSizePixel=0},row)
+                    make("UICorner",{CornerRadius=UDim.new(0,3)},slider)
+                    local fill=make("Frame",{BackgroundColor3=channel==1 and Color3.fromRGB(234,110,110) or channel==2 and Color3.fromRGB(110,204,150) or Color3.fromRGB(113,158,231),BorderSizePixel=0,Size=UDim2.new(values[channel]/255,0,1,0)},slider)
+                    fill:SetAttribute("PivotFixedColor",true); make("UICorner",{CornerRadius=UDim.new(0,3)},fill); tracks[channel]=fill
+                    local dragging
+                    local function update(position)
+                        if slider.AbsoluteSize.X<=0 then return end
+                        values[channel]=math.floor(math.max(0,math.min(1,(position.X-slider.AbsolutePosition.X)/slider.AbsoluteSize.X))*255+.5); apply()
+                    end
+                    connect(slider.InputBegan,function(event) if event.UserInputType==Enum.UserInputType.MouseButton1 or event.UserInputType==Enum.UserInputType.Touch then dragging=event; update(event.Position) end end)
+                    local move=input.InputChanged:Connect(function(event) if row.Parent and dragging and (event==dragging or event.UserInputType==Enum.UserInputType.MouseMovement) then update(event.Position) end end)
+                    local finish=input.InputEnded:Connect(function(event) if event==dragging or event.UserInputType==Enum.UserInputType.MouseButton1 then dragging=nil end end)
+                    connect(row.Destroying,function() move:Disconnect(); finish:Disconnect() end)
+                end
+                color_sync=function()
+                    local h=box.Text:gsub("#",""); if not Core.hex_color(box.Text) then return end
+                    for channel=1,3 do values[channel]=tonumber(h:sub(channel*2-1,channel*2),16) end
+                    apply()
+                end
+            end
+            connect(box:GetPropertyChangedSignal("Text"),function() local value=Core.hex_color(box.Text); if value then swatch.BackgroundColor3=value end end)
+        end
+
         connect(box.FocusLost,function()
             local original=engine.settings[key]; local value=box.Text
             if type(original)=="number" then local range=engine.ranges[key]; value=Core.bounded(value,range[1],range[2]); if not value then box.Text=tostring(original); report("Value outside allowed range: "..key); return end end
             if #box.Text>100 then box.Text=tostring(original); return end
             if type(value)=="string" and (key:match("_color$") or key=="ui_accent" or key=="sky_tint" or key=="sky_decay") and not Core.hex_color(value) then box.Text=tostring(original); report("Use #RRGGBB for colors"); return end
             engine.settings[key]=value
+            if color_sync then color_sync() end
             if key:match("^ui_") then ui.edit_theme(engine.settings) end
             if key=="sky_asset" and engine.settings.sky_preset=="Custom" and engine.registry.active.sky then engine.registry:disable("sky"); local ok,err=engine.registry:enable("sky",engine.settings); if not ok then report(tostring(err)) end end
             if key=="model_asset" and engine.settings.model_preset=="Custom" and engine.registry.active.custom_model then engine.registry:disable("custom_model"); local ok,err=engine.registry:enable("custom_model",engine.settings); if not ok then report(tostring(err)) end end
         end)
     end
-    local buttons={}; local rebuild
+    local buttons={}
     local function update_buttons()
         for id,button in pairs(buttons) do
             if button.Parent then paint_switch(button,engine.registry.active[id]~=nil) end
@@ -2446,7 +2595,7 @@ do
             action("Disable every module / restore values",function() cancel(); engine:stop(); update_buttons(); report("All modules disabled") end)
         else
             local options={auto_shoot={{"shot_range","Shoot range / studs"}},rim_range={{"shot_range","Shoot range / studs"}},dribble_glide={{"glide_speed","Glide speed"}},auto_ankle={{"ankle_range","Ankle break range"},{"ankle_delay","Attempt interval / seconds"},{"ankle_combo","Dribble inputs"}},dribble_macros={{"custom_combo","Custom combo"},{"combo_delay","Combo delay / ms"},{"combo_bind","Combo keybind / F1–F12"}},auto_takeover={{"takeover_threshold","Takeover threshold"}},speed={{"walk_speed","Client walk speed"}},split_speed={{"on_ball_speed","On-ball speed"},{"off_ball_speed","Off-ball speed"}},jump={{"jump_power","Jump power"}},fly={{"fly_speed","Flight speed"}},spin={{"spin_speed","Degrees / second"}},guard={{"guard_target","Target username"},{"guard_distance","Guard spacing"},{"guard_range","Activation range"},{"guard_strength","Guard strength"}},block={{"guard_target","Target username"},{"block_range","Activation range"},{"block_delay","Block delay / seconds"},{"jump_key","Jump / block key"}},rebound={{"rebound_range","Activation range"},{"jump_key","Jump key"}},range_circle={{"range","Range / studs"}},time={{"time","Time / 0-24"}},fov={{"fov","Field of view"}},spectate={{"spectate","Target username"}}}
-            local groups=category=="All" and {"Shooting","Defense","Dribbling","Cosmetics","Player","Visuals","Camera","World"} or {category}
+            local groups=category=="All" and {"Shooting","Defense","Dribbling","Cosmetics","Character","Player","Visuals","Camera","World"} or {category}
             local columns=category=="All" and window.Size.X.Offset>=620 and 2 or 1
             local heights={46,46}
             for _,group in ipairs(groups) do
@@ -2459,6 +2608,23 @@ do
                 local divider=make("Frame",{Position=UDim2.fromOffset(0,32),Size=UDim2.new(1,0,0,1),BackgroundColor3=theme.line,BorderSizePixel=0},card)
                 divider.Visible=not collapsed[group]
                 container=card; y=38
+                if not collapsed[group] and group=="Character" and category=="Character" then
+                    local grid=window.Size.X.Offset>=620 and 3 or 2
+                    for i,entry in ipairs(engine.characters) do
+                        local item=ui.button(card,entry.name,function()
+                            local ok,err=pcall(function() engine:select_character(entry.name) end); if not ok then report(tostring(err)) end
+                            rebuild()
+                        end)
+                        item.Name="Character_"..entry.name
+                        item.Position=UDim2.new(((i-1)%grid)/grid,8,0,38+math.floor((i-1)/grid)*34)
+                        item.Size=UDim2.new(1/grid,-16,0,28)
+                        item.BackgroundColor3=engine.settings.model_preset==entry.name and theme.selected or theme.input
+                        item.TextColor3=engine.settings.model_preset==entry.name and theme.accent or theme.text
+                    end
+                    y=38+math.ceil(#engine.characters/grid)*34+4
+                    local active=engine.registry.active.custom_model
+                    text("Selected: "..engine.settings.model_preset.." · "..(active and active.state.rig_label or "Enable Character skin to load"),12,theme.muted,38)
+                end
                 if not collapsed[group] then
             for _,definition in ipairs(engine.definitions) do
                 if definition.category==group then
@@ -2550,6 +2716,13 @@ do
         local id,section=definition.id,definition.category
         ui.add_search(definition.title,definition.description,function()
             ui.search.Text=""; category=section; expanded=id; choosing=false; ui.show("Modules"); page.CanvasPosition=Vector2.new(0,0); rebuild()
+        end)
+    end
+    for _,entry in ipairs(engine.characters) do
+        ui.add_search(entry.name,"Character skin",function()
+            ui.search.Text=""; category="Character"; choosing=false; expanded="custom_model"
+            local ok,err=pcall(function() engine:select_character(entry.name) end); if not ok then report(tostring(err)) end
+            ui.show("Modules"); page.CanvasPosition=Vector2.new(0,0); rebuild()
         end)
     end
     connect(window:GetPropertyChangedSignal("Size"),function() if page.Visible then rebuild() end end)
