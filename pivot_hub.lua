@@ -412,8 +412,8 @@ local function create_pivot_modules(ctx)
         ball_trail_color="#AAC8FF",ball_trail_lifetime=.35,ball_trail_width=.6,ball_trail_opacity=.7,player_trail_color="#C6CFFF",player_trail_lifetime=.3,player_trail_width=.7,player_trail_opacity=.5,
         ball_color="#D1D6E0",ball_material="SmoothPlastic",ball_reflectance=0,ball_remove_texture=true,ball_glow=true,ball_glow_strength=.8,ball_bloom=.7,court_color="#444C60",court_line_color="#E6E8ED",court_material="SmoothPlastic",court_reflectance=0,court_part_name="CourtFloor",court_color_lines=true,court_remove_texture=true,court_three_color="#E6E8ED",court_free_color="#E6E8ED",court_three_enabled=true,court_free_enabled=true,court_rebuild_markings=true,court_three_radius=34,court_three_angle=128,court_free_radius=8,court_free_distance=21.5,court_corner_depth=6,court_line_width=.18,
         outline_color="#C0C9DC",outline_fill_color="#C0C9DC",outline_opacity=1,outline_fill_opacity=0,outline_through_walls=false,sky_preset="Night",sky_asset="",sky_tint="#8799BB",sky_decay="#283650",sky_stars=3000,sky_density=.22,sky_haze=.5,
-        model_preset="Tung Tung",model_style="Basketball",model_renderer="Viewport",model_high_detail=true,model_show_hair=true,model_show_hats=true,model_show_masks=true,model_show_capes=true,model_show_weapons=true,model_show_extras=true,coverage_radius=12,model_fit_pb=true,model_fit_scale=1.015,model_accessory_scale=1,model_asset="",model_height=6,model_offset=0,model_rotation=0,model_follow_pose=true,model_motion=true,model_hide_avatar=true,
-        theme_custom=false,ui_accent="#C0C9DC",ui_font_size=14,ui_rounding=6,ui_opacity=1,refine_good=true,shot_hud=true},ranges={model_accessory_scale={.5,1.5},coverage_radius={4,20},model_fit_scale={.95,1.12},court_three_radius={20,45},court_three_angle={90,180},court_free_radius={3,12},court_free_distance={10,30},court_corner_depth={0,12},court_line_width={.05,.8},ball_glow_strength={.05,1},ball_bloom={0,2},crosshair_size={2,24},crosshair_gap={0,20},crosshair_thickness={1,6},crosshair_opacity={.1,1},ball_trail_lifetime={.05,2},ball_trail_width={.1,4},ball_trail_opacity={.05,1},player_trail_lifetime={.05,2},player_trail_width={.1,4},player_trail_opacity={.05,1},ball_reflectance={0,1},court_reflectance={0,1},outline_opacity={0,1},outline_fill_opacity={0,1},sky_stars={0,5000},sky_density={0,.6},sky_haze={0,5},model_height={2,12},model_offset={-6,6},model_rotation={0,360},ui_font_size={14,20},ui_rounding={0,14},ui_opacity={.2,1},guard_strength={.5,2},block_delay={0,.5},shot_range={5,60},glide_speed={4,60},ankle_range={2,20},ankle_delay={.5,5},combo_delay={20,500},ping_factor={0,1},takeover_threshold={1,100},walk_speed={4,60},jump_power={10,120},fly_speed={4,100},spin_speed={10,360},fov={40,110},time={0,24},range={5,60},esp_distance={30,1000},guard_distance={2,10},guard_range={5,60},block_range={3,18},steal_range={2,8},on_ball_speed={4,60},off_ball_speed={4,60},rebound_range={3,15}},definitions={},recording={version=1,steps={}}}
+        model_preset="Tung Tung",model_style="Basketball",model_renderer="Viewport",model_high_detail=true,model_show_hair=true,model_show_hats=true,model_show_masks=true,model_show_capes=true,model_show_weapons=true,model_show_extras=true,coverage_radius=12,model_fit_pb=true,model_fit_scale=1.015,model_accessory_scale=1,model_face_size=.86,model_face_width=1,model_face_x=0,model_face_y=0,model_asset="",model_height=6,model_offset=0,model_rotation=0,model_follow_pose=true,model_motion=true,model_hide_avatar=true,
+        theme_custom=false,ui_accent="#C0C9DC",ui_font_size=14,ui_rounding=6,ui_opacity=1,refine_good=true,shot_hud=true},ranges={model_face_size={.5,1.2},model_face_width={.65,1.35},model_face_x={-.3,.3},model_face_y={-.3,.3},model_accessory_scale={.5,1.5},coverage_radius={4,20},model_fit_scale={.95,1.12},court_three_radius={20,45},court_three_angle={90,180},court_free_radius={3,12},court_free_distance={10,30},court_corner_depth={0,12},court_line_width={.05,.8},ball_glow_strength={.05,1},ball_bloom={0,2},crosshair_size={2,24},crosshair_gap={0,20},crosshair_thickness={1,6},crosshair_opacity={.1,1},ball_trail_lifetime={.05,2},ball_trail_width={.1,4},ball_trail_opacity={.05,1},player_trail_lifetime={.05,2},player_trail_width={.1,4},player_trail_opacity={.05,1},ball_reflectance={0,1},court_reflectance={0,1},outline_opacity={0,1},outline_fill_opacity={0,1},sky_stars={0,5000},sky_density={0,.6},sky_haze={0,5},model_height={2,12},model_offset={-6,6},model_rotation={0,360},ui_font_size={14,20},ui_rounding={0,14},ui_opacity={.2,1},guard_strength={.5,2},block_delay={0,.5},shot_range={5,60},glide_speed={4,60},ankle_range={2,20},ankle_delay={.5,5},combo_delay={20,500},ping_factor={0,1},takeover_threshold={1,100},walk_speed={4,60},jump_power={10,120},fly_speed={4,100},spin_speed={10,360},fov={40,110},time={0,24},range={5,60},esp_distance={30,1000},guard_distance={2,10},guard_range={5,60},block_range={3,18},steal_range={2,8},on_ball_speed={4,60},off_ball_speed={4,60},rebound_range={3,15}},definitions={},recording={version=1,steps={}}}
     local registry=Core.module_registry(ctx.report); Engine.registry=registry
     local players,input,run=ctx.players,ctx.input,ctx.run
     local lighting=game:GetService("Lighting")
@@ -1559,6 +1559,20 @@ local function create_pivot_modules(ctx)
         if has("hat headband crown helmet") or kind=="Hat" then return "hats" end
         if has("accessory handle") or kind then return "extras" end
     end
+    function Engine:align_costume_faces(state,s)
+        for _,entry in ipairs(state.face_layers or {}) do
+            local head=entry.head; local face=entry.face
+            if face.Parent==head then
+                local width=math.max(.01,head.Size.X); local height=math.max(.01,head.Size.Y)
+                local tile_u=width/s.model_face_size/s.model_face_width
+                local tile_v=height/s.model_face_size
+                -- Center the image in the actual head bounds before applying user offsets.
+                face.StudsPerTileU=tile_u; face.StudsPerTileV=tile_v
+                face.OffsetStudsU=(tile_u-width)/2-width*s.model_face_x
+                face.OffsetStudsV=(tile_v-height)/2+height*s.model_face_y
+            end
+        end
+    end
     local function build_pb_costume(donor,source,scope,s,captured_joints)
         local basketball=s.model_style=="Basketball"
         local sasuke=basketball and s.model_preset=="Sasuke"
@@ -1792,6 +1806,19 @@ local function create_pivot_modules(ctx)
         local current=assert(root(),"Enter a court first"); model:PivotTo(current.CFrame)
         local rig_type=motors>0 and (model:FindFirstChild("UpperTorso",true) and "R15 joint rig" or model:FindFirstChild("Torso",true) and "R6 joint rig" or "Joint rig") or #bones>0 and "Bone rig" or "Static / welded model"
         state={model=model,parts=parts,source=rig(),height=s.model_height,viewport=viewport,camera=camera,last_position=current.Position,phase=0,speed=0,joints=joints,bones=bones,motor_count=motors,rig_scale=rig_scale,pb_costume=pb_costume,fit_scale=s.model_fit_scale,rig_label=pb_costume and (pb_costume.basketball and (pb_costume.texture_error and "PB basketball · custom textures unavailable" or pb_costume.uniform_ready and "PB basketball · Uchiha textures registered" or "PB basketball · live body geometry") or "PB costume · live body proportions and poses") or s.model_fit_pb and motors==0 and #bones==0 and "Single-piece fitted costume · limited limb animation" or rig_type.." · "..motors.." animated joints / "..#bones.." bones"}
+        state.face_layers={}
+        for _,part in ipairs(parts) do
+            if canonical_body(part.Name)=="Head" then
+                for _,original in ipairs(part:GetChildren()) do
+                    if original:IsA("Decal") and original.Face==Enum.NormalId.Front then
+                        local face=Instance.new("Texture"); face.Name=original.Name; face.Face=original.Face; face.Texture=original.Texture
+                        face.Transparency=original.Transparency; face.Color3=original.Color3; face.ZIndex=original.ZIndex
+                        face.Parent=part; original:Destroy(); state.face_layers[#state.face_layers+1]={head=part,face=face}
+                    end
+                end
+            end
+        end
+        Engine:align_costume_faces(state,s)
         state.accessories={}
         for _,part in ipairs(parts) do
             local group=part:GetAttribute("PivotAccessoryGroup") or accessory_group(part)
@@ -1813,6 +1840,7 @@ local function create_pivot_modules(ctx)
         local source=rig(); local part=root(); assert(source and part,"Character unavailable")
         local camera=camera_service(); if state.camera then state.camera.CFrame=camera.CFrame; state.camera.FieldOfView=camera.FieldOfView end
         if state.viewport then state.viewport.Visible=true end
+        Engine:align_costume_faces(state,s)
         for part,original in pairs(state.mesh_fidelity) do pcall(function() part.RenderFidelity=s.model_high_detail and Enum.RenderFidelity.Precise or original end) end
         for _,entry in ipairs(state.accessories) do entry.part.Transparency=s["model_show_"..entry.group] and entry.transparency or 1 end
         if not s.model_fit_pb and s.model_height~=state.height then local factor=s.model_height/state.height; state.model:ScaleTo(state.model:GetScale()*factor); state.rig_scale=state.rig_scale*factor; state.height=s.model_height end
@@ -1840,7 +1868,7 @@ local function create_pivot_modules(ctx)
         court_appearance={{"court_color","Floor / #RRGGBB"},{"court_line_color","Other lines / #RRGGBB"},{"court_three_color","Three-point / #RRGGBB"},{"court_free_color","Free throw / #RRGGBB"},{"court_reflectance","Reflectance"},{"court_part_name","Exact surface part name"}},
         self_outline={{"outline_color","Outline / #RRGGBB"},{"outline_fill_color","Fill / #RRGGBB"},{"outline_opacity","Outline opacity"},{"outline_fill_opacity","Fill opacity"}},
         sky={{"sky_asset","Custom sky model asset ID"},{"sky_tint","Sky tint / #RRGGBB"},{"sky_decay","Atmosphere / #RRGGBB"},{"sky_stars","Star count"},{"sky_density","Atmosphere density"},{"sky_haze","Haze"}},
-        custom_model={{"model_asset","Custom model asset ID"},{"model_fit_scale","Costume fit"},{"model_accessory_scale","Accessory size"},{"model_height","Model height / studs"},{"model_offset","Height offset"},{"model_rotation","Rotation"}}
+        custom_model={{"model_asset","Custom model asset ID"},{"model_fit_scale","Costume fit"},{"model_accessory_scale","Accessory size"},{"model_face_size","Face size"},{"model_face_width","Face width"},{"model_face_x","Face left / right"},{"model_face_y","Face up / down"},{"model_height","Model height / studs"},{"model_offset","Height offset"},{"model_rotation","Rotation"}}
     }
     Engine.cosmetic_choices={
         crosshair={{"crosshair_shape","Shape",{"Dot","Cross","Ring"}}},
@@ -2968,6 +2996,8 @@ do
                             action("Copy release diagnostics",function() export(engine.shot_stats) end)
                             toggle_action("Ping compensation",function() return engine.settings.ping_compensation end,function(on) engine.settings.ping_compensation=on end)
                             field("ping_factor","Ping compensation strength")
+                        elseif id=="custom_model" then
+                            action("Reset face alignment",function() engine.settings.model_face_size=.86; engine.settings.model_face_width=1; engine.settings.model_face_x=0; engine.settings.model_face_y=0; rebuild() end)
                         elseif id=="meter_style" then choice("meter_style","Meter style",{"Vertical","Rocket","Bat","Funnel","Hoop","Roblox","None"})
                         elseif id=="guard" then
                             toggle_action("Guard sprint",function() return engine.settings.guard_sprint end,function(on) engine.settings.guard_sprint=on end)
