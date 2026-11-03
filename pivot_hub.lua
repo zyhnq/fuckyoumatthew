@@ -412,8 +412,8 @@ local function create_pivot_modules(ctx)
         ball_trail_color="#AAC8FF",ball_trail_lifetime=.35,ball_trail_width=.6,ball_trail_opacity=.7,player_trail_color="#C6CFFF",player_trail_lifetime=.3,player_trail_width=.7,player_trail_opacity=.5,
         ball_color="#D1D6E0",ball_material="SmoothPlastic",ball_reflectance=0,ball_remove_texture=true,ball_glow=true,ball_glow_strength=.8,ball_bloom=.7,court_color="#444C60",court_line_color="#E6E8ED",court_material="SmoothPlastic",court_reflectance=0,court_part_name="CourtFloor",court_color_lines=true,court_remove_texture=true,court_three_color="#E6E8ED",court_free_color="#E6E8ED",court_three_enabled=true,court_free_enabled=true,court_rebuild_markings=true,court_three_radius=34,court_three_angle=128,court_free_radius=8,court_free_distance=21.5,court_corner_depth=6,court_line_width=.18,
         outline_color="#C0C9DC",outline_fill_color="#C0C9DC",outline_opacity=1,outline_fill_opacity=0,outline_through_walls=false,sky_preset="Night",sky_asset="",sky_tint="#8799BB",sky_decay="#283650",sky_stars=3000,sky_density=.22,sky_haze=.5,
-        module_preset_name="Favorites",model_preset="Sasuke",model_catalog="Curated",model_save_name="",model_style="Basketball",model_renderer="Native world",model_high_detail=true,model_show_hair=true,model_show_hats=true,model_show_masks=true,model_show_capes=true,model_show_weapons=true,model_show_extras=true,coverage_radius=12,coverage_display="Both",coverage_scale=1,coverage_height=2.6,coverage_response=12,model_fit_pb=true,model_fit_scale=1.015,model_accessory_scale=1,model_asset="",model_height=6,model_offset=0,model_rotation=0,model_follow_pose=true,model_motion=true,model_hide_avatar=true,
-        theme_custom=false,ui_accent="#C0C9DC",ui_font_size=14,ui_rounding=6,ui_opacity=1,refine_good=true,shot_hud=true},ranges={coverage_scale={.75,1.5},coverage_height={1,5},coverage_response={2,25},model_accessory_scale={.5,1.5},coverage_radius={4,20},model_fit_scale={.95,1.12},court_three_radius={20,45},court_three_angle={90,180},court_free_radius={3,12},court_free_distance={10,30},court_corner_depth={0,12},court_line_width={.05,.8},ball_glow_strength={.05,1},ball_bloom={0,2},crosshair_size={2,24},crosshair_gap={0,20},crosshair_thickness={1,6},crosshair_opacity={.1,1},ball_trail_lifetime={.05,2},ball_trail_width={.1,4},ball_trail_opacity={.05,1},player_trail_lifetime={.05,2},player_trail_width={.1,4},player_trail_opacity={.05,1},ball_reflectance={0,1},court_reflectance={0,1},outline_opacity={0,1},outline_fill_opacity={0,1},sky_stars={0,5000},sky_density={0,.6},sky_haze={0,5},model_height={2,12},model_offset={-6,6},model_rotation={0,360},ui_font_size={14,20},ui_rounding={0,14},ui_opacity={.2,1},guard_strength={.5,2},block_delay={0,.5},shot_range={5,60},glide_speed={4,60},ankle_range={2,20},ankle_delay={.5,5},combo_delay={20,500},ping_factor={0,1},takeover_threshold={1,100},walk_speed={4,60},jump_power={10,120},fly_speed={4,100},spin_speed={10,360},fov={40,110},time={0,24},range={5,60},esp_distance={30,1000},guard_distance={2,10},guard_range={5,60},block_range={3,18},steal_range={2,8},on_ball_speed={4,60},off_ball_speed={4,60},rebound_range={3,15}},definitions={},recording={version=1,steps={}}}
+        dribble_sprint=false,dribble_gap=180,dribble_combo_name="My combo",shot_hud_compact=false,module_preset_name="Favorites",model_preset="Sasuke",model_catalog="Curated",model_save_name="",model_style="Basketball",model_renderer="Native world",model_high_detail=true,model_show_hair=true,model_show_hats=true,model_show_masks=true,model_show_capes=true,model_show_weapons=true,model_show_extras=true,coverage_radius=12,coverage_display="Both",coverage_scale=1,coverage_height=2.6,coverage_response=12,model_fit_pb=true,model_fit_scale=1.015,model_accessory_scale=1,model_asset="",model_height=6,model_offset=0,model_rotation=0,model_follow_pose=true,model_motion=true,model_hide_avatar=true,
+        theme_custom=false,ui_accent="#C0C9DC",ui_font_size=14,ui_rounding=6,ui_opacity=1,refine_good=true,shot_hud=true},ranges={dribble_gap={80,1200},coverage_scale={.75,1.5},coverage_height={1,5},coverage_response={2,25},model_accessory_scale={.5,1.5},coverage_radius={4,20},model_fit_scale={.95,1.12},court_three_radius={20,45},court_three_angle={90,180},court_free_radius={3,12},court_free_distance={10,30},court_corner_depth={0,12},court_line_width={.05,.8},ball_glow_strength={.05,1},ball_bloom={0,2},crosshair_size={2,24},crosshair_gap={0,20},crosshair_thickness={1,6},crosshair_opacity={.1,1},ball_trail_lifetime={.05,2},ball_trail_width={.1,4},ball_trail_opacity={.05,1},player_trail_lifetime={.05,2},player_trail_width={.1,4},player_trail_opacity={.05,1},ball_reflectance={0,1},court_reflectance={0,1},outline_opacity={0,1},outline_fill_opacity={0,1},sky_stars={0,5000},sky_density={0,.6},sky_haze={0,5},model_height={2,12},model_offset={-6,6},model_rotation={0,360},ui_font_size={14,20},ui_rounding={0,14},ui_opacity={.2,1},guard_strength={.5,2},block_delay={0,.5},shot_range={5,60},glide_speed={4,60},ankle_range={2,20},ankle_delay={.5,5},combo_delay={20,500},ping_factor={0,1},takeover_threshold={1,100},walk_speed={4,60},jump_power={10,120},fly_speed={4,100},spin_speed={10,360},fov={40,110},time={0,24},range={5,60},esp_distance={30,1000},guard_distance={2,10},guard_range={5,60},block_range={3,18},steal_range={2,8},on_ball_speed={4,60},off_ball_speed={4,60},rebound_range={3,15}},definitions={},recording={version=1,steps={}}}
     local registry=Core.module_registry(ctx.report); Engine.registry=registry
     local players,input,run=ctx.players,ctx.input,ctx.run
     local lighting=game:GetService("Lighting")
@@ -893,7 +893,7 @@ local function create_pivot_modules(ctx)
             end
         end)
         scope:defer(function() link:Disconnect() end)
-    end})
+    end,conflicts={"dribble_library"}})
     add("auto_ankle","Auto ankle breaker","Dribbling","Attempts your dribble combo near an opponent; the game decides ankle breaks",{start=function(scope,s)
         local _,keyboard=client_parts(); assert(keyboard.Services.InputService.Dribble,"Dribble endpoint unavailable")
         assert(s.ankle_combo:match("^[ZXCVH]+$") and #s.ankle_combo<=8,"Use up to 8 Z/X/C/V/H inputs")
@@ -903,7 +903,7 @@ local function create_pivot_modules(ctx)
         if not ctx.runner.current and not input:GetFocusedTextBox() and held_ball(rig()) and attributes.Action=="" and opponent_near(s.ankle_range,false) and os.clock()-state.last>=s.ankle_delay then
             state.last=os.clock(); state.keyboard.Services.InputService.Dribble:Fire(s.ankle_combo,true,c.Movement and c.Movement.lastMoveDirection or Vector3.zero)
         end
-    end,interval=.1})
+    end,interval=.1,conflicts={"dribble_library"}})
     add("dribble_glide","Dribble glide","Dribbling","Adjusts the local movement velocity during dribble actions",{start=function()
         local c=local_state(); assert(c.Movement and c.Movement.MovementVelocity,"Movement velocity unavailable")
     end,step=function(scope,_,s)
@@ -2030,6 +2030,130 @@ local function create_pivot_modules(ctx)
     }
     Engine.cosmetic_toggles={ball_appearance={{"ball_remove_texture","Remove ball texture"},{"ball_glow","Neon glow"}},court_appearance={{"court_color_lines","Customize court markings"},{"court_remove_texture","Remove floor textures"},{"court_three_enabled","Custom three-point color"},{"court_free_enabled","Custom free-throw color"},{"court_rebuild_markings","Rebuild baked markings"}},self_outline={{"outline_through_walls","Show through walls"}},custom_model={{"model_show_hair","Show hair"},{"model_show_hats","Show hats / headbands"},{"model_show_masks","Show masks / glasses"},{"model_show_capes","Show capes / coats"},{"model_show_weapons","Show weapons"},{"model_show_extras","Show other accessories"},{"model_high_detail","High mesh detail"},{"model_fit_pb","Fit costume to PB body"},{"model_motion","Single-piece motion"},{"model_hide_avatar","Hide your normal avatar"},{"model_follow_pose","Follow player pose"}}}
 
+    Engine.dribble_moves={
+        {id="cross_left",name="Crossover right → left",code="Z"},{id="cross_right",name="Crossover left → right",code="C"},
+        {id="hesi_left",name="Hesitation left",code="Z"},{id="hesi_right",name="Hesitation right",code="C"},
+        {id="double_left",name="Double crossover left",code="ZZ"},{id="double_right",name="Double crossover right",code="CC"},
+        {id="behind_left",name="Behind the back left",code="CX"},{id="behind_right",name="Behind the back right",code="ZX"},
+        {id="double_behind_left",name="Double behind left",code="XC"},{id="double_behind_right",name="Double behind right",code="XZ"},
+        {id="stepback",name="Stepback",code="X"},{id="snatchback",name="Snatchback",code="XX"},{id="half_spin",name="Half spin",code="V"},
+        {id="spin_left",name="Spin left",code="CXZ"},{id="spin_right",name="Spin right",code="ZXC"},
+        {id="tween_left",name="Tween / between left",code="VZ"},{id="tween_right",name="Tween / between right",code="VC"},
+        {id="shammgod",name="Shammgod",code="VV"},{id="switch_hand",name="Switch hand",code="H"}}
+    local moves={}; for _,move in ipairs(Engine.dribble_moves) do moves[move.id]=move end
+    Engine.dribble_library={version=1,bindings={},combos={}}; Engine.dribble_draft={}
+    local function reserved(key)
+        if key=="F8" then return true end
+        for _,value in ipairs(ctx.reserved_keys and ctx.reserved_keys() or {"F6","F7"}) do if key==value then return true end end
+    end
+    local function valid_key(key)
+        if key=="None" then return true end
+        if type(key)~="string" then return false end
+        local number=tonumber(key:match("^F(%d+)$"))
+        return number and number>=1 and number<=12 and key=="F"..tostring(number) and not reserved(key)
+    end
+    function Engine:validate_dribble_library(data)
+        if type(data)~="table" or data.version~=1 or type(data.bindings)~="table" or type(data.combos)~="table" then return nil,"Invalid dribble library" end
+        local result={version=1,bindings={},combos={}}; local keys={}; local names={}
+        local function bind(key)
+            if not valid_key(key) then return false end
+            if key~="None" then if keys[key] then return false end; keys[key]=true end
+            return true
+        end
+        for id,key in pairs(data.bindings) do if not moves[id] or not bind(key) then return nil,"Unknown move, reserved key or duplicate binding" end; result.bindings[id]=key end
+        local count=0; for key in pairs(data.combos) do if type(key)~="number" or key%1~=0 or key<1 then return nil,"Combos must be a list" end; count=count+1 end
+        if count>16 then return nil,"Save up to 16 combos" end
+        for i=1,count do
+            local combo=data.combos[i]
+            if type(combo)~="table" or type(combo.name)~="string" or #combo.name<1 or #combo.name>40 or not combo.name:find("%S") or combo.name:find("[%c]") or names[combo.name:lower()] or not bind(combo.key) then return nil,"Invalid combo name or binding" end
+            local gap=Core.bounded(combo.gap,80,1200); if not gap or type(combo.steps)~="table" or #combo.steps<1 or #combo.steps>12 then return nil,"Use 1–12 moves and a gap of 80–1200 ms" end
+            local steps={}; for _,step in ipairs(combo.steps) do if type(step)~="table" or not moves[step.move] or type(step.sprint)~="boolean" then return nil,"Invalid combo move" end; steps[#steps+1]={move=step.move,sprint=step.sprint} end
+            names[combo.name:lower()]=true; result.combos[i]={name=combo.name,key=combo.key,gap=gap,steps=steps}
+        end
+        return result
+    end
+    function Engine:save_dribble_library()
+        assert(type(writefile)=="function","File saving unavailable")
+        writefile("pivot_dribbles.json",game:GetService("HttpService"):JSONEncode(self.dribble_library))
+    end
+    local function persist() local ok=pcall(function() Engine:save_dribble_library() end); if not ok then ctx.report("Dribble library kept for this session; file saving unavailable") end end
+    function Engine:read_dribble_library()
+        assert(type(readfile)=="function","File loading unavailable"); local raw=readfile("pivot_dribbles.json"); assert(#raw<=65536,"Library exceeds 64 KB")
+        local value,err=self:validate_dribble_library(game:GetService("HttpService"):JSONDecode(raw)); assert(value,err); self.dribble_library=value
+    end
+    function Engine:cycle_dribble_binding(id,index)
+        local target=index and assert(self.dribble_library.combos[index],"Combo not found") or self.dribble_library.bindings
+        assert(index or moves[id],"Move not found")
+        local current=index and target.key or target[id] or "None"; local options={"None","F1","F2","F3","F4","F5","F6","F7","F8","F9","F10","F11","F12"}; local at=1
+        for i,key in ipairs(options) do if key==current then at=i end end
+        for offset=1,#options do
+            local key=options[(at+offset-1)%#options+1]
+            if index then target.key=key else target[id]=key end
+            if self:validate_dribble_library(self.dribble_library) then persist(); return key end
+        end
+        if index then target.key=current else target[id]=current end; error("No available key")
+    end
+    function Engine:add_dribble_move(id)
+        assert(moves[id],"Move not found"); assert(#self.dribble_draft<12,"Combo already has 12 moves")
+        self.dribble_draft[#self.dribble_draft+1]={move=id,sprint=self.settings.dribble_sprint}
+    end
+    function Engine:save_dribble_combo(name)
+        name=tostring(name or ""):match("^%s*(.-)%s*$"); if name=="" then name="My combo" end
+        local combo={name=name,key="None",gap=self.settings.dribble_gap,steps={}}
+        for _,step in ipairs(self.dribble_draft) do combo.steps[#combo.steps+1]={move=step.move,sprint=step.sprint} end
+        local data={version=1,bindings=self.dribble_library.bindings,combos={}}; local replaced=false
+        for i,old in ipairs(self.dribble_library.combos) do if old.name:lower()==name:lower() then combo.key=old.key; data.combos[i]=combo; replaced=true else data.combos[i]=old end end
+        if not replaced then data.combos[#data.combos+1]=combo end
+        local value,err=self:validate_dribble_library(data); assert(value,err); self.dribble_library=value; persist(); ctx.report("Saved combo: "..name)
+    end
+    function Engine:remove_dribble_combo(index) table.remove(self.dribble_library.combos,index); persist() end
+    function Engine:edit_dribble_combo(index)
+        local combo=assert(self.dribble_library.combos[index],"Combo not found"); self.dribble_draft={}
+        for _,step in ipairs(combo.steps) do self.dribble_draft[#self.dribble_draft+1]={move=step.move,sprint=step.sprint} end
+        self.settings.dribble_combo_name=combo.name; self.settings.dribble_gap=combo.gap
+    end
+    function Engine:play_dribble_steps(steps,gap)
+        assert(registry.active.dribble_library,"Enable Dribble library first")
+        assert(not self.dribble_job and not ctx.runner.current,"Another combo is running")
+        assert(type(steps)=="table" and #steps>0,"Add a move first")
+        local controller,keyboard=client_parts(); local endpoint=assert(keyboard.Services.InputService.Dribble,"Dribble input unavailable")
+        local job={cancelled=false}; self.dribble_job=job
+        task.spawn(function()
+            local ok,err=pcall(function()
+                for i,step in ipairs(steps) do
+                    if job.cancelled then break end
+                    assert(registry.active.dribble_library and not input:GetFocusedTextBox() and not ctx.runner.current,"Dribble combo paused")
+                    local character=assert(controller:GetCharacter(),"Enter a court first"); local a=character.data and character.data.Attributes or {}
+                    assert(held_ball(rig()) or rig() and rig():GetAttribute("Basketball")==true,"Hold the ball first")
+                    assert(a.Action~="Shooting" and a.Action~="Dunking","Finish the shot before dribbling")
+                    local move=assert(moves[step.move],"Unknown move")
+                    if move.code=="H" then endpoint:Fire("H") else endpoint:Fire(move.code,step.sprint,character.Movement and character.Movement.lastMoveDirection or Vector3.zero) end
+                    if i<#steps then task.wait(gap/1000) end
+                end
+            end)
+            if self.dribble_job==job then self.dribble_job=nil end
+            if not ok and not job.cancelled then ctx.report(tostring(err)) end
+        end)
+        return true
+    end
+    function Engine:play_dribble_move(id) assert(moves[id],"Move not found"); return self:play_dribble_steps({{move=id,sprint=self.settings.dribble_sprint}},self.settings.dribble_gap) end
+    add("dribble_library","Dribble library","Dribbling","Named input presets, individual function-key bindings and saved chains. Move outcome depends on ball hand, movement and equipped animations",{start=function(scope)
+        local value,err=Engine:validate_dribble_library(Engine.dribble_library); assert(value,err)
+        local _,keyboard=client_parts(); assert(keyboard.Services.InputService.Dribble,"Dribble input unavailable")
+        scope:defer(function() if Engine.dribble_job then Engine.dribble_job.cancelled=true; Engine.dribble_job=nil end end)
+        local connection=input.InputBegan:Connect(function(event,processed)
+            if processed or input:GetFocusedTextBox() or ctx.runner.current or Engine.dribble_job then return end
+            local key=event.KeyCode.Name; if reserved(key) then return end
+            local ok,err=pcall(function()
+                for id,binding in pairs(Engine.dribble_library.bindings) do if binding~="None" and binding==key then Engine:play_dribble_move(id); return end end
+                for _,combo in ipairs(Engine.dribble_library.combos) do if combo.key~="None" and combo.key==key then Engine:play_dribble_steps(combo.steps,combo.gap); return end end
+            end)
+            if not ok then ctx.report(tostring(err)) end
+        end)
+        scope:defer(function() connection:Disconnect() end)
+    end,conflicts={"dribble_macros","auto_ankle"}})
+    if type(readfile)=="function" then pcall(function() Engine:read_dribble_library() end) end
+
     Engine.shot_stats={total=0,perfect=0,good=0,early=0,late=0,skipped=0,releases=0,unconfirmed=0,last="Waiting for a shot",history={}}
     function Engine:record_shot(event)
         local stats=self.shot_stats; local kind=event.kind
@@ -2047,16 +2171,35 @@ local function create_pivot_modules(ctx)
         stats.history[#stats.history+1]=entry; if #stats.history>100 then table.remove(stats.history,1) end
     end
     function Engine:attach_shot_hud(scope)
-        local label=Instance.new("TextLabel"); label.Name="PivotShotStats"; label.AnchorPoint=Vector2.new(1,0); label.Position=UDim2.new(1,-20,0,20); label.Size=UDim2.fromOffset(290,84)
-        label.BackgroundColor3=Color3.fromRGB(24,26,30); label.BackgroundTransparency=.15; label.BorderSizePixel=0; label.TextColor3=Color3.fromRGB(230,232,237); label.Font=Enum.Font.SourceSans; label.TextSize=18; label.TextWrapped=true; label.Parent=ctx.gui
-        local corner=Instance.new("UICorner"); corner.CornerRadius=UDim.new(0,6); corner.Parent=label
-        scope:defer(function() label:Destroy() end)
-        local function update()
-            local stats=self.shot_stats; local rate=stats.total>0 and string.format("%.1f%%",stats.perfect/stats.total*100) or "--"
-            label.Visible=self.settings.shot_hud
-            label.Text="Perfect rate: "..rate.."  ("..stats.perfect.."/"..stats.total..")\n"..stats.last.."\nSkipped: "..stats.skipped.." · Unconfirmed: "..stats.unconfirmed
+        local panel=Instance.new("Frame"); panel.Name="PivotShotStats"; panel.AnchorPoint=Vector2.new(1,0); panel.Position=UDim2.new(1,-18,0,18); panel.Size=UDim2.fromOffset(292,116); panel.BackgroundColor3=Color3.fromRGB(20,24,30); panel.BackgroundTransparency=.06; panel.BorderSizePixel=0; panel.Parent=ctx.gui
+        local corner=Instance.new("UICorner"); corner.CornerRadius=UDim.new(0,8); corner.Parent=panel
+        local stroke=Instance.new("UIStroke"); stroke.Color=Color3.fromRGB(49,57,69); stroke.Thickness=1; stroke.Parent=panel
+        local function text(name,value,x,y,width,height,size,color)
+            local label=Instance.new("TextLabel"); label.Name=name; label.Text=value; label.Position=UDim2.fromOffset(x,y); label.Size=UDim2.fromOffset(width,height); label.BackgroundTransparency=1; label.TextColor3=color; label.TextSize=size; label.Font=Enum.Font.SourceSans; label.TextXAlignment=Enum.TextXAlignment.Left; label.TextWrapped=false; label.TextTruncate=Enum.TextTruncate.AtEnd; label.Parent=panel; return label
         end
-        update(); local connection=run.Heartbeat:Connect(update); scope:defer(function() connection:Disconnect() end)
+        local title=text("Title","SHOOTING",14,8,210,18,12,Color3.fromRGB(154,166,183)); title.Font=Enum.Font.SourceSansSemibold
+        local rate=text("Rate","--",14,26,120,32,30,Color3.fromRGB(237,242,247)); rate.Font=Enum.Font.SourceSansSemibold
+        local count=text("Confirmed","0 / 0 perfect",146,33,130,22,14,Color3.fromRGB(170,182,199))
+        local track=Instance.new("Frame"); track.Position=UDim2.fromOffset(14,62); track.Size=UDim2.new(1,-28,0,3); track.BackgroundColor3=Color3.fromRGB(41,48,59); track.BorderSizePixel=0; track.Parent=panel
+        local fill=Instance.new("Frame"); fill.Name="PerfectBar"; fill.Size=UDim2.fromScale(0,1); fill.BackgroundColor3=Color3.fromRGB(147,189,165); fill.BorderSizePixel=0; fill.Parent=track
+        local result=text("Result","Waiting for a shot",14,72,264,18,14,Color3.fromRGB(218,226,236))
+        local details=text("Details","Skipped 0    Unconfirmed 0",14,94,264,16,12,Color3.fromRGB(142,156,176))
+        local collapse=Instance.new("TextButton"); collapse.Name="Collapse"; collapse.Position=UDim2.new(1,-32,0,5); collapse.Size=UDim2.fromOffset(25,25); collapse.BackgroundTransparency=1; collapse.Text="−"; collapse.TextColor3=Color3.fromRGB(170,182,199); collapse.TextSize=21; collapse.Font=Enum.Font.SourceSans; collapse.Parent=panel
+        scope:defer(function() panel:Destroy() end)
+        local function update()
+            local stats=self.shot_stats; local ratio=stats.total>0 and stats.perfect/stats.total or 0
+            local percentage=stats.total>0 and string.format("%.1f%%",ratio*100) or "--"
+            local compact=self.settings.shot_hud_compact
+            panel.Visible=self.settings.shot_hud; panel.Size=UDim2.fromOffset(compact and 210 or 292,compact and 36 or 116)
+            title.Text=compact and "Shooting  ·  "..percentage or "SHOOTING"; title.Size=UDim2.fromOffset(compact and 166 or 210,18); title.TextSize=compact and 14 or 12
+            collapse.Text=compact and "+" or "−"
+            for _,object in ipairs({rate,count,track,result,details}) do object.Visible=not compact end
+            rate.Text=percentage; count.Text=stats.perfect.." / "..stats.total.." perfect"; fill.Size=UDim2.fromScale(math.max(0,math.min(1,ratio)),1)
+            result.Text=stats.last; details.Text="Skipped "..stats.skipped.."    Unconfirmed "..stats.unconfirmed
+        end
+        local click=collapse.Activated:Connect(function() self.settings.shot_hud_compact=not self.settings.shot_hud_compact; update() end); scope:defer(function() click:Disconnect() end)
+        local elapsed=0; local connection=run.Heartbeat:Connect(function(dt) elapsed=elapsed+dt; if elapsed>=.1 then elapsed=0; update() end end)
+        scope:defer(function() connection:Disconnect() end); update()
     end
 
     Engine.emit=emit; Engine.held=held
@@ -2120,9 +2263,10 @@ local function create_pivot_modules(ctx)
         local value,err=self:validate_saved_modules(game:GetService("HttpService"):JSONDecode(raw)); assert(value,err)
         self.saved_modules=value; return #value.presets
     end
-    function Engine:save_enabled_modules(name,selection)
+    function Engine:save_enabled_modules(name)
         name=tostring(name or ""):match("^%s*(.-)%s*$"); if name=="" then name="Favorites" end
-        local captured=selection or capture_modules(name)
+        local captured=capture_modules(name)
+        assert(#captured.enabled>0,"No modules are enabled. Turn on the modules you want, then save again")
         local item={name=name,enabled=captured.enabled,settings=captured.settings}; local value={version=1,presets={}}; local replaced=false
         for i,old in ipairs(self.saved_modules.presets) do if old.name:lower()==name:lower() then value.presets[i]=item; replaced=true else value.presets[i]=old end end
         if not replaced then value.presets[#value.presets+1]=item end
@@ -2133,6 +2277,7 @@ local function create_pivot_modules(ctx)
     function Engine:load_saved_modules(index)
         local data,err=self:validate_saved_modules(self.saved_modules); assert(data,err)
         local item=assert(data.presets[index],"Saved module preset not found"); local previous=capture_modules("Previous")
+        assert(#item.enabled>0,"This preset is empty. Enable the modules you want and save it again")
         assert(ctx.runner:cancel(),"Input release pending; press F8 and retry")
         assert(self:stop(),"Input release pending; press F8 and retry")
         for key,value in pairs(item.settings) do self.settings[key]=value end
@@ -2517,8 +2662,8 @@ do
         object.Parent=parent; return object
     end
     local function rgb(r,g,b) return Color3.fromRGB(r,g,b) end
-    local theme={base=rgb(20,21,24),rail=rgb(20,21,24),panel=rgb(28,30,34),input=rgb(24,26,30),line=rgb(43,46,52),
-        text=rgb(230,232,237),muted=rgb(145,151,163),accent=rgb(192,201,220),selected=rgb(39,44,54),green=rgb(159,190,170)}
+    local theme={base=rgb(18,20,24),rail=rgb(18,20,24),panel=rgb(25,29,35),input=rgb(21,24,29),line=rgb(43,50,61),
+        text=rgb(236,241,247),muted=rgb(149,161,178),accent=rgb(192,201,220),selected=rgb(36,45,57),green=rgb(159,190,170)}
     local function corner(object,n)
         local c=object:FindFirstChildWhichIsA("UICorner") or make("UICorner",{},object); c.CornerRadius=UDim.new(0,n)
     end
@@ -2796,7 +2941,7 @@ do
     local function fit()
         local camera=workspace.CurrentCamera; if not camera then return end
         local v=camera.ViewportSize
-        local w=math.max(340,math.min(760,v.X-24)); local h=math.max(430,math.min(580,v.Y-32))
+        local w=math.max(340,math.min(800,v.X-24)); local h=math.max(430,math.min(620,v.Y-32))
         scale.Scale=math.min(1,(v.X-12)/w,(v.Y-12)/h); shell.Size=UDim2.fromOffset(w,h)
         rail_line.Size=UDim2.new(1,-40,0,1); top_line.Size=UDim2.new(1,-40,0,1)
         layout_nav()
@@ -2852,7 +2997,7 @@ do
     end)
     local function set_theme(mode)
         local palettes={
-            Graphite={base=rgb(20,21,24),rail=rgb(20,21,24),panel=rgb(28,30,34),input=rgb(24,26,30),line=rgb(43,46,52),text=rgb(230,232,237),muted=rgb(145,151,163),accent=rgb(192,201,220),selected=rgb(39,44,54),green=rgb(159,190,170)},
+            Graphite={base=rgb(18,20,24),rail=rgb(18,20,24),panel=rgb(25,29,35),input=rgb(21,24,29),line=rgb(43,50,61),text=rgb(236,241,247),muted=rgb(149,161,178),accent=rgb(192,201,220),selected=rgb(36,45,57),green=rgb(159,190,170)},
             Slate={base=rgb(23,28,35),rail=rgb(23,28,35),panel=rgb(31,38,47),input=rgb(26,32,40),line=rgb(48,57,70),text=rgb(229,234,242),muted=rgb(151,163,182),accent=rgb(172,193,220),selected=rgb(43,54,69),green=rgb(159,190,170)},
             Light={base=rgb(241,242,244),rail=rgb(241,242,244),panel=rgb(250,250,251),input=rgb(232,234,238),line=rgb(213,216,223),text=rgb(33,37,44),muted=rgb(102,110,124),accent=rgb(67,83,111),selected=rgb(221,227,237),green=rgb(64,124,88)}
         }
@@ -2899,7 +3044,7 @@ end
 
 do
     local ui=PivotUI
-    local engine=Core.create_pivot_modules({players=players,player=player,input=input,run=run_service,runner=runner,gui=gui,connect=connect,report=report})
+    local engine=Core.create_pivot_modules({players=players,player=player,input=input,run=run_service,runner=runner,gui=gui,connect=connect,report=report,reserved_keys=function() return {config.shot,config.combo,config.menu,"F8"} end})
     PivotModules=engine
     local theme=ui.theme
     local function paint_switch(button,on)
@@ -2910,6 +3055,7 @@ do
         ui.animate(track,{BackgroundColor3=on and theme.accent or theme.line})
         ui.animate(knob,{BackgroundColor3=on and theme.base or theme.muted,Position=UDim2.fromOffset(on and 20 or 2,2)})
         local row=button.Parent
+        local marker=row and row:FindFirstChild("StateMark"); if marker then marker.Visible=on end
         if row and row.Name:sub(1,10)=="ModuleRow_" then row.BackgroundColor3=on and theme.selected or theme.panel; row.BackgroundTransparency=on and .4 or 1 end
     end
     local function switch(parent,callback)
@@ -2927,10 +3073,10 @@ do
     local container=page
     local collapsed={}
     local expanded,choosing,section_button,record_tools,court_alignment
-    local character_open=false; local library_open=false; local module_preset_draft
+    local dribble_editor_open=false; local character_open=false; local library_open=false; local module_selection_label
     local auxiliary={}; local capture_switch; local character_status; local library_status
     local function clear()
-        for _,object in ipairs(rows) do object:Destroy() end; rows={}; fields={}; auxiliary={}; character_status=nil; library_status=nil; y=46
+        for _,object in ipairs(rows) do object:Destroy() end; rows={}; fields={}; auxiliary={}; character_status=nil; library_status=nil; module_selection_label=nil; y=46
     end
     local function own(object) rows[#rows+1]=object; return object end
     local function text(value,size,color,height)
@@ -3046,6 +3192,10 @@ do
         for _,entry in ipairs(auxiliary) do if entry.button.Parent then paint_switch(entry.button,entry.read()) end end
         if capture_switch then paint_switch(capture_switch,capture) end
         if character_status and character_status.Parent then local active=engine.registry.active.custom_model; character_status.Text="Selected: "..engine.settings.model_preset.." · "..(active and active.state.rig_label or "Enable Character skin to load") end
+        if module_selection_label and module_selection_label.Parent then
+            local names={}; for _,definition in ipairs(engine.definitions) do if engine.registry.active[definition.id] then names[#names+1]=definition.title end end
+            module_selection_label.Text="Selected: "..(#names>0 and table.concat(names,", ") or "None — turn on your modules before saving")
+        end
         if library_status and library_status.Parent then
             local progress=engine.model_preload; local cached=0; for _ in pairs(engine.model_cache) do cached=cached+1 end
             library_status.Text=progress.busy and ("Preloading "..progress.done.." / "..progress.total) or (cached.." cached · "..progress.failed.." preload failures")
@@ -3122,7 +3272,7 @@ do
         clear(); buttons={}
         if section_button then section_button.Text=(category=="All" and "All modules" or category).."  ▾" end
         if choosing then
-            for _,name in ipairs(tabs) do action(name,function() category=name; if name=="Saved modules" then module_preset_draft=engine:capture_enabled_modules() end; choosing=false; expanded=nil; page.CanvasPosition=Vector2.new(0,0); rebuild() end) end
+            for _,name in ipairs(tabs) do action(name,function() category=name; choosing=false; expanded=nil; page.CanvasPosition=Vector2.new(0,0); rebuild() end) end
         elseif category=="Recorder" then
             text("Z X C V H + Shift / 64 steps / 60 seconds",11,theme.muted)
             toggle_action("Record dribbles",function() return engine.capturing==true end,function(on)
@@ -3142,19 +3292,17 @@ do
             action("Load recording from disk",function() assert(type(readfile)=="function","Disk read unavailable"); local raw=readfile("pivot_recording.json"); assert(#raw<=32768,"Recording exceeds size limit"); local value,err=Core.validate_recording(http:JSONDecode(raw)); assert(value,err); stop_capture(); engine.recording=value; report("Loaded recording") end)
             end
         elseif category=="Saved modules" then
-            module_preset_draft=module_preset_draft or engine:capture_enabled_modules()
-            local selected={}; for _,id in ipairs(module_preset_draft.enabled) do selected[#selected+1]=engine.registry.definitions[id].title end
-            text("Selected: "..(#selected>0 and table.concat(selected,", ") or "All modules off"),12,theme.muted,38)
+            module_selection_label=text("Selected: checking enabled modules…",12,theme.muted,38)
             field("module_preset_name","Preset name")
-            action("Save enabled modules",function() engine:save_enabled_modules(engine.settings.module_preset_name,module_preset_draft); rebuild() end)
+            action("Save enabled modules",function() engine:save_enabled_modules(engine.settings.module_preset_name); rebuild() end)
             action("Reload saved module presets",function() local count=engine:read_saved_modules(); report("Loaded "..count.." module presets"); rebuild() end)
             for i,item in ipairs(engine.saved_modules.presets) do
                 local index=i
-                local button=action(item.name.." · "..#item.enabled.." modules · Load",function() engine:load_saved_modules(index); module_preset_draft=engine:capture_enabled_modules(); ui.set_theme(engine.settings.theme_mode); ui.edit_theme(engine.settings); rebuild() end)
+                local button=action(item.name.." · "..#item.enabled.." modules · Load",function() engine:load_saved_modules(index); ui.set_theme(engine.settings.theme_mode); ui.edit_theme(engine.settings); rebuild() end)
                 button.Size=UDim2.new(1,-50,0,30)
                 local remove=own(ui.button(container,"×",function() engine:remove_saved_modules(index); rebuild() end)); remove.Position=UDim2.new(1,-42,0,y-36); remove.Size=UDim2.fromOffset(34,30)
                 local names={}; for _,id in ipairs(item.enabled) do names[#names+1]=engine.registry.definitions[id].title end
-                text(#names>0 and table.concat(names,", ") or "All modules off",11,theme.muted,32)
+                text(#names>0 and table.concat(names,", ") or "Empty preset — enable your modules and save again",11,theme.muted,32)
             end
         elseif category=="Options" then
             text("Settings load without enabling modules.",11,theme.muted)
@@ -3174,6 +3322,7 @@ do
             local groups=category=="All" and {"Shooting","Defense","Dribbling","Cosmetics","Character","Player","Visuals","Camera","World"} or {category}
             local columns=category=="All" and window.Size.X.Offset>=620 and 2 or 1
             local heights={46,46}
+            local display_definitions={}; for _,definition in ipairs(engine.definitions) do if definition.id=="dribble_library" then table.insert(display_definitions,1,definition) else display_definitions[#display_definitions+1]=definition end end
             for _,group in ipairs(groups) do
                 local column=columns==2 and (heights[1]<=heights[2] and 1 or 2) or 1
                 local card=own(make("Frame",{Name="Group_"..group,Position=UDim2.new((column-1)/columns,(column-1)*4,0,heights[column]),Size=UDim2.new(1/columns,columns==2 and -10 or -6,0,40),BackgroundColor3=theme.panel,BorderSizePixel=0},page))
@@ -3230,30 +3379,69 @@ do
                     character_status=text("Selected: "..engine.settings.model_preset.." · "..(active and active.state.rig_label or "Enable Character skin to load"),12,theme.muted,38)
                 end
                 if not collapsed[group] then
-            for _,definition in ipairs(engine.definitions) do
+            for _,definition in ipairs(display_definitions) do
                 if definition.category==group then
                     local id=definition.id
-                    local row=own(make("Frame",{Name="ModuleRow_"..id,Position=UDim2.fromOffset(0,y),Size=UDim2.new(1,0,0,30),BackgroundColor3=theme.panel,BackgroundTransparency=1,BorderSizePixel=0},container))
+                    local row=own(make("Frame",{Name="ModuleRow_"..id,Position=UDim2.fromOffset(0,y),Size=UDim2.new(1,0,0,36),BackgroundColor3=theme.panel,BackgroundTransparency=1,BorderSizePixel=0},container))
                     make("UICorner",{CornerRadius=UDim.new(0,5)},row)
-                    local title=ui.label(row,definition.title,12,0,300,30,12,theme.text); title.Size=UDim2.new(1,-89,0,30)
+                    make("Frame",{Name="StateMark",Position=UDim2.fromOffset(3,9),Size=UDim2.fromOffset(2,18),BackgroundColor3=theme.accent,BorderSizePixel=0,Visible=false},row)
+                    local title=ui.label(row,definition.title,12,0,300,36,12,theme.text); title.Font=Enum.Font.SourceSansSemibold; title.Size=UDim2.new(1,-89,0,36)
 
                     local detail=ui.button(row,expanded==id and "−" or "+",function() if expanded==id then expanded=nil else expanded=id end; rebuild() end)
-                    detail.Name="Details"; detail.Position=UDim2.new(1,-76,0,3); detail.Size=UDim2.fromOffset(24,24); detail.BackgroundTransparency=1
+                    detail.Name="Details"; detail.Position=UDim2.new(1,-76,0,6); detail.Size=UDim2.fromOffset(24,24); detail.BackgroundTransparency=1
                     buttons[id]=switch(row,function()
                         if engine.registry.active[id] then engine.registry:disable(id) else local ok,err=engine.registry:enable(id,engine.settings); if not ok then report(tostring(err)) end end
                         update_buttons()
                     end)
-                    buttons[id].Position=UDim2.new(1,-48,0,2)
+                    buttons[id].Position=UDim2.new(1,-48,0,5)
                     connect(row.MouseEnter,function() row.BackgroundColor3=theme.panel; row.BackgroundTransparency=.25 end)
                     connect(row.MouseLeave,function() row.BackgroundColor3=engine.registry.active[id] and theme.selected or theme.panel; row.BackgroundTransparency=engine.registry.active[id] and .4 or 1 end)
-                    y=y+32
+                    y=y+38
                     if expanded==id then
-                        text(definition.description,12,theme.muted,60).TextWrapped=true
+                        text(definition.description,12,theme.muted,id=="dribble_library" and 40 or 60).TextWrapped=true
                         for _,entry in ipairs(options[id] or {}) do field(entry[1],entry[2]) end
                         for _,entry in ipairs((engine.cosmetic_choices or {})[id] or {}) do choice(entry[1],entry[2],entry[3]) end
                         for _,entry in ipairs((engine.cosmetic_fields or {})[id] or {}) do if (entry[1]~="model_asset" or engine.settings.model_preset=="Custom") and (entry[1]~="model_height" or not engine.settings.model_fit_pb) then field(entry[1],entry[2]) end end
                         for _,entry in ipairs((engine.cosmetic_toggles or {})[id] or {}) do local key=entry[1]; if key~="model_follow_pose" or not engine.settings.model_fit_pb then toggle_action(entry[2],function() return engine.settings[key] end,function(on) engine.settings[key]=on; if key=="model_fit_pb" then local active=engine.registry.active.custom_model; if active then engine.registry:disable("custom_model"); local ok,err=engine.registry:enable("custom_model",engine.settings); if not ok then report(tostring(err)) end end; rebuild() end end) end end
-                        if id=="meter_release" then
+                        if id=="dribble_library" then
+                            toggle_action("Sprint variants",function() return engine.settings.dribble_sprint end,function(on) engine.settings.dribble_sprint=on end)
+                            text("Key: bind    +: add to chain    Run: play move",11,theme.muted,24)
+                            action("Combo builder / "..#engine.dribble_draft.." moves"..(dribble_editor_open and "  −" or "  +"),function() dribble_editor_open=not dribble_editor_open; rebuild() end)
+                            if dribble_editor_open then
+                                field("dribble_gap","Gap between moves / ms")
+                                local names={}; for _,step in ipairs(engine.dribble_draft) do for _,move in ipairs(engine.dribble_moves) do if move.id==step.move then names[#names+1]=move.name..(step.sprint and " (sprint)" or "") end end end
+                                text(#names>0 and table.concat(names," → ") or "Add moves from the library below.",11,theme.muted,48)
+                                field("dribble_combo_name","Combo name")
+                                action("Save combo",function() engine:save_dribble_combo(engine.settings.dribble_combo_name); rebuild() end)
+                                action("Run chain",function() engine:play_dribble_steps(engine.dribble_draft,engine.settings.dribble_gap) end)
+                                action("Undo last move",function() table.remove(engine.dribble_draft); rebuild() end)
+                                action("Clear chain",function() engine.dribble_draft={}; rebuild() end)
+                            end
+                            local move_list=make("ScrollingFrame",{Name="DribbleMoveList",Position=UDim2.fromOffset(0,y),Size=UDim2.new(1,-6,0,220),CanvasSize=UDim2.fromOffset(0,#engine.dribble_moves*44),ScrollBarThickness=3,BackgroundTransparency=1,BorderSizePixel=0},container)
+                            for i,move in ipairs(engine.dribble_moves) do
+                                local id=move.id
+                                local row=make("Frame",{Name="Move_"..id,Position=UDim2.fromOffset(0,(i-1)*44),Size=UDim2.new(1,-5,0,40),BackgroundColor3=theme.input,BorderSizePixel=0},move_list)
+                                make("UICorner",{CornerRadius=UDim.new(0,4)},row)
+                                local title=ui.label(row,move.name.."  ·  "..move.code,8,0,100,40,11,theme.text); title.Size=UDim2.new(1,-144,1,0)
+                                local bind=ui.button(row,engine.dribble_library.bindings[id] or "None",function() local ok,err=pcall(function() engine:cycle_dribble_binding(id) end); if not ok then report(tostring(err)) end; rebuild() end)
+                                bind.Name="MoveBind_"..id; bind.Position=UDim2.new(1,-130,0,5); bind.Size=UDim2.fromOffset(58,30)
+                                local plus=ui.button(row,"+",function() local ok,err=pcall(function() engine:add_dribble_move(id) end); if not ok then report(tostring(err)) end; dribble_editor_open=true; rebuild() end)
+                                plus.Name="MoveAdd_"..id; plus.Position=UDim2.new(1,-66,0,5); plus.Size=UDim2.fromOffset(28,30)
+                                local play=ui.button(row,"Run",function() local ok,err=pcall(function() engine:play_dribble_move(id) end); if not ok then report(tostring(err)) end end)
+                                play.Name="MoveRun_"..id; play.Position=UDim2.new(1,-34,0,5); play.Size=UDim2.fromOffset(30,30)
+                            end
+                            y=y+228
+                            if #engine.dribble_library.combos>0 then text("Saved combos",12,theme.text,24) end
+                            for i,combo in ipairs(engine.dribble_library.combos) do
+                                local index=i
+                                local row=own(make("Frame",{Name="DribbleCombo_"..i,Position=UDim2.fromOffset(0,y),Size=UDim2.new(1,-6,0,36),BackgroundColor3=theme.input,BorderSizePixel=0},container)); y=y+42
+                                local play=ui.button(row,combo.name,function() local ok,err=pcall(function() local saved=engine.dribble_library.combos[index]; engine:play_dribble_steps(saved.steps,saved.gap) end); if not ok then report(tostring(err)) end end); play.Size=UDim2.new(1,-144,1,0)
+                                local bind=ui.button(row,combo.key,function() engine:cycle_dribble_binding(nil,index); rebuild() end); bind.Position=UDim2.new(1,-138,0,3); bind.Size=UDim2.fromOffset(54,30)
+                                local edit=ui.button(row,"Edit",function() engine:edit_dribble_combo(index); dribble_editor_open=true; rebuild() end); edit.Position=UDim2.new(1,-80,0,3); edit.Size=UDim2.fromOffset(42,30)
+                                local remove=ui.button(row,"×",function() engine:remove_dribble_combo(index); rebuild() end); remove.Position=UDim2.new(1,-34,0,3); remove.Size=UDim2.fromOffset(28,30)
+                            end
+
+                        elseif id=="meter_release" then
                             toggle_action("Auto correct",function() return engine.settings.auto_calibrate end,function(on) engine.settings.auto_calibrate=on end)
                             toggle_action("Refine Good results",function() return engine.settings.refine_good end,function(on) engine.settings.refine_good=on end)
                             toggle_action("Perfect rate HUD",function() return engine.settings.shot_hud end,function(on) engine.settings.shot_hud=on end)
