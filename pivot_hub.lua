@@ -391,10 +391,10 @@ local function create_pivot_modules(ctx)
         guard_distance=4,guard_range=25,block_range=12,steal_range=5,steal_key="",spectate="",
         on_ball_speed=20,off_ball_speed=20,guard_target="",jump_key="Space",rebound_range=8,team_check=true,guard_sprint=false,ball_handler_only=false,guard_strength=1,block_delay=0,shot_range=34,glide_speed=20,ankle_range=8,ankle_delay=1.2,ankle_combo="ZX",custom_combo="Z X C",combo_delay=110,combo_bind="F5",meter_style="Vertical",auto_calibrate=true,ping_compensation=false,ping_factor=.5,takeover_threshold=100,theme_mode="Graphite",crosshair_shape="Cross",crosshair_color="#E6E8ED",crosshair_size=6,crosshair_gap=4,crosshair_thickness=2,crosshair_opacity=1,
         ball_trail_color="#AAC8FF",ball_trail_lifetime=.35,ball_trail_width=.6,ball_trail_opacity=.7,player_trail_color="#C6CFFF",player_trail_lifetime=.3,player_trail_width=.7,player_trail_opacity=.5,
-        ball_color="#D1D6E0",ball_material="SmoothPlastic",ball_reflectance=0,ball_remove_texture=true,ball_glow=true,ball_glow_brightness=2,ball_glow_range=10,ball_bloom=.7,court_color="#444C60",court_line_color="#E6E8ED",court_material="SmoothPlastic",court_reflectance=0,court_part_name="CourtFloor",court_color_lines=true,court_remove_texture=true,
+        ball_color="#D1D6E0",ball_material="SmoothPlastic",ball_reflectance=0,ball_remove_texture=true,ball_glow=true,ball_glow_strength=.8,ball_bloom=.7,court_color="#444C60",court_line_color="#E6E8ED",court_material="SmoothPlastic",court_reflectance=0,court_part_name="CourtFloor",court_color_lines=true,court_remove_texture=true,
         outline_color="#C0C9DC",outline_fill_color="#C0C9DC",outline_opacity=1,outline_fill_opacity=0,outline_through_walls=false,sky_preset="Night",sky_asset="",sky_tint="#8799BB",sky_decay="#283650",sky_stars=3000,sky_density=.22,sky_haze=.5,
         model_preset="Tung Tung",model_asset="",model_height=6,model_offset=0,model_rotation=0,model_follow_pose=true,model_motion=true,model_hide_avatar=true,
-        theme_custom=false,ui_accent="#C0C9DC",ui_font_size=14,ui_rounding=6,ui_opacity=1,refine_good=true,shot_hud=true},ranges={ball_glow_brightness={0,5},ball_glow_range={2,20},ball_bloom={0,2},crosshair_size={2,24},crosshair_gap={0,20},crosshair_thickness={1,6},crosshair_opacity={.1,1},ball_trail_lifetime={.05,2},ball_trail_width={.1,4},ball_trail_opacity={.05,1},player_trail_lifetime={.05,2},player_trail_width={.1,4},player_trail_opacity={.05,1},ball_reflectance={0,1},court_reflectance={0,1},outline_opacity={0,1},outline_fill_opacity={0,1},sky_stars={0,5000},sky_density={0,.6},sky_haze={0,5},model_height={2,12},model_offset={-6,6},model_rotation={0,360},ui_font_size={14,20},ui_rounding={0,14},ui_opacity={.2,1},guard_strength={.5,2},block_delay={0,.5},shot_range={5,60},glide_speed={4,60},ankle_range={2,20},ankle_delay={.5,5},combo_delay={20,500},ping_factor={0,1},takeover_threshold={1,100},walk_speed={4,60},jump_power={10,120},fly_speed={4,100},spin_speed={10,360},fov={40,110},time={0,24},range={5,60},esp_distance={30,1000},guard_distance={2,10},guard_range={5,60},block_range={3,18},steal_range={2,8},on_ball_speed={4,60},off_ball_speed={4,60},rebound_range={3,15}},definitions={},recording={version=1,steps={}}}
+        theme_custom=false,ui_accent="#C0C9DC",ui_font_size=14,ui_rounding=6,ui_opacity=1,refine_good=true,shot_hud=true},ranges={ball_glow_strength={.05,1},ball_bloom={0,2},crosshair_size={2,24},crosshair_gap={0,20},crosshair_thickness={1,6},crosshair_opacity={.1,1},ball_trail_lifetime={.05,2},ball_trail_width={.1,4},ball_trail_opacity={.05,1},player_trail_lifetime={.05,2},player_trail_width={.1,4},player_trail_opacity={.05,1},ball_reflectance={0,1},court_reflectance={0,1},outline_opacity={0,1},outline_fill_opacity={0,1},sky_stars={0,5000},sky_density={0,.6},sky_haze={0,5},model_height={2,12},model_offset={-6,6},model_rotation={0,360},ui_font_size={14,20},ui_rounding={0,14},ui_opacity={.2,1},guard_strength={.5,2},block_delay={0,.5},shot_range={5,60},glide_speed={4,60},ankle_range={2,20},ankle_delay={.5,5},combo_delay={20,500},ping_factor={0,1},takeover_threshold={1,100},walk_speed={4,60},jump_power={10,120},fly_speed={4,100},spin_speed={10,360},fov={40,110},time={0,24},range={5,60},esp_distance={30,1000},guard_distance={2,10},guard_range={5,60},block_range={3,18},steal_range={2,8},on_ball_speed={4,60},off_ball_speed={4,60},rebound_range={3,15}},definitions={},recording={version=1,steps={}}}
     local registry=Core.module_registry(ctx.report); Engine.registry=registry
     local players,input,run=ctx.players,ctx.input,ctx.run
     local lighting=game:GetService("Lighting")
@@ -1044,10 +1044,10 @@ local function create_pivot_modules(ctx)
     end
     trail_module("ball_trail","Ball trail",true)
     trail_module("player_trail","Player trail",false)
-    add("ball_appearance","Ball appearance","Cosmetics","Local color/material override; Neon glow adds a local light and bloom",{start=function(scope)
-        local state={lights={}}
+    add("ball_appearance","Ball appearance","Cosmetics","Local color/material override; Neon glow stays on the ball surface with a bloom halo",{start=function(scope)
+        local state={glows={}}
         local bloom=Instance.new("BloomEffect"); bloom.Name="PivotBallBloom"; bloom.Enabled=false; bloom.Parent=lighting; state.bloom=bloom
-        scope:defer(function() bloom:Destroy(); for _,light in pairs(state.lights) do light:Destroy() end end)
+        scope:defer(function() bloom:Destroy(); for _,glow in pairs(state.glows) do glow:Destroy() end end)
         return state
     end,step=function(scope,state,s)
         local color=cosmetic_color(s.ball_color); local chosen=material(s.ball_material); local parts={}; local seen={}; local glowing=0
@@ -1070,15 +1070,20 @@ local function create_pivot_modules(ctx)
                         elseif object:IsA("Decal") or object:IsA("Texture") then scope:restore(object,"Transparency") end
                     end
                 end
-                local light=state.lights[part]
+                local glow=state.glows[part]
                 local enabled=s.ball_glow and s.ball_material=="Neon"
-                if enabled and not light then light=Instance.new("PointLight"); light.Name="PivotBallGlow"; light.Shadows=false; light.Parent=part; state.lights[part]=light end
-                if light then light.Enabled=enabled; light.Color=color; light.Brightness=s.ball_glow_brightness; light.Range=s.ball_glow_range end
+                if enabled and not glow then
+                    glow=Instance.new("Highlight"); glow.Name="PivotBallSurfaceGlow"; glow.Adornee=part; glow.DepthMode=Enum.HighlightDepthMode.Occluded; glow.Parent=part; state.glows[part]=glow
+                end
+                if glow then
+                    glow.Enabled=enabled; glow.FillColor=color; glow.OutlineColor=color
+                    glow.FillTransparency=1-s.ball_glow_strength; glow.OutlineTransparency=math.max(.15,1-s.ball_glow_strength)
+                end
                 if enabled then glowing=glowing+1 end
             end
         end
-        for part,light in pairs(state.lights) do if not seen[part] then light:Destroy(); state.lights[part]=nil end end
-        state.bloom.Enabled=glowing>0; state.bloom.Intensity=s.ball_bloom; state.bloom.Size=24; state.bloom.Threshold=.9
+        for part,glow in pairs(state.glows) do if not seen[part] then glow:Destroy(); state.glows[part]=nil end end
+        state.bloom.Enabled=glowing>0; state.bloom.Intensity=s.ball_bloom; state.bloom.Size=18; state.bloom.Threshold=.9
     end,interval=.1})
     local function named_court_parts(s)
         local surfaces,lines={},{}
@@ -1298,7 +1303,7 @@ local function create_pivot_modules(ctx)
         crosshair={{"crosshair_color","Color / #RRGGBB"},{"crosshair_size","Size"},{"crosshair_gap","Gap"},{"crosshair_thickness","Thickness"},{"crosshair_opacity","Opacity"}},
         ball_trail={{"ball_trail_color","Color / #RRGGBB"},{"ball_trail_lifetime","Lifetime / seconds"},{"ball_trail_width","Width"},{"ball_trail_opacity","Opacity"}},
         player_trail={{"player_trail_color","Color / #RRGGBB"},{"player_trail_lifetime","Lifetime / seconds"},{"player_trail_width","Width"},{"player_trail_opacity","Opacity"}},
-        ball_appearance={{"ball_color","Color / #RRGGBB"},{"ball_reflectance","Reflectance"},{"ball_glow_brightness","Neon light brightness"},{"ball_glow_range","Neon light range"},{"ball_bloom","Neon bloom strength"}},
+        ball_appearance={{"ball_color","Color / #RRGGBB"},{"ball_reflectance","Reflectance"},{"ball_glow_strength","Ball surface glow"},{"ball_bloom","Neon bloom strength"}},
         court_appearance={{"court_color","Floor / #RRGGBB"},{"court_line_color","Lines / #RRGGBB"},{"court_reflectance","Reflectance"},{"court_part_name","Exact surface part name"}},
         self_outline={{"outline_color","Outline / #RRGGBB"},{"outline_fill_color","Fill / #RRGGBB"},{"outline_opacity","Outline opacity"},{"outline_fill_opacity","Fill opacity"}},
         sky={{"sky_asset","Custom sky model asset ID"},{"sky_tint","Sky tint / #RRGGBB"},{"sky_decay","Atmosphere / #RRGGBB"},{"sky_stars","Star count"},{"sky_density","Atmosphere density"},{"sky_haze","Haze"}},
