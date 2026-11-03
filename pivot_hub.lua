@@ -399,18 +399,6 @@ function Core.coverage_estimate(origin,goal,defenders,radius)
     return math.max(0,math.min(100,(1-remaining)*100))
 end
 
-function Core.costume_region(width,height,fov,bounds)
-    if width<=0 or height<=0 then return nil end
-    local half_w,half_h=width/2,height/2
-    if bounds then
-        half_w=math.min(half_w,math.max(32,math.abs(bounds[1]-width/2),math.abs(bounds[3]-width/2))+16)
-        half_h=math.min(half_h,math.max(32,math.abs(bounds[2]-height/2),math.abs(bounds[4]-height/2))+16)
-    end
-    local left=math.max(0,math.floor(width/2-half_w)); local top=math.max(0,math.floor(height/2-half_h))
-    local cropped_h=height-top*2
-    return {x=left,y=top,width=width-left*2,height=cropped_h,fov=math.deg(2*math.atan(math.tan(math.rad(fov)/2)*cropped_h/height))}
-end
-
 function Core.hex_color(value)
     if type(value)~="string" then return nil end
     local hex=value:match("^#?(%x%x%x%x%x%x)$"); if not hex then return nil end
@@ -424,8 +412,8 @@ local function create_pivot_modules(ctx)
         ball_trail_color="#AAC8FF",ball_trail_lifetime=.35,ball_trail_width=.6,ball_trail_opacity=.7,player_trail_color="#C6CFFF",player_trail_lifetime=.3,player_trail_width=.7,player_trail_opacity=.5,
         ball_color="#D1D6E0",ball_material="SmoothPlastic",ball_reflectance=0,ball_remove_texture=true,ball_glow=true,ball_glow_strength=.8,ball_bloom=.7,court_color="#444C60",court_line_color="#E6E8ED",court_material="SmoothPlastic",court_reflectance=0,court_part_name="CourtFloor",court_color_lines=true,court_remove_texture=true,court_three_color="#E6E8ED",court_free_color="#E6E8ED",court_three_enabled=true,court_free_enabled=true,court_rebuild_markings=true,court_three_radius=34,court_three_angle=128,court_free_radius=8,court_free_distance=21.5,court_corner_depth=6,court_line_width=.18,
         outline_color="#C0C9DC",outline_fill_color="#C0C9DC",outline_opacity=1,outline_fill_opacity=0,outline_through_walls=false,sky_preset="Night",sky_asset="",sky_tint="#8799BB",sky_decay="#283650",sky_stars=3000,sky_density=.22,sky_haze=.5,
-        model_preset="Sasuke",model_catalog="Curated",model_save_name="",model_render_region="Focused",model_style="Basketball",model_renderer="Viewport",model_high_detail=true,model_show_hair=true,model_show_hats=true,model_show_masks=true,model_show_capes=true,model_show_weapons=true,model_show_extras=true,coverage_radius=12,coverage_display="Both",coverage_scale=1,coverage_height=2.6,coverage_response=12,model_fit_pb=true,model_fit_scale=1.015,model_accessory_scale=1,model_face_size=.86,model_face_width=1,model_face_x=0,model_face_y=0,model_asset="",model_height=6,model_offset=0,model_rotation=0,model_follow_pose=true,model_motion=true,model_hide_avatar=true,
-        theme_custom=false,ui_accent="#C0C9DC",ui_font_size=14,ui_rounding=6,ui_opacity=1,refine_good=true,shot_hud=true},ranges={coverage_scale={.75,1.5},coverage_height={1,5},coverage_response={2,25},model_face_size={.5,1.2},model_face_width={.65,1.35},model_face_x={-.3,.3},model_face_y={-.3,.3},model_accessory_scale={.5,1.5},coverage_radius={4,20},model_fit_scale={.95,1.12},court_three_radius={20,45},court_three_angle={90,180},court_free_radius={3,12},court_free_distance={10,30},court_corner_depth={0,12},court_line_width={.05,.8},ball_glow_strength={.05,1},ball_bloom={0,2},crosshair_size={2,24},crosshair_gap={0,20},crosshair_thickness={1,6},crosshair_opacity={.1,1},ball_trail_lifetime={.05,2},ball_trail_width={.1,4},ball_trail_opacity={.05,1},player_trail_lifetime={.05,2},player_trail_width={.1,4},player_trail_opacity={.05,1},ball_reflectance={0,1},court_reflectance={0,1},outline_opacity={0,1},outline_fill_opacity={0,1},sky_stars={0,5000},sky_density={0,.6},sky_haze={0,5},model_height={2,12},model_offset={-6,6},model_rotation={0,360},ui_font_size={14,20},ui_rounding={0,14},ui_opacity={.2,1},guard_strength={.5,2},block_delay={0,.5},shot_range={5,60},glide_speed={4,60},ankle_range={2,20},ankle_delay={.5,5},combo_delay={20,500},ping_factor={0,1},takeover_threshold={1,100},walk_speed={4,60},jump_power={10,120},fly_speed={4,100},spin_speed={10,360},fov={40,110},time={0,24},range={5,60},esp_distance={30,1000},guard_distance={2,10},guard_range={5,60},block_range={3,18},steal_range={2,8},on_ball_speed={4,60},off_ball_speed={4,60},rebound_range={3,15}},definitions={},recording={version=1,steps={}}}
+        model_preset="Sasuke",model_catalog="Curated",model_save_name="",model_style="Basketball",model_renderer="Native world",model_high_detail=true,model_show_hair=true,model_show_hats=true,model_show_masks=true,model_show_capes=true,model_show_weapons=true,model_show_extras=true,coverage_radius=12,coverage_display="Both",coverage_scale=1,coverage_height=2.6,coverage_response=12,model_fit_pb=true,model_fit_scale=1.015,model_accessory_scale=1,model_asset="",model_height=6,model_offset=0,model_rotation=0,model_follow_pose=true,model_motion=true,model_hide_avatar=true,
+        theme_custom=false,ui_accent="#C0C9DC",ui_font_size=14,ui_rounding=6,ui_opacity=1,refine_good=true,shot_hud=true},ranges={coverage_scale={.75,1.5},coverage_height={1,5},coverage_response={2,25},model_accessory_scale={.5,1.5},coverage_radius={4,20},model_fit_scale={.95,1.12},court_three_radius={20,45},court_three_angle={90,180},court_free_radius={3,12},court_free_distance={10,30},court_corner_depth={0,12},court_line_width={.05,.8},ball_glow_strength={.05,1},ball_bloom={0,2},crosshair_size={2,24},crosshair_gap={0,20},crosshair_thickness={1,6},crosshair_opacity={.1,1},ball_trail_lifetime={.05,2},ball_trail_width={.1,4},ball_trail_opacity={.05,1},player_trail_lifetime={.05,2},player_trail_width={.1,4},player_trail_opacity={.05,1},ball_reflectance={0,1},court_reflectance={0,1},outline_opacity={0,1},outline_fill_opacity={0,1},sky_stars={0,5000},sky_density={0,.6},sky_haze={0,5},model_height={2,12},model_offset={-6,6},model_rotation={0,360},ui_font_size={14,20},ui_rounding={0,14},ui_opacity={.2,1},guard_strength={.5,2},block_delay={0,.5},shot_range={5,60},glide_speed={4,60},ankle_range={2,20},ankle_delay={.5,5},combo_delay={20,500},ping_factor={0,1},takeover_threshold={1,100},walk_speed={4,60},jump_power={10,120},fly_speed={4,100},spin_speed={10,360},fov={40,110},time={0,24},range={5,60},esp_distance={30,1000},guard_distance={2,10},guard_range={5,60},block_range={3,18},steal_range={2,8},on_ball_speed={4,60},off_ball_speed={4,60},rebound_range={3,15}},definitions={},recording={version=1,steps={}}}
     local registry=Core.module_registry(ctx.report); Engine.registry=registry
     local players,input,run=ctx.players,ctx.input,ctx.run
     local lighting=game:GetService("Lighting")
@@ -1482,7 +1470,7 @@ local function create_pivot_modules(ctx)
     Engine.model_library={version=1,models={}}
     Engine.model_cache={}; Engine.model_preload={busy=false,done=0,total=0,failed=0}
     local library_defaults={}
-    for _,key in ipairs({"model_style","model_fit_pb","model_fit_scale","model_accessory_scale","model_height","model_offset","model_rotation","model_follow_pose","model_motion","model_hide_avatar","model_high_detail","model_show_hair","model_show_hats","model_show_masks","model_show_capes","model_show_weapons","model_show_extras","model_render_region"}) do library_defaults[key]=Engine.settings[key] end
+    for _,key in ipairs({"model_style","model_fit_pb","model_fit_scale","model_accessory_scale","model_height","model_offset","model_rotation","model_follow_pose","model_motion","model_hide_avatar","model_high_detail","model_show_hair","model_show_hats","model_show_masks","model_show_capes","model_show_weapons","model_show_extras"}) do library_defaults[key]=Engine.settings[key] end
     function Engine:validate_model_library(data)
         if type(data)~="table" or data.version~=1 or type(data.models)~="table" then return nil,"Invalid model library" end
         local result={version=1,models={}}; local names={}; local count=0
@@ -1495,7 +1483,6 @@ local function create_pivot_modules(ctx)
             local settings,err=Core.validate_module_settings(item.settings or {},library_defaults,self.ranges)
             if not settings then return nil,err end
             if settings.model_style~="Basketball" and settings.model_style~="Original costume" then return nil,"Invalid costume style" end
-            if settings.model_render_region~="Focused" and settings.model_render_region~="Full screen" then return nil,"Invalid rendering region" end
             local preset="Custom"; if type(item.preset)=="string" and model_presets[item.preset]==item.asset then preset=item.preset end
             names[item.name:lower()]=true; result.models[i]={name=item.name,asset=item.asset,preset=preset,settings=settings}
         end
@@ -1807,11 +1794,6 @@ local function create_pivot_modules(ctx)
             end
         end
         if not model.PrimaryPart then model.PrimaryPart=parts[1] end
-        -- A fresh, state-disabled helper renders clothes without controlling the visual shell.
-        local humanoid=Instance.new("Humanoid"); humanoid.Name="PivotAppearanceHumanoid"; humanoid.AutoRotate=false; humanoid.PlatformStand=true; humanoid.RequiresNeck=false; humanoid.BreakJointsOnDeath=false; humanoid.DisplayDistanceType=Enum.HumanoidDisplayDistanceType.None
-        pcall(function() humanoid.EvaluateStateMachine=false; humanoid.AutomaticScalingEnabled=false end)
-        pcall(function() humanoid.RigType=source:FindFirstChild("UpperTorso") and Enum.HumanoidRigType.R15 or Enum.HumanoidRigType.R6 end)
-        humanoid.Parent=model
         return {model=model,parts=parts,bindings=bindings,extras=extras,nested=nested,fit_scale=s.model_fit_scale,matched=matched,basketball=basketball,uniform_ready=uniform~=nil,texture_error=texture_error}
     end
     function Engine:pose_pb_costume(state,source,s)
@@ -1854,39 +1836,74 @@ local function create_pivot_modules(ctx)
         costume.fit_scale=s.model_fit_scale
     end
 
+    local function clothing(object) return object:IsA("Shirt") or object:IsA("Pants") or object:IsA("ShirtGraphic") end
+    function Engine:apply_native_appearance(scope,state,s)
+        if not state.native_body then return end
+        for _,entry in ipairs(state.native_body) do
+            local real,look=entry.real,entry.look
+            if real.Parent then
+                for _,property in ipairs({"Color","Material","Reflectance"}) do if look[property]~=nil then scope:set(real,property,look[property]) end end
+                if real:IsA("MeshPart") then
+                    scope:set(real,"TextureID",look:IsA("MeshPart") and look.TextureID or "")
+                    if s.model_high_detail then pcall(function() scope:set(real,"RenderFidelity",Enum.RenderFidelity.Precise) end) else scope:restore(real,"RenderFidelity") end
+                end
+                for _,object in ipairs(real:GetDescendants()) do
+                    if object:IsA("SurfaceAppearance") then scope:set(object,"Parent",nil)
+                    elseif object:IsA("SpecialMesh") and real.Name=="Head" then scope:set(object,"TextureId","") end
+                end
+            end
+        end
+        for _,object in ipairs(state.source:GetChildren()) do
+            if clothing(object) and not state.native_garment_set[object] then scope:set(object,"Parent",nil) end
+        end
+    end
+    function Engine:prepare_native_costume(scope,state,s)
+        local source=state.source; local costume=state.pb_costume
+        if costume then
+            state.native_body={}; state.native_source_parts={}; state.native_garments={}; state.native_garment_set={}
+            local appearance=Instance.new("Model"); appearance.Name="PivotAppearanceTemplate"; state.appearance_template=appearance; scope:defer(function() appearance:Destroy() end)
+            state.model.PrimaryPart=nil
+            for _,binding in ipairs(costume.bindings) do
+                local real=source:FindFirstChild(binding.name)
+                if real then state.native_body[#state.native_body+1]={real=real,look=binding.part}; state.native_source_parts[real]=true end
+                binding.part.Parent=appearance
+            end
+            for _,object in ipairs(state.model:GetChildren()) do
+                if clothing(object) then
+                    state.native_garments[#state.native_garments+1]=object; state.native_garment_set[object]=true
+                    scope:defer(function() object:Destroy() end)
+                end
+            end
+            -- Existing PB geometry and its existing Humanoid render the local wardrobe.
+            -- Only appearance properties are changed; never source transforms, size, joints or physics.
+            self:apply_native_appearance(scope,state,s)
+            for _,object in ipairs(state.native_garments) do object.Parent=source end
+            self:pose_pb_costume(state,source,s)
+        else
+            for _,object in ipairs(state.model:GetDescendants()) do assert(not clothing(object),"Enable Fit costume to PB body to render this outfit's clothes") end
+            state.model:PivotTo(assert(root(),"Character unavailable").CFrame)
+        end
+        -- Validate the final render tree before a single part enters Workspace.
+        for _,object in ipairs(state.model:GetDescendants()) do
+            assert(not object:IsA("Humanoid") and not object:IsA("AnimationController") and not object:IsA("Animator"),"Cosmetic controller rejected")
+            assert(not object:IsA("LuaSourceContainer") and not object:IsA("Script") and not object:IsA("LocalScript") and not object:IsA("ModuleScript"),"Cosmetic script rejected")
+            assert(not object:IsA("JointInstance") and not object:IsA("Motor6D") and not object:IsA("Weld") and not object:IsA("WeldConstraint") and not object:IsA("Constraint") and not object:IsA("BodyMover") and not object:IsA("BodyVelocity") and not object:IsA("BodyForce"),"Cosmetic physics link rejected")
+            if object:IsA("BasePart") then
+                assert(not object:IsDescendantOf(source),"Live character part rejected")
+                object.Anchored=true; object.CanCollide=false; object.CanTouch=false; object.CanQuery=false; object.Massless=true
+            end
+        end
+        local folder=new_local(scope,"Folder",workspace); folder.Name="PivotLocalCosmetics"; state.world=folder
+        state.model.Parent=folder
+    end
+
     function Engine:rendering_report()
         local active=registry.active.custom_model; local state=active and active.state
-        local camera=workspace.CurrentCamera; local size=camera and camera.ViewportSize
-        return {preset=self.settings.model_preset,enabled=active~=nil,mode=self.settings.model_render_region,screen=size and {width=size.X,height=size.Y},region=state and state.render_region,parts=state and #state.parts,textures_ready=state and state.textures_ready,rig=state and state.rig_label}
-    end
-    function Engine:sync_costume_camera(state,s)
-        local source=workspace.CurrentCamera; if not source then return end
-        local size=source.ViewportSize; local bounds
-        if s.model_render_region=="Focused" and source.WorldToViewportPoint then
-            local left,top,right,bottom=math.huge,math.huge,-math.huge,-math.huge; local count=0; local near=false
-            local boxes={}
-            if state.model and state.model.GetBoundingBox then
-                local frame,extent=state.model:GetBoundingBox(); boxes[1]={frame=frame,size=extent}
-            else
-                for _,part in ipairs(state.parts) do if part.Parent and part.Transparency<.95 then boxes[#boxes+1]={frame=part.CFrame,size=part.Size} end end
-            end
-            for _,box in ipairs(boxes) do
-                for _,x in ipairs({-1,1}) do for _,y in ipairs({-1,1}) do for _,z in ipairs({-1,1}) do
-                    local p=box.frame*CFrame.new(box.size.X*x/2,box.size.Y*y/2,box.size.Z*z/2)
-                    local point=source:WorldToViewportPoint(p.Position)
-                    if point.Z<=.2 then near=true else left=math.min(left,point.X); top=math.min(top,point.Y); right=math.max(right,point.X); bottom=math.max(bottom,point.Y); count=count+1 end
-                end end end
-            end
-            if count>0 and not near then bounds={left,top,right,bottom} end
-        end
-        local region=Core.costume_region(size.X,size.Y,source.FieldOfView,bounds); if not region then return end
-        state.viewport.Position=UDim2.fromOffset(region.x,region.y); state.viewport.Size=UDim2.fromOffset(region.width,region.height)
-        state.camera.FieldOfViewMode=Enum.FieldOfViewMode.Vertical; state.camera.CFrame=source.CFrame; state.camera.FieldOfView=region.fov; state.render_region=region
+        return {preset=self.settings.model_preset,enabled=active~=nil,renderer="Native world",parts=state and #state.parts,textures_ready=state and state.textures_ready,body=state and state.native_body and "Existing PB body" or "Anchored cosmetic mesh",rig=state and state.rig_label}
     end
 
     add("custom_model","Character skin","Character","Basketball style preserves PB body meshes; Sasuke includes a custom Uchiha uniform. Original costume keeps the donor appearance",{start=function(scope,s)
-        -- World-parented costume Humanoids have caused live-game flings. Never parent this rig to Workspace.
-        s.model_renderer="Viewport"
+        s.model_renderer="Native world"
         assert(model_presets[s.model_preset] or s.model_preset=="Custom","Unknown character preset")
         local asset=model_presets[s.model_preset] or s.model_asset
         asset=tostring(asset):match("^%s*(%d+)%s*$"); assert(asset and #asset<=18,"Enter a numeric Roblox model asset ID")
@@ -1907,17 +1924,6 @@ local function create_pivot_modules(ctx)
                 if not object:IsA("LuaSourceContainer") and not object:IsA("Script") and not object:IsA("LocalScript") and not object:IsA("ModuleScript") then object.Parent=model end
             end
         end
-        local appearance_owners={}
-        for _,object in ipairs(model:GetDescendants()) do
-            if (object:IsA("Shirt") or object:IsA("Pants") or object:IsA("ShirtGraphic") or object:IsA("BodyColors")) and object.Parent and object.Parent:IsA("Model") then appearance_owners[object.Parent]=true end
-        end
-        for owner in pairs(appearance_owners) do
-            local humanoid=Instance.new("Humanoid"); humanoid.Name="PivotAppearanceHumanoid"
-            humanoid.AutoRotate=false; humanoid.PlatformStand=true; humanoid.BreakJointsOnDeath=false; humanoid.RequiresNeck=false; humanoid.DisplayDistanceType=Enum.HumanoidDisplayDistanceType.None
-            pcall(function() humanoid.EvaluateStateMachine=false end); pcall(function() humanoid.AutomaticScalingEnabled=false end)
-            pcall(function() humanoid.RigType=owner:FindFirstChild("UpperTorso") and Enum.HumanoidRigType.R15 or Enum.HumanoidRigType.R6 end)
-            humanoid.Parent=owner
-        end
         local parts={}; local first
         for _,part in ipairs(model:GetDescendants()) do
             if part:IsA("BasePart") then
@@ -1937,23 +1943,15 @@ local function create_pivot_modules(ctx)
         local height=s.model_fit_pb and assert(rig(),"Character unavailable"):GetExtentsSize().Y or s.model_height
         local rig_scale=pb_costume and 1 or height/size.Y*(s.model_fit_pb and s.model_fit_scale or 1)
         if not pb_costume then model:ScaleTo(rig_scale) end
-        local viewport,world,camera
-            viewport=new_local(scope,"ViewportFrame",ctx.gui); viewport.Name="PivotModelViewport"; viewport.Size=UDim2.fromScale(1,1); viewport.BackgroundTransparency=1; viewport.BorderSizePixel=0; viewport.ZIndex=0; viewport.Active=false
-            viewport.BackgroundColor3=Color3.fromRGB(255,255,255); viewport.Ambient=Color3.fromRGB(110,110,110); viewport.LightColor=Color3.fromRGB(255,255,255); viewport.LightDirection=Vector3.new(-1,-1,-1)
-            world=Instance.new("WorldModel"); world.Name="PivotModelWorld"; world.Parent=viewport
-            camera=Instance.new("Camera"); camera.Parent=viewport; viewport.CurrentCamera=camera
-        model.Parent=world
         local state
         local binding="PivotCostumeCamera"
         run:BindToRenderStep(binding,Enum.RenderPriority.Last.Value+2,function()
-            local current_camera=workspace.CurrentCamera
-            if state and current_camera then Engine:sync_costume_camera(state,s) end
             if state and rig() then if state.pb_costume then Engine:pose_pb_costume(state,rig(),s) elseif s.model_follow_pose then Engine:pose_character(state,rig()) end end
         end)
         scope:defer(function() run:UnbindFromRenderStep(binding) end)
         local current=assert(root(),"Enter a court first"); model:PivotTo(current.CFrame)
         local rig_type=motors>0 and (model:FindFirstChild("UpperTorso",true) and "R15 joint rig" or model:FindFirstChild("Torso",true) and "R6 joint rig" or "Joint rig") or #bones>0 and "Bone rig" or "Static / welded model"
-        state={model=model,parts=parts,source=rig(),height=s.model_height,viewport=viewport,camera=camera,last_position=current.Position,phase=0,speed=0,joints=joints,bones=bones,motor_count=motors,rig_scale=rig_scale,pb_costume=pb_costume,fit_scale=s.model_fit_scale,rig_label=pb_costume and (pb_costume.basketball and (pb_costume.texture_error and "PB basketball · custom textures unavailable" or pb_costume.uniform_ready and "PB basketball · authored textures registered" or "PB basketball · live body geometry") or "PB costume · live body proportions and poses") or s.model_fit_pb and motors==0 and #bones==0 and "Single-piece fitted costume · limited limb animation" or rig_type.." · "..motors.." animated joints / "..#bones.." bones"}
+        state={model=model,parts=parts,source=rig(),height=s.model_height,last_position=current.Position,phase=0,speed=0,joints=joints,bones=bones,motor_count=motors,rig_scale=rig_scale,pb_costume=pb_costume,fit_scale=s.model_fit_scale,rig_label=pb_costume and (pb_costume.basketball and (pb_costume.texture_error and "PB basketball · custom textures unavailable" or pb_costume.uniform_ready and "PB basketball · authored textures registered" or "PB basketball · live body geometry") or "PB costume · live body proportions and poses") or s.model_fit_pb and motors==0 and #bones==0 and "Single-piece fitted costume · limited limb animation" or rig_type.." · "..motors.." animated joints / "..#bones.." bones"}
         -- Faceless costumes: remove face art in every style, retaining hair and glasses.
         for _,part in ipairs(parts) do
             if canonical_body(part.Name)=="Head" then
@@ -1966,6 +1964,7 @@ local function create_pivot_modules(ctx)
             local name=part.Name:lower()
             if part:GetAttribute("PivotFaceGeometry") or not canonical_body(part.Name) and not name:find("glasses",1,true) and not name:find("mask",1,true) and (name:find("face",1,true) or name:find("eyebrow",1,true) or name:find("eyelash",1,true) or name:find("mouth",1,true) or name=="eye" or name=="eyes") then part.Transparency=1 end
         end
+        Engine:prepare_native_costume(scope,state,s)
         state.accessories={}
         for _,part in ipairs(parts) do
             local group=part:GetAttribute("PivotAccessoryGroup") or accessory_group(part)
@@ -1978,15 +1977,14 @@ local function create_pivot_modules(ctx)
             local active=true; scope:defer(function() active=false end)
             task.spawn(function()
                 local failed=0
-                local ok=pcall(function() provider:PreloadAsync({model},function(_,status) if status~=Enum.AssetFetchStatus.Success then failed=failed+1 end end) end)
+                local ok=pcall(function() provider:PreloadAsync((function() local targets={model}; for _,garment in ipairs(state.native_garments or {}) do targets[#targets+1]=garment end; return targets end)(),function(_,status) if status~=Enum.AssetFetchStatus.Success then failed=failed+1 end end) end)
                 if active then state.textures_ready=ok and failed==0; if not state.textures_ready then ctx.report("Some costume textures could not be preloaded") end end
             end)
         end
         return state
     end,step=function(scope,state,s,dt)
         local source=rig(); local part=root(); assert(source and part,"Character unavailable")
-        Engine:sync_costume_camera(state,s)
-        if state.viewport then state.viewport.Visible=true end
+        Engine:apply_native_appearance(scope,state,s)
         for part,original in pairs(state.mesh_fidelity) do pcall(function() part.RenderFidelity=s.model_high_detail and Enum.RenderFidelity.Precise or original end) end
         for _,entry in ipairs(state.accessories) do entry.part.Transparency=s["model_show_"..entry.group] and entry.transparency or 1 end
         if not s.model_fit_pb and s.model_height~=state.height then local factor=s.model_height/state.height; state.model:ScaleTo(state.model:GetScale()*factor); state.rig_scale=state.rig_scale*factor; state.height=s.model_height end
@@ -2004,7 +2002,7 @@ local function create_pivot_modules(ctx)
         if state.pb_costume then Engine:pose_pb_costume(state,source,s) elseif s.model_follow_pose then Engine:pose_character(state,source) end
         for _,original in ipairs(source:GetDescendants()) do
             if original:IsA("BasePart") then
-                if s.model_hide_avatar then scope:set(original,"LocalTransparencyModifier",1) else scope:restore(original,"LocalTransparencyModifier") end
+                if s.model_hide_avatar and not (state.native_source_parts and state.native_source_parts[original]) then scope:set(original,"LocalTransparencyModifier",1) else scope:restore(original,"LocalTransparencyModifier") end
             elseif original:IsA("Decal") or original:IsA("Texture") then
                 if s.model_hide_avatar then scope:set(original,"Transparency",1) else scope:restore(original,"Transparency") end
             end
@@ -2028,7 +2026,7 @@ local function create_pivot_modules(ctx)
         ball_appearance={{"ball_material","Material",{"SmoothPlastic","Plastic","Neon","Metal","Glass"}}},
         court_appearance={{"court_material","Material",{"SmoothPlastic","Wood","WoodPlanks","Concrete","Neon"}}},
         sky={{"sky_preset","Sky preset",{"Night","Galaxy","Sunset","Day","Custom"}}},
-        custom_model={{"model_style","Costume style",{"Basketball","Original costume"}},{"model_render_region","Render region",{"Focused","Full screen"}}}
+        custom_model={{"model_style","Costume style",{"Basketball","Original costume"}}}
     }
     Engine.cosmetic_toggles={ball_appearance={{"ball_remove_texture","Remove ball texture"},{"ball_glow","Neon glow"}},court_appearance={{"court_color_lines","Customize court markings"},{"court_remove_texture","Remove floor textures"},{"court_three_enabled","Custom three-point color"},{"court_free_enabled","Custom free-throw color"},{"court_rebuild_markings","Rebuild baked markings"}},self_outline={{"outline_through_walls","Show through walls"}},custom_model={{"model_show_hair","Show hair"},{"model_show_hats","Show hats / headbands"},{"model_show_masks","Show masks / glasses"},{"model_show_capes","Show capes / coats"},{"model_show_weapons","Show weapons"},{"model_show_extras","Show other accessories"},{"model_high_detail","High mesh detail"},{"model_fit_pb","Fit costume to PB body"},{"model_motion","Single-piece motion"},{"model_hide_avatar","Hide your normal avatar"},{"model_follow_pose","Follow player pose"}}}
 
