@@ -399,6 +399,18 @@ function Core.coverage_estimate(origin,goal,defenders,radius)
     return math.max(0,math.min(100,(1-remaining)*100))
 end
 
+function Core.costume_region(width,height,fov,bounds)
+    if width<=0 or height<=0 then return nil end
+    local half_w,half_h=width/2,height/2
+    if bounds then
+        half_w=math.min(half_w,math.max(32,math.abs(bounds[1]-width/2),math.abs(bounds[3]-width/2))+16)
+        half_h=math.min(half_h,math.max(32,math.abs(bounds[2]-height/2),math.abs(bounds[4]-height/2))+16)
+    end
+    local left=math.max(0,math.floor(width/2-half_w)); local top=math.max(0,math.floor(height/2-half_h))
+    local cropped_h=height-top*2
+    return {x=left,y=top,width=width-left*2,height=cropped_h,fov=math.deg(2*math.atan(math.tan(math.rad(fov)/2)*cropped_h/height))}
+end
+
 function Core.hex_color(value)
     if type(value)~="string" then return nil end
     local hex=value:match("^#?(%x%x%x%x%x%x)$"); if not hex then return nil end
@@ -412,8 +424,8 @@ local function create_pivot_modules(ctx)
         ball_trail_color="#AAC8FF",ball_trail_lifetime=.35,ball_trail_width=.6,ball_trail_opacity=.7,player_trail_color="#C6CFFF",player_trail_lifetime=.3,player_trail_width=.7,player_trail_opacity=.5,
         ball_color="#D1D6E0",ball_material="SmoothPlastic",ball_reflectance=0,ball_remove_texture=true,ball_glow=true,ball_glow_strength=.8,ball_bloom=.7,court_color="#444C60",court_line_color="#E6E8ED",court_material="SmoothPlastic",court_reflectance=0,court_part_name="CourtFloor",court_color_lines=true,court_remove_texture=true,court_three_color="#E6E8ED",court_free_color="#E6E8ED",court_three_enabled=true,court_free_enabled=true,court_rebuild_markings=true,court_three_radius=34,court_three_angle=128,court_free_radius=8,court_free_distance=21.5,court_corner_depth=6,court_line_width=.18,
         outline_color="#C0C9DC",outline_fill_color="#C0C9DC",outline_opacity=1,outline_fill_opacity=0,outline_through_walls=false,sky_preset="Night",sky_asset="",sky_tint="#8799BB",sky_decay="#283650",sky_stars=3000,sky_density=.22,sky_haze=.5,
-        model_preset="Tung Tung",model_style="Basketball",model_renderer="Viewport",model_high_detail=true,model_show_hair=true,model_show_hats=true,model_show_masks=true,model_show_capes=true,model_show_weapons=true,model_show_extras=true,coverage_radius=12,model_fit_pb=true,model_fit_scale=1.015,model_accessory_scale=1,model_face_size=.86,model_face_width=1,model_face_x=0,model_face_y=0,model_asset="",model_height=6,model_offset=0,model_rotation=0,model_follow_pose=true,model_motion=true,model_hide_avatar=true,
-        theme_custom=false,ui_accent="#C0C9DC",ui_font_size=14,ui_rounding=6,ui_opacity=1,refine_good=true,shot_hud=true},ranges={model_face_size={.5,1.2},model_face_width={.65,1.35},model_face_x={-.3,.3},model_face_y={-.3,.3},model_accessory_scale={.5,1.5},coverage_radius={4,20},model_fit_scale={.95,1.12},court_three_radius={20,45},court_three_angle={90,180},court_free_radius={3,12},court_free_distance={10,30},court_corner_depth={0,12},court_line_width={.05,.8},ball_glow_strength={.05,1},ball_bloom={0,2},crosshair_size={2,24},crosshair_gap={0,20},crosshair_thickness={1,6},crosshair_opacity={.1,1},ball_trail_lifetime={.05,2},ball_trail_width={.1,4},ball_trail_opacity={.05,1},player_trail_lifetime={.05,2},player_trail_width={.1,4},player_trail_opacity={.05,1},ball_reflectance={0,1},court_reflectance={0,1},outline_opacity={0,1},outline_fill_opacity={0,1},sky_stars={0,5000},sky_density={0,.6},sky_haze={0,5},model_height={2,12},model_offset={-6,6},model_rotation={0,360},ui_font_size={14,20},ui_rounding={0,14},ui_opacity={.2,1},guard_strength={.5,2},block_delay={0,.5},shot_range={5,60},glide_speed={4,60},ankle_range={2,20},ankle_delay={.5,5},combo_delay={20,500},ping_factor={0,1},takeover_threshold={1,100},walk_speed={4,60},jump_power={10,120},fly_speed={4,100},spin_speed={10,360},fov={40,110},time={0,24},range={5,60},esp_distance={30,1000},guard_distance={2,10},guard_range={5,60},block_range={3,18},steal_range={2,8},on_ball_speed={4,60},off_ball_speed={4,60},rebound_range={3,15}},definitions={},recording={version=1,steps={}}}
+        model_preset="Sasuke",model_catalog="Curated",model_save_name="",model_render_region="Focused",model_style="Basketball",model_renderer="Viewport",model_high_detail=true,model_show_hair=true,model_show_hats=true,model_show_masks=true,model_show_capes=true,model_show_weapons=true,model_show_extras=true,coverage_radius=12,coverage_display="Both",coverage_scale=1,coverage_height=2.6,coverage_response=12,model_fit_pb=true,model_fit_scale=1.015,model_accessory_scale=1,model_face_size=.86,model_face_width=1,model_face_x=0,model_face_y=0,model_asset="",model_height=6,model_offset=0,model_rotation=0,model_follow_pose=true,model_motion=true,model_hide_avatar=true,
+        theme_custom=false,ui_accent="#C0C9DC",ui_font_size=14,ui_rounding=6,ui_opacity=1,refine_good=true,shot_hud=true},ranges={coverage_scale={.75,1.5},coverage_height={1,5},coverage_response={2,25},model_face_size={.5,1.2},model_face_width={.65,1.35},model_face_x={-.3,.3},model_face_y={-.3,.3},model_accessory_scale={.5,1.5},coverage_radius={4,20},model_fit_scale={.95,1.12},court_three_radius={20,45},court_three_angle={90,180},court_free_radius={3,12},court_free_distance={10,30},court_corner_depth={0,12},court_line_width={.05,.8},ball_glow_strength={.05,1},ball_bloom={0,2},crosshair_size={2,24},crosshair_gap={0,20},crosshair_thickness={1,6},crosshair_opacity={.1,1},ball_trail_lifetime={.05,2},ball_trail_width={.1,4},ball_trail_opacity={.05,1},player_trail_lifetime={.05,2},player_trail_width={.1,4},player_trail_opacity={.05,1},ball_reflectance={0,1},court_reflectance={0,1},outline_opacity={0,1},outline_fill_opacity={0,1},sky_stars={0,5000},sky_density={0,.6},sky_haze={0,5},model_height={2,12},model_offset={-6,6},model_rotation={0,360},ui_font_size={14,20},ui_rounding={0,14},ui_opacity={.2,1},guard_strength={.5,2},block_delay={0,.5},shot_range={5,60},glide_speed={4,60},ankle_range={2,20},ankle_delay={.5,5},combo_delay={20,500},ping_factor={0,1},takeover_threshold={1,100},walk_speed={4,60},jump_power={10,120},fly_speed={4,100},spin_speed={10,360},fov={40,110},time={0,24},range={5,60},esp_distance={30,1000},guard_distance={2,10},guard_range={5,60},block_range={3,18},steal_range={2,8},on_ball_speed={4,60},off_ball_speed={4,60},rebound_range={3,15}},definitions={},recording={version=1,steps={}}}
     local registry=Core.module_registry(ctx.report); Engine.registry=registry
     local players,input,run=ctx.players,ctx.input,ctx.run
     local lighting=game:GetService("Lighting")
@@ -1044,14 +1056,18 @@ local function create_pivot_modules(ctx)
         local object=Instance.new(class); object.Parent=parent; scope:defer(function() object:Destroy() end); return object
     end
     add("coverage_hud","Coverage number","Cosmetics","Local geometric estimate: 0% open, 100% covered. Uses defender distance and basket direction; not the game's official contest percentage",{start=function(scope)
-        local board=new_local(scope,"BillboardGui",ctx.gui); board.Name="PivotCoverage"; board.Size=UDim2.fromOffset(148,62); board.StudsOffsetWorldSpace=Vector3.new(0,2.6,0); board.AlwaysOnTop=false; board.LightInfluence=0; board.MaxDistance=150
-        local label=new_local(scope,"TextLabel",board); label.Size=UDim2.fromScale(1,1); label.BackgroundTransparency=1; label.Font=Enum.Font.SourceSansSemibold; label.TextSize=27; label.TextStrokeTransparency=.45; label.Text="--%\nCOVERAGE EST."
-        return {board=board,label=label}
+        local board=new_local(scope,"BillboardGui",ctx.gui); board.Name="PivotCoverage"; board.Size=UDim2.fromOffset(148,72); board.StudsOffsetWorldSpace=Vector3.new(0,2.6,0); board.AlwaysOnTop=false; board.LightInfluence=0; board.MaxDistance=150
+        local label=new_local(scope,"TextLabel",board); label.BackgroundTransparency=1; label.Font=Enum.Font.SourceSansSemibold; label.TextSize=27; label.TextStrokeTransparency=.45; label.Size=UDim2.new(1,0,.55,0); label.Text="--%"
+        local caption=new_local(scope,"TextLabel",board); caption.Size=UDim2.new(1,0,.26,0); caption.Position=UDim2.fromScale(0,.55); caption.BackgroundTransparency=1; caption.Font=Enum.Font.SourceSansSemibold; caption.TextSize=15; caption.TextStrokeTransparency=.5; caption.Text="COVERAGE EST."
+        local track=new_local(scope,"Frame",board); track.Position=UDim2.fromScale(.14,.88); track.Size=UDim2.fromScale(.72,.06); track.BackgroundColor3=Color3.fromRGB(35,38,45); track.BorderSizePixel=0
+        local fill=new_local(scope,"Frame",track); fill.Size=UDim2.fromScale(0,1); fill.BorderSizePixel=0
+        for _,object in ipairs({track,fill}) do local corner=new_local(scope,"UICorner",object); corner.CornerRadius=UDim.new(1,0) end
+        return {board=board,label=label,caption=caption,track=track,fill=fill}
     end,step=function(_,state,s,dt)
         local source=rig(); local mine=root(); local head=source and (source:FindFirstChild("Head") or mine)
         if not mine or not head then state.board.Enabled=false; state.value=nil; return end
         if state.source~=source then state.value=nil; state.source=source end
-        state.board.Adornee=head; state.board.Enabled=true
+        state.board.Adornee=head; state.board.Enabled=true; state.board.Size=UDim2.fromOffset(148*s.coverage_scale,72*s.coverage_scale); state.board.StudsOffsetWorldSpace=Vector3.new(0,s.coverage_height,0)
         local defenders={}; local team=source:GetAttribute("Team")
         for _,who in ipairs(players:GetPlayers()) do
             if who~=ctx.player then
@@ -1065,10 +1081,13 @@ local function create_pivot_modules(ctx)
         end
         local rim=nearest_rim(mine.Position)
         local target=Core.coverage_estimate(mine.Position,rim and rim.Position,defenders,s.coverage_radius)
-        state.value=state.value and state.value+(target-state.value)*math.min(1,(dt or .05)*12) or target
+        state.value=state.value and state.value+(target-state.value)*(1-math.exp(-s.coverage_response*(dt or .05))) or target
         local value=math.floor(state.value+.5)
-        state.label.Text=tostring(value).."%\nCOVERAGE EST."
+        state.label.Text=tostring(value).."%"; state.label.TextSize=27*s.coverage_scale; state.caption.TextSize=15*s.coverage_scale
+        state.label.Visible=s.coverage_display~="Bar"; state.track.Visible=s.coverage_display~="Number"; state.fill.Size=UDim2.fromScale(state.value/100,1)
+        state.caption.Text=(value<15 and "OPEN" or value<40 and "LIGHT" or value<70 and "CONTESTED" or "SMOTHERED").." · EST."
         state.label.TextColor3=value<25 and Color3.fromRGB(132,222,164) or value<60 and Color3.fromRGB(242,205,115) or Color3.fromRGB(240,133,133)
+        state.caption.TextColor3=state.label.TextColor3; state.fill.BackgroundColor3=state.label.TextColor3
     end,interval=.05})
     local function material(name)
         local allowed={SmoothPlastic=true,Plastic=true,Neon=true,Metal=true,Wood=true,WoodPlanks=true,Concrete=true,Glass=true}
@@ -1460,6 +1479,125 @@ local function create_pivot_modules(ctx)
     }
     local model_presets={}
     for _,entry in ipairs(Engine.characters) do model_presets[entry.name]=entry.asset end
+    Engine.model_library={version=1,models={}}
+    Engine.model_cache={}; Engine.model_preload={busy=false,done=0,total=0,failed=0}
+    local library_defaults={}
+    for _,key in ipairs({"model_style","model_fit_pb","model_fit_scale","model_accessory_scale","model_height","model_offset","model_rotation","model_follow_pose","model_motion","model_hide_avatar","model_high_detail","model_show_hair","model_show_hats","model_show_masks","model_show_capes","model_show_weapons","model_show_extras","model_render_region"}) do library_defaults[key]=Engine.settings[key] end
+    function Engine:validate_model_library(data)
+        if type(data)~="table" or data.version~=1 or type(data.models)~="table" then return nil,"Invalid model library" end
+        local result={version=1,models={}}; local names={}; local count=0
+        for key in pairs(data.models) do if type(key)~="number" or key%1~=0 or key<1 then return nil,"Model list must be an array" end; count=count+1 end
+        if count>32 then return nil,"Library supports up to 32 saved models" end
+        for i=1,count do
+            local item=data.models[i]
+            if type(item)~="table" or type(item.name)~="string" or #item.name<1 or #item.name>40 or item.name:find("[%c]") or names[item.name:lower()] then return nil,"Invalid or duplicate model name" end
+            if type(item.asset)~="string" or not item.asset:match("^%d+$") or #item.asset>18 or not item.asset:find("[1-9]") then return nil,"Invalid model asset ID" end
+            local settings,err=Core.validate_module_settings(item.settings or {},library_defaults,self.ranges)
+            if not settings then return nil,err end
+            if settings.model_style~="Basketball" and settings.model_style~="Original costume" then return nil,"Invalid costume style" end
+            if settings.model_render_region~="Focused" and settings.model_render_region~="Full screen" then return nil,"Invalid rendering region" end
+            local preset="Custom"; if type(item.preset)=="string" and model_presets[item.preset]==item.asset then preset=item.preset end
+            names[item.name:lower()]=true; result.models[i]={name=item.name,asset=item.asset,preset=preset,settings=settings}
+        end
+        return result
+    end
+    function Engine:save_model_library()
+        assert(type(writefile)=="function","File saving unavailable; library is kept for this session")
+        local data,err=self:validate_model_library(self.model_library); assert(data,err)
+        writefile("pivot_models.json",game:GetService("HttpService"):JSONEncode(data)); return true
+    end
+    function Engine:read_model_library()
+        assert(type(readfile)=="function","File loading unavailable")
+        local raw=readfile("pivot_models.json"); assert(type(raw)=="string" and #raw<=131072,"Library exceeds 128 KB")
+        local value,err=self:validate_model_library(game:GetService("HttpService"):JSONDecode(raw)); assert(value,err)
+        self.model_library=value; self:prune_model_cache(); return #value.models
+    end
+    function Engine:save_current_model(name)
+        name=tostring(name or ""):match("^%s*(.-)%s*$"); if name=="" then name=self.settings.model_preset end
+        local item={name=name,preset=self.settings.model_preset,asset=model_presets[self.settings.model_preset] or tostring(self.settings.model_asset):match("^%s*(%d+)%s*$"),settings={}}
+        for key in pairs(library_defaults) do item.settings[key]=self.settings[key] end
+        local next_library={version=1,models={}}; local replaced=false
+        for i,old in ipairs(self.model_library.models) do if old.name:lower()==name:lower() then next_library.models[i]=item; replaced=true else next_library.models[i]=old end end
+        if not replaced then next_library.models[#next_library.models+1]=item end
+        local valid,err=self:validate_model_library(next_library); assert(valid,err); self.model_library=valid; self:prune_model_cache()
+        local ok=pcall(function() self:save_model_library() end)
+        ctx.report(ok and "Saved model: "..name or "Saved model for this session: "..name.." / file saving unavailable")
+        return true
+    end
+    function Engine:equip_saved_model(index)
+        local valid,err=self:validate_model_library(self.model_library); assert(valid,err)
+        local item=assert(valid.models[index],"Saved model not found")
+        local previous={}; for key in pairs(library_defaults) do previous[key]=self.settings[key] end
+        previous.model_preset=self.settings.model_preset; previous.model_asset=self.settings.model_asset
+        local was_active=registry.active.custom_model~=nil; registry:disable("custom_model")
+        for key,value in pairs(item.settings) do self.settings[key]=value end
+        self.settings.model_preset=item.preset; self.settings.model_asset=item.asset
+        local ok,failure=registry:enable("custom_model",self.settings)
+        if not ok then for key,value in pairs(previous) do self.settings[key]=value end; if was_active then registry:enable("custom_model",self.settings) end; error(failure) end
+        self.settings.model_save_name=item.name; ctx.report("Equipped "..item.name); return true
+    end
+    function Engine:remove_saved_model(index)
+        assert(self.model_library.models[index],"Saved model not found"); table.remove(self.model_library.models,index)
+        self:prune_model_cache(); local ok=pcall(function() self:save_model_library() end); ctx.report(ok and "Removed saved model" or "Removed saved model for this session")
+    end
+    function Engine:model_objects(asset)
+        local cached=self.model_cache[asset]
+        if cached then local copies={}; for _,object in ipairs(cached) do copies[#copies+1]=object:Clone() end; return copies end
+        return game:GetObjects("rbxassetid://"..asset)
+    end
+    function Engine:clear_model_cache()
+        for _,objects in pairs(self.model_cache) do for _,object in ipairs(objects) do object:Destroy() end end; self.model_cache={}
+    end
+    function Engine:prune_model_cache()
+        local keep={}; for _,item in ipairs(self.model_library.models) do keep[item.asset]=true end
+        for asset,objects in pairs(self.model_cache) do if not keep[asset] then for _,object in ipairs(objects) do object:Destroy() end; self.model_cache[asset]=nil end end
+    end
+    function Engine:preload_model_library()
+        assert(not self.model_preload.busy,"Models are already preloading")
+        local valid,err=self:validate_model_library(self.model_library); assert(valid,err)
+        local progress={busy=true,done=0,total=#valid.models,failed=0}; self.model_preload=progress
+        task.spawn(function()
+            for _,item in ipairs(valid.models) do
+                if self.library_closed then break end
+                if not self.model_cache[item.asset] then
+                    local objects
+                    local ok=pcall(function()
+                        objects=game:GetObjects("rbxassetid://"..item.asset); local parts=0
+                        for _,object in ipairs(objects) do
+                            assert(not object:IsDescendantOf(workspace),"Asset must be detached")
+                            local all={object}; for _,child in ipairs(object:GetDescendants()) do all[#all+1]=child end
+                            for _,child in ipairs(all) do
+                                if child:IsA("BasePart") then parts=parts+1; assert(parts<=500,"Asset exceeds 500 parts") end
+                                if child:IsA("LuaSourceContainer") or child:IsA("Script") or child:IsA("LocalScript") or child:IsA("ModuleScript") or child:IsA("RemoteEvent") or child:IsA("RemoteFunction") then child:Destroy() end
+                            end
+                        end
+                        assert(parts>0,"Asset contains no model geometry")
+                        if self.library_closed then error("Library closed") end
+                        self.model_cache[item.asset]=objects
+                        local provider=game:GetService("ContentProvider"); if provider then
+                            local failures=0; provider:PreloadAsync(objects,function(_,status) if status~=Enum.AssetFetchStatus.Success then failures=failures+1 end end)
+                            assert(failures==0,"Some textures could not preload")
+                        end
+                    end)
+                    if not ok then progress.failed=progress.failed+1; self.model_cache[item.asset]=nil; if objects then for _,object in ipairs(objects) do object:Destroy() end end end
+                end
+                progress.done=progress.done+1; task.wait()
+            end
+            progress.busy=false; self:prune_model_cache()
+            if not self.library_closed then ctx.report("Model preload: "..progress.done.." / "..progress.total.." · "..progress.failed.." failed") end
+        end)
+    end
+    local curated={Sasuke=true,Naruto=true,Sukuna=true,Luffy=true,Saitama=true}
+    function Engine:character_choices()
+        local result={}
+        for _,entry in ipairs(self.characters) do if self.settings.model_catalog=="All" or curated[entry.name] or entry.name=="Custom" or entry.name==self.settings.model_preset then result[#result+1]=entry end end
+        return result
+    end
+    if type(readfile)=="function" then
+        local ok,exists=pcall(function() return type(isfile)~="function" or isfile("pivot_models.json") end)
+        if ok and exists then pcall(function() Engine:read_model_library() end) end
+    end
+
     function Engine:select_character(name)
         local found=false; for _,entry in ipairs(self.characters) do if entry.name==name then found=true; break end end
         assert(found,"Unknown character")
@@ -1716,13 +1854,43 @@ local function create_pivot_modules(ctx)
         costume.fit_scale=s.model_fit_scale
     end
 
+    function Engine:rendering_report()
+        local active=registry.active.custom_model; local state=active and active.state
+        local camera=workspace.CurrentCamera; local size=camera and camera.ViewportSize
+        return {preset=self.settings.model_preset,enabled=active~=nil,mode=self.settings.model_render_region,screen=size and {width=size.X,height=size.Y},region=state and state.render_region,parts=state and #state.parts,textures_ready=state and state.textures_ready,rig=state and state.rig_label}
+    end
+    function Engine:sync_costume_camera(state,s)
+        local source=workspace.CurrentCamera; if not source then return end
+        local size=source.ViewportSize; local bounds
+        if s.model_render_region=="Focused" and source.WorldToViewportPoint then
+            local left,top,right,bottom=math.huge,math.huge,-math.huge,-math.huge; local count=0; local near=false
+            local boxes={}
+            if state.model and state.model.GetBoundingBox then
+                local frame,extent=state.model:GetBoundingBox(); boxes[1]={frame=frame,size=extent}
+            else
+                for _,part in ipairs(state.parts) do if part.Parent and part.Transparency<.95 then boxes[#boxes+1]={frame=part.CFrame,size=part.Size} end end
+            end
+            for _,box in ipairs(boxes) do
+                for _,x in ipairs({-1,1}) do for _,y in ipairs({-1,1}) do for _,z in ipairs({-1,1}) do
+                    local p=box.frame*CFrame.new(box.size.X*x/2,box.size.Y*y/2,box.size.Z*z/2)
+                    local point=source:WorldToViewportPoint(p.Position)
+                    if point.Z<=.2 then near=true else left=math.min(left,point.X); top=math.min(top,point.Y); right=math.max(right,point.X); bottom=math.max(bottom,point.Y); count=count+1 end
+                end end end
+            end
+            if count>0 and not near then bounds={left,top,right,bottom} end
+        end
+        local region=Core.costume_region(size.X,size.Y,source.FieldOfView,bounds); if not region then return end
+        state.viewport.Position=UDim2.fromOffset(region.x,region.y); state.viewport.Size=UDim2.fromOffset(region.width,region.height)
+        state.camera.FieldOfViewMode=Enum.FieldOfViewMode.Vertical; state.camera.CFrame=source.CFrame; state.camera.FieldOfView=region.fov; state.render_region=region
+    end
+
     add("custom_model","Character skin","Character","Basketball style preserves PB body meshes; Sasuke includes a custom Uchiha uniform. Original costume keeps the donor appearance",{start=function(scope,s)
         -- World-parented costume Humanoids have caused live-game flings. Never parent this rig to Workspace.
         s.model_renderer="Viewport"
         assert(model_presets[s.model_preset] or s.model_preset=="Custom","Unknown character preset")
         local asset=model_presets[s.model_preset] or s.model_asset
         asset=tostring(asset):match("^%s*(%d+)%s*$"); assert(asset and #asset<=18,"Enter a numeric Roblox model asset ID")
-        local objects=game:GetObjects("rbxassetid://"..asset); assert(type(objects)=="table" and #objects>0,"Model asset could not be loaded")
+        local objects=Engine:model_objects(asset); assert(type(objects)=="table" and #objects>0,"Model asset could not be loaded")
         local model=Instance.new("Model"); model.Name="PivotCosmeticModel"; local donor_container=model; scope:defer(function() donor_container:Destroy() end)
         local captured_joints,captured_bones={},{}
         -- Objects remain outside the data model until all executable descendants are removed.
@@ -1779,7 +1947,7 @@ local function create_pivot_modules(ctx)
         local binding="PivotCostumeCamera"
         run:BindToRenderStep(binding,Enum.RenderPriority.Last.Value+2,function()
             local current_camera=workspace.CurrentCamera
-            if camera and current_camera then camera.CFrame=current_camera.CFrame; camera.FieldOfView=current_camera.FieldOfView end
+            if state and current_camera then Engine:sync_costume_camera(state,s) end
             if state and rig() then if state.pb_costume then Engine:pose_pb_costume(state,rig(),s) elseif s.model_follow_pose then Engine:pose_character(state,rig()) end end
         end)
         scope:defer(function() run:UnbindFromRenderStep(binding) end)
@@ -1817,7 +1985,7 @@ local function create_pivot_modules(ctx)
         return state
     end,step=function(scope,state,s,dt)
         local source=rig(); local part=root(); assert(source and part,"Character unavailable")
-        local camera=camera_service(); if state.camera then state.camera.CFrame=camera.CFrame; state.camera.FieldOfView=camera.FieldOfView end
+        Engine:sync_costume_camera(state,s)
         if state.viewport then state.viewport.Visible=true end
         for part,original in pairs(state.mesh_fidelity) do pcall(function() part.RenderFidelity=s.model_high_detail and Enum.RenderFidelity.Precise or original end) end
         for _,entry in ipairs(state.accessories) do entry.part.Transparency=s["model_show_"..entry.group] and entry.transparency or 1 end
@@ -1844,7 +2012,7 @@ local function create_pivot_modules(ctx)
     end})
 
     Engine.cosmetic_fields={
-        coverage_hud={{"coverage_radius","Defender range / studs"}},
+        coverage_hud={{"coverage_radius","Defender range / studs"},{"coverage_scale","Display size"},{"coverage_height","Height above head"},{"coverage_response","Response speed"}},
         crosshair={{"crosshair_color","Color / #RRGGBB"},{"crosshair_size","Size"},{"crosshair_gap","Gap"},{"crosshair_thickness","Thickness"},{"crosshair_opacity","Opacity"}},
         ball_trail={{"ball_trail_color","Color / #RRGGBB"},{"ball_trail_lifetime","Lifetime / seconds"},{"ball_trail_width","Width"},{"ball_trail_opacity","Opacity"}},
         player_trail={{"player_trail_color","Color / #RRGGBB"},{"player_trail_lifetime","Lifetime / seconds"},{"player_trail_width","Width"},{"player_trail_opacity","Opacity"}},
@@ -1855,11 +2023,12 @@ local function create_pivot_modules(ctx)
         custom_model={{"model_asset","Custom model asset ID"},{"model_fit_scale","Costume fit"},{"model_accessory_scale","Accessory size"},{"model_height","Model height / studs"},{"model_offset","Height offset"},{"model_rotation","Rotation"}}
     }
     Engine.cosmetic_choices={
+        coverage_hud={{"coverage_display","Display",{"Both","Number","Bar"}}},
         crosshair={{"crosshair_shape","Shape",{"Dot","Cross","Ring"}}},
         ball_appearance={{"ball_material","Material",{"SmoothPlastic","Plastic","Neon","Metal","Glass"}}},
         court_appearance={{"court_material","Material",{"SmoothPlastic","Wood","WoodPlanks","Concrete","Neon"}}},
         sky={{"sky_preset","Sky preset",{"Night","Galaxy","Sunset","Day","Custom"}}},
-        custom_model={{"model_style","Costume style",{"Basketball","Original costume"}}}
+        custom_model={{"model_style","Costume style",{"Basketball","Original costume"}},{"model_render_region","Render region",{"Focused","Full screen"}}}
     }
     Engine.cosmetic_toggles={ball_appearance={{"ball_remove_texture","Remove ball texture"},{"ball_glow","Neon glow"}},court_appearance={{"court_color_lines","Customize court markings"},{"court_remove_texture","Remove floor textures"},{"court_three_enabled","Custom three-point color"},{"court_free_enabled","Custom free-throw color"},{"court_rebuild_markings","Rebuild baked markings"}},self_outline={{"outline_through_walls","Show through walls"}},custom_model={{"model_show_hair","Show hair"},{"model_show_hats","Show hats / headbands"},{"model_show_masks","Show masks / glasses"},{"model_show_capes","Show capes / coats"},{"model_show_weapons","Show weapons"},{"model_show_extras","Show other accessories"},{"model_high_detail","High mesh detail"},{"model_fit_pb","Fit costume to PB body"},{"model_motion","Single-piece motion"},{"model_hide_avatar","Hide your normal avatar"},{"model_follow_pose","Follow player pose"}}}
 
@@ -1899,7 +2068,7 @@ local function create_pivot_modules(ctx)
         if next(held) then ctx.report("Input release pending / press F8 to retry") end
         return next(held)==nil
     end
-    function Engine:close() self:stop(); self.registry:close() end
+    function Engine:close() self.library_closed=true; self:stop(); self.registry:close(); if self.clear_model_cache then self:clear_model_cache() end end
     function Engine:stop_controls()
         -- Auto Green pauses through adapter.paused while typing, retaining its toggle and profiles.
         for _,id in ipairs({"auto_sprint","guard","block","rebound","fly","spin"}) do self.registry:disable(id) end
@@ -2687,10 +2856,10 @@ do
     local container=page
     local collapsed={}
     local expanded,choosing,section_button,record_tools,court_alignment
-    local character_open=false
-    local auxiliary={}; local capture_switch; local character_status
+    local character_open=false; local library_open=false
+    local auxiliary={}; local capture_switch; local character_status; local library_status
     local function clear()
-        for _,object in ipairs(rows) do object:Destroy() end; rows={}; fields={}; auxiliary={}; character_status=nil; y=46
+        for _,object in ipairs(rows) do object:Destroy() end; rows={}; fields={}; auxiliary={}; character_status=nil; library_status=nil; y=46
     end
     local function own(object) rows[#rows+1]=object; return object end
     local function text(value,size,color,height)
@@ -2806,6 +2975,10 @@ do
         for _,entry in ipairs(auxiliary) do if entry.button.Parent then paint_switch(entry.button,entry.read()) end end
         if capture_switch then paint_switch(capture_switch,capture) end
         if character_status and character_status.Parent then local active=engine.registry.active.custom_model; character_status.Text="Selected: "..engine.settings.model_preset.." · "..(active and active.state.rig_label or "Enable Character skin to load") end
+        if library_status and library_status.Parent then
+            local progress=engine.model_preload; local cached=0; for _ in pairs(engine.model_cache) do cached=cached+1 end
+            library_status.Text=progress.busy and ("Preloading "..progress.done.." / "..progress.total) or (cached.." cached · "..progress.failed.." preload failures")
+        end
     end
     local function toggle_action(caption,read,write)
         local row=own(make("Frame",{Position=UDim2.fromOffset(0,y),Size=UDim2.new(1,-6,0,32),BackgroundTransparency=1},container))
@@ -2926,12 +3099,14 @@ do
                 divider.Visible=not collapsed[group]
                 container=card; y=38
                 if not collapsed[group] and group=="Character" then
+                    choice("model_catalog","Presets",{"Curated","All"})
+                    local choices=engine:character_choices()
                     local selector=action("Character  /  "..engine.settings.model_preset..(character_open and "  ▴" or "  ▾"),function() character_open=not character_open; rebuild() end)
                     selector.Name="CharacterDropdown"
                     if character_open then
-                        local menu=make("ScrollingFrame",{Name="CharacterOptions",Position=UDim2.fromOffset(6,y),Size=UDim2.new(1,-12,0,168),CanvasSize=UDim2.fromOffset(0,#engine.characters*30),ScrollBarThickness=3,ScrollBarImageColor3=theme.accent,BackgroundColor3=theme.input,BorderSizePixel=0},card)
+                        local menu=make("ScrollingFrame",{Name="CharacterOptions",Position=UDim2.fromOffset(6,y),Size=UDim2.new(1,-12,0,168),CanvasSize=UDim2.fromOffset(0,#choices*30),ScrollBarThickness=3,ScrollBarImageColor3=theme.accent,BackgroundColor3=theme.input,BorderSizePixel=0},card)
                         make("UICorner",{CornerRadius=UDim.new(0,4)},menu)
-                        for i,entry in ipairs(engine.characters) do
+                        for i,entry in ipairs(choices) do
                             local item=ui.button(menu,entry.name,function()
                                 local ok,err=pcall(function() engine:select_character(entry.name) end); if not ok then report(tostring(err)) end
                                 character_open=false
@@ -2945,6 +3120,25 @@ do
                             item.TextColor3=engine.settings.model_preset==entry.name and theme.accent or theme.text
                         end
                         y=y+176
+                    end
+                    action("Saved models  /  "..#engine.model_library.models..(library_open and "  −" or "  +"),function() library_open=not library_open; rebuild() end)
+                    if library_open then
+                        library_status=text("Saved models stay in pivot_models.json",11,theme.muted,24)
+                        field("model_save_name","Save as")
+                        action("Save current model",function() engine:save_current_model(engine.settings.model_save_name); rebuild() end)
+                        action("Preload all saved models",function() engine:preload_model_library() end)
+                        action("Reload saved library",function() local count=engine:read_model_library(); report("Loaded "..count.." saved models"); rebuild() end)
+                        if #engine.model_library.models>0 then
+                            local height=math.min(170,#engine.model_library.models*34)
+                            local list=make("ScrollingFrame",{Name="SavedModelList",Position=UDim2.fromOffset(0,y),Size=UDim2.new(1,-6,0,height),CanvasSize=UDim2.fromOffset(0,#engine.model_library.models*34),ScrollBarThickness=3,BackgroundTransparency=1,BorderSizePixel=0},container)
+                            for i,item in ipairs(engine.model_library.models) do
+                                local index=i
+                                local button=ui.button(list,item.name.."  ·  Equip",function() local ok,err=pcall(function() engine:equip_saved_model(index) end); if not ok then report(tostring(err)) end; rebuild() end)
+                                button.Position=UDim2.fromOffset(0,(i-1)*34); button.Size=UDim2.new(1,-45,0,30)
+                                local remove=ui.button(list,"×",function() engine:remove_saved_model(index); rebuild() end); remove.Position=UDim2.new(1,-40,0,(i-1)*34); remove.Size=UDim2.fromOffset(32,30)
+                            end
+                            y=y+height+8
+                        end
                     end
                     local active=engine.registry.active.custom_model
                     character_status=text("Selected: "..engine.settings.model_preset.." · "..(active and active.state.rig_label or "Enable Character skin to load"),12,theme.muted,38)
@@ -2980,6 +3174,8 @@ do
                             action("Copy release diagnostics",function() export(engine.shot_stats) end)
                             toggle_action("Ping compensation",function() return engine.settings.ping_compensation end,function(on) engine.settings.ping_compensation=on end)
                             field("ping_factor","Ping compensation strength")
+                        elseif id=="custom_model" then
+                            action("Copy rendering report",function() export(engine:rendering_report()) end)
                         elseif id=="meter_style" then choice("meter_style","Meter style",{"Vertical","Rocket","Bat","Funnel","Hoop","Roblox","None"})
                         elseif id=="guard" then
                             toggle_action("Guard sprint",function() return engine.settings.guard_sprint end,function(on) engine.settings.guard_sprint=on end)
