@@ -412,7 +412,7 @@ local function create_pivot_modules(ctx)
         ball_trail_color="#AAC8FF",ball_trail_lifetime=.35,ball_trail_width=.6,ball_trail_opacity=.7,player_trail_color="#C6CFFF",player_trail_lifetime=.3,player_trail_width=.7,player_trail_opacity=.5,
         ball_color="#D1D6E0",ball_material="SmoothPlastic",ball_reflectance=0,ball_remove_texture=true,ball_glow=true,ball_glow_strength=.8,ball_bloom=.7,court_color="#444C60",court_line_color="#E6E8ED",court_material="SmoothPlastic",court_reflectance=0,court_part_name="CourtFloor",court_color_lines=true,court_remove_texture=true,court_three_color="#E6E8ED",court_free_color="#E6E8ED",court_three_enabled=true,court_free_enabled=true,court_rebuild_markings=true,court_three_radius=34,court_three_angle=128,court_free_radius=8,court_free_distance=21.5,court_corner_depth=6,court_line_width=.18,
         outline_color="#C0C9DC",outline_fill_color="#C0C9DC",outline_opacity=1,outline_fill_opacity=0,outline_through_walls=false,sky_preset="Night",sky_asset="",sky_tint="#8799BB",sky_decay="#283650",sky_stars=3000,sky_density=.22,sky_haze=.5,
-        model_preset="Tung Tung",model_renderer="Native world",model_high_detail=true,model_show_hair=true,model_show_hats=true,model_show_masks=true,model_show_capes=true,model_show_weapons=true,model_show_extras=true,coverage_radius=12,model_fit_pb=true,model_fit_scale=1.015,model_accessory_scale=1,model_asset="",model_height=6,model_offset=0,model_rotation=0,model_follow_pose=true,model_motion=true,model_hide_avatar=true,
+        model_preset="Tung Tung",model_renderer="Viewport",model_high_detail=true,model_show_hair=true,model_show_hats=true,model_show_masks=true,model_show_capes=true,model_show_weapons=true,model_show_extras=true,coverage_radius=12,model_fit_pb=true,model_fit_scale=1.015,model_accessory_scale=1,model_asset="",model_height=6,model_offset=0,model_rotation=0,model_follow_pose=true,model_motion=true,model_hide_avatar=true,
         theme_custom=false,ui_accent="#C0C9DC",ui_font_size=14,ui_rounding=6,ui_opacity=1,refine_good=true,shot_hud=true},ranges={model_accessory_scale={.5,1.5},coverage_radius={4,20},model_fit_scale={.95,1.12},court_three_radius={20,45},court_three_angle={90,180},court_free_radius={3,12},court_free_distance={10,30},court_corner_depth={0,12},court_line_width={.05,.8},ball_glow_strength={.05,1},ball_bloom={0,2},crosshair_size={2,24},crosshair_gap={0,20},crosshair_thickness={1,6},crosshair_opacity={.1,1},ball_trail_lifetime={.05,2},ball_trail_width={.1,4},ball_trail_opacity={.05,1},player_trail_lifetime={.05,2},player_trail_width={.1,4},player_trail_opacity={.05,1},ball_reflectance={0,1},court_reflectance={0,1},outline_opacity={0,1},outline_fill_opacity={0,1},sky_stars={0,5000},sky_density={0,.6},sky_haze={0,5},model_height={2,12},model_offset={-6,6},model_rotation={0,360},ui_font_size={14,20},ui_rounding={0,14},ui_opacity={.2,1},guard_strength={.5,2},block_delay={0,.5},shot_range={5,60},glide_speed={4,60},ankle_range={2,20},ankle_delay={.5,5},combo_delay={20,500},ping_factor={0,1},takeover_threshold={1,100},walk_speed={4,60},jump_power={10,120},fly_speed={4,100},spin_speed={10,360},fov={40,110},time={0,24},range={5,60},esp_distance={30,1000},guard_distance={2,10},guard_range={5,60},block_range={3,18},steal_range={2,8},on_ball_speed={4,60},off_ball_speed={4,60},rebound_range={3,15}},definitions={},recording={version=1,steps={}}}
     local registry=Core.module_registry(ctx.report); Engine.registry=registry
     local players,input,run=ctx.players,ctx.input,ctx.run
@@ -1496,6 +1496,10 @@ local function create_pivot_modules(ctx)
 
     local body_names={Head=true,HumanoidRootPart=true,Torso=true,UpperTorso=true,LowerTorso=true,["Left Arm"]=true,["Right Arm"]=true,["Left Leg"]=true,["Right Leg"]=true,LeftUpperArm=true,LeftLowerArm=true,LeftHand=true,RightUpperArm=true,RightLowerArm=true,RightHand=true,LeftUpperLeg=true,LeftLowerLeg=true,LeftFoot=true,RightUpperLeg=true,RightLowerLeg=true,RightFoot=true}
     local r6_body={UpperTorso="Torso",LowerTorso="Torso",LeftUpperArm="Left Arm",LeftLowerArm="Left Arm",LeftHand="Left Arm",RightUpperArm="Right Arm",RightLowerArm="Right Arm",RightHand="Right Arm",LeftUpperLeg="Left Leg",LeftLowerLeg="Left Leg",LeftFoot="Left Leg",RightUpperLeg="Right Leg",RightLowerLeg="Right Leg",RightFoot="Right Leg"}
+    local normalized_body={}; for name in pairs(body_names) do normalized_body[rig_key(name)]=name end
+    local function canonical_body(name)
+        local key=rig_key(name); return normalized_body[key] or normalized_body[key:gsub("%d+$",""):gsub("^mesh",""):gsub("mesh$","")]
+    end
     local function clean_wearable(part)
         for _,object in ipairs(part:GetDescendants()) do
             if object:IsA("LuaSourceContainer") or object:IsA("Script") or object:IsA("LocalScript") or object:IsA("ModuleScript") or object:IsA("JointInstance") or object:IsA("Motor6D") or object:IsA("Weld") or object:IsA("WeldConstraint") or object:IsA("Constraint") or object:IsA("BodyMover") or object:IsA("BillboardGui") or object:IsA("SurfaceGui") or object:IsA("Sound") or object:IsA("ParticleEmitter") or object:IsA("Trail") or object:IsA("Beam") or object:IsA("Fire") or object:IsA("Smoke") or object:IsA("Sparkles") or object:IsA("Light") then object:Destroy() end
@@ -1503,7 +1507,7 @@ local function create_pivot_modules(ctx)
         part.Anchored=true; part.CanCollide=false; part.CanTouch=false; part.CanQuery=false; part.Massless=true; part.LocalTransparencyModifier=0
     end
     local function accessory_group(part)
-        if body_names[part.Name] then return nil end
+        if canonical_body(part.Name) then return nil end
         local names={}; local item=part; local kind
         while item and item~=workspace do
             if item:IsA("Model") and (item:FindFirstChild("Head") or item:FindFirstChild("Torso") or item:FindFirstChild("UpperTorso")) then break end
@@ -1523,7 +1527,7 @@ local function create_pivot_modules(ctx)
     local function build_pb_costume(donor,source,scope,s,captured_joints)
         local donors={}; local donor_parts={}; local donor_height=donor:GetExtentsSize().Y
         for _,object in ipairs(donor:GetDescendants()) do
-            if object:IsA("BasePart") then donor_parts[#donor_parts+1]=object; if body_names[object.Name] then donors[object.Name]=object end end
+            if object:IsA("BasePart") then donor_parts[#donor_parts+1]=object; local name=canonical_body(object.Name); if name then donors[name]=object end end
         end
         local matched=0
         for _,part in ipairs(source:GetChildren()) do if part:IsA("BasePart") and part.Name~="HumanoidRootPart" and (donors[part.Name] or donors[r6_body[part.Name]]) then matched=matched+1 end end
@@ -1532,13 +1536,14 @@ local function create_pivot_modules(ctx)
         local parts,bindings,extras,nested={},{},{},{}; local used={}
         local function copy_part(original)
             local copy=original:Clone(); assert(copy,"Could not copy costume geometry")
-            clean_wearable(copy); copy:SetAttribute("PivotAccessoryGroup",accessory_group(original)); copy.Parent=model; parts[#parts+1]=copy
+            clean_wearable(copy); copy:SetAttribute("PivotAccessoryGroup",accessory_group(original)); copy.Parent=model; parts[#parts+1]=copy; used[original]=true
             for _,child in ipairs(copy:GetDescendants()) do
                 if child:IsA("BasePart") then
                     clean_wearable(child); child:SetAttribute("PivotAccessoryGroup",copy:GetAttribute("PivotAccessoryGroup")); parts[#parts+1]=child
                     nested[#nested+1]={part=child,anchor=copy,offset=copy.CFrame:ToObjectSpace(child.CFrame),base_size=child.Size,anchor_size=copy.Size}
                 end
             end
+            for _,child in ipairs(original:GetDescendants()) do if child:IsA("BasePart") then used[child]=true end end
             return copy
         end
         for _,real in ipairs(source:GetChildren()) do
@@ -1546,6 +1551,11 @@ local function create_pivot_modules(ctx)
                 local look=donors[real.Name] or donors[r6_body[real.Name]]
                 local exact=donors[real.Name]
                 local copy=copy_part(exact and look or real); copy.Name=real.Name; copy.CFrame=real.CFrame; copy.Size=real.Size*s.model_fit_scale
+                if not exact and look then
+                    -- PB mesh textures can cover the selected outfit; keep geometry, replace its appearance.
+                    if copy:IsA("MeshPart") then pcall(function() copy.TextureID="" end) end
+                    for _,object in ipairs(copy:GetDescendants()) do if object:IsA("SurfaceAppearance") or object:IsA("Decal") or object:IsA("Texture") then object:Destroy() end end
+                end
                 if look then used[look]=true; if exact then for _,child in ipairs(look:GetDescendants()) do if child:IsA("BasePart") then used[child]=true end end end; copy.Color=look.Color; copy.Material=look.Material; copy.Reflectance=look.Reflectance end
                 if real.Name=="HumanoidRootPart" then copy.Transparency=1; model.PrimaryPart=copy end
                 bindings[#bindings+1]={part=copy,name=real.Name}
@@ -1555,23 +1565,26 @@ local function create_pivot_modules(ctx)
             if object:IsA("Shirt") or object:IsA("Pants") or object:IsA("ShirtGraphic") or object:IsA("BodyColors") then local copy=object:Clone(); copy.Parent=model end
         end
         for _,part in ipairs(donor_parts) do
-            if not body_names[part.Name] and not used[part] and part.Transparency<.95 then
+            if not canonical_body(part.Name) and not used[part] and part.Transparency<.95 then
                 local name=part.Name:lower(); local parent=part.Parent; local accessory=false
                 while parent and parent~=donor do if parent:IsA("Accessory") or parent.Name:lower()=="accessories" then accessory=true; break end; parent=parent.Parent end
-                if accessory or accessory_group(part) then
+                -- Preserve unnamed costume meshes too: masks and armor often use generic export names.
+                if not used[part] then
                     local nearest,distance
                     for donor_name,body in pairs(donors) do
                         if donor_name~="HumanoidRootPart" then local d=(body.Position-part.Position).Magnitude; if not distance or d<distance then nearest=body; distance=d end end
                     end
                     -- Prefer the asset's real attachment over a nearest-body guess.
                     for _,joint in ipairs(captured_joints or {}) do
-                        if joint.part1==part and donors[joint.part0.Name]==joint.part0 then nearest=joint.part0; break end
-                        if joint.part0==part and donors[joint.part1.Name]==joint.part1 then nearest=joint.part1; break end
+                        if joint.part1==part and donors[canonical_body(joint.part0.Name)]==joint.part0 then nearest=joint.part0; break end
+                        if joint.part0==part and donors[canonical_body(joint.part1.Name)]==joint.part1 then nearest=joint.part1; break end
                     end
                     if nearest and #extras<80 then
-                        local target=source:FindFirstChild(nearest.Name) or nearest.Name=="Torso" and source:FindFirstChild("UpperTorso")
+                        local nearest_name=canonical_body(nearest.Name)
+                        local target=source:FindFirstChild(nearest_name) or nearest_name=="Torso" and source:FindFirstChild("UpperTorso")
                         if target then
                             local copy=copy_part(part)
+                            if not copy:GetAttribute("PivotAccessoryGroup") then copy:SetAttribute("PivotAccessoryGroup","extras") end
                             local offset=nearest.CFrame:ToObjectSpace(part.CFrame)
                             extras[#extras+1]={part=copy,target=target.Name,offset=offset,donor_size=nearest.Size,base_size=part.Size,group=accessory_group(part)}
                         end
@@ -1628,6 +1641,8 @@ local function create_pivot_modules(ctx)
     end
 
     add("custom_model","Character skin","Character","Wears the selected appearance on a copy of your live PB body. Single-piece models use a fitted costume fallback",{start=function(scope,s)
+        -- World-parented costume Humanoids have caused live-game flings. Never parent this rig to Workspace.
+        s.model_renderer="Viewport"
         assert(model_presets[s.model_preset] or s.model_preset=="Custom","Unknown character preset")
         local asset=model_presets[s.model_preset] or s.model_asset
         asset=tostring(asset):match("^%s*(%d+)%s*$"); assert(asset and #asset<=18,"Enter a numeric Roblox model asset ID")
@@ -1679,15 +1694,10 @@ local function create_pivot_modules(ctx)
         local rig_scale=pb_costume and 1 or height/size.Y*(s.model_fit_pb and s.model_fit_scale or 1)
         if not pb_costume then model:ScaleTo(rig_scale) end
         local viewport,world,camera
-        if s.model_renderer=="Native world" then
-            world=new_local(scope,"Folder",workspace); world.Name="PivotCharacterVisuals"
-        else
-            assert(s.model_renderer=="Viewport","Unknown character renderer")
             viewport=new_local(scope,"ViewportFrame",ctx.gui); viewport.Name="PivotModelViewport"; viewport.Size=UDim2.fromScale(1,1); viewport.BackgroundTransparency=1; viewport.BorderSizePixel=0; viewport.ZIndex=0; viewport.Active=false
             viewport.Ambient=Color3.fromRGB(110,110,110); viewport.LightColor=Color3.fromRGB(255,255,255); viewport.LightDirection=Vector3.new(-1,-1,-1)
             world=Instance.new("WorldModel"); world.Name="PivotModelWorld"; world.Parent=viewport
             camera=Instance.new("Camera"); camera.Parent=viewport; viewport.CurrentCamera=camera
-        end
         model.Parent=world
         local state
         local binding="PivotCostumeCamera"
@@ -1755,7 +1765,7 @@ local function create_pivot_modules(ctx)
         ball_appearance={{"ball_material","Material",{"SmoothPlastic","Plastic","Neon","Metal","Glass"}}},
         court_appearance={{"court_material","Material",{"SmoothPlastic","Wood","WoodPlanks","Concrete","Neon"}}},
         sky={{"sky_preset","Sky preset",{"Night","Galaxy","Sunset","Day","Custom"}}},
-        custom_model={{"model_renderer","Rendering",{"Native world","Viewport"}}}
+        custom_model={}
     }
     Engine.cosmetic_toggles={ball_appearance={{"ball_remove_texture","Remove ball texture"},{"ball_glow","Neon glow"}},court_appearance={{"court_color_lines","Customize court markings"},{"court_remove_texture","Remove floor textures"},{"court_three_enabled","Custom three-point color"},{"court_free_enabled","Custom free-throw color"},{"court_rebuild_markings","Rebuild baked markings"}},self_outline={{"outline_through_walls","Show through walls"}},custom_model={{"model_show_hair","Show hair"},{"model_show_hats","Show hats / headbands"},{"model_show_masks","Show masks / glasses"},{"model_show_capes","Show capes / coats"},{"model_show_weapons","Show weapons"},{"model_show_extras","Show other accessories"},{"model_high_detail","High mesh detail"},{"model_fit_pb","Fit costume to PB body"},{"model_motion","Single-piece motion"},{"model_hide_avatar","Hide your normal avatar"},{"model_follow_pose","Follow player pose"}}}
 
@@ -1797,7 +1807,8 @@ local function create_pivot_modules(ctx)
     end
     function Engine:close() self:stop(); self.registry:close() end
     function Engine:stop_controls()
-        for _,id in ipairs({"auto_sprint","guard","block","rebound","meter_release","fly","spin"}) do self.registry:disable(id) end
+        -- Auto Green pauses through adapter.paused while typing, retaining its toggle and profiles.
+        for _,id in ipairs({"auto_sprint","guard","block","rebound","fly","spin"}) do self.registry:disable(id) end
         for _,owner in pairs(held) do release_owned(owner) end
         self.capturing=false
     end
@@ -1820,6 +1831,7 @@ local function create_pivot_modules(ctx)
     ctx.connect(input.InputBegan,function(event) if event.KeyCode==Enum.KeyCode.F8 then Engine:stop() end end)
     return Engine
 end
+
 
 Core.create_pivot_modules=create_pivot_modules
 if C4_HUB_TEST then return Core end
