@@ -391,10 +391,10 @@ local function create_pivot_modules(ctx)
         guard_distance=4,guard_range=25,block_range=12,steal_range=5,steal_key="",spectate="",
         on_ball_speed=20,off_ball_speed=20,guard_target="",jump_key="Space",rebound_range=8,team_check=true,guard_sprint=false,ball_handler_only=false,guard_strength=1,block_delay=0,shot_range=34,glide_speed=20,ankle_range=8,ankle_delay=1.2,ankle_combo="ZX",custom_combo="Z X C",combo_delay=110,combo_bind="F5",meter_style="Vertical",auto_calibrate=true,ping_compensation=false,ping_factor=.5,takeover_threshold=100,theme_mode="Graphite",crosshair_shape="Cross",crosshair_color="#E6E8ED",crosshair_size=6,crosshair_gap=4,crosshair_thickness=2,crosshair_opacity=1,
         ball_trail_color="#AAC8FF",ball_trail_lifetime=.35,ball_trail_width=.6,ball_trail_opacity=.7,player_trail_color="#C6CFFF",player_trail_lifetime=.3,player_trail_width=.7,player_trail_opacity=.5,
-        ball_color="#D1D6E0",ball_material="SmoothPlastic",ball_reflectance=0,ball_remove_texture=true,ball_glow=true,ball_glow_strength=.8,ball_bloom=.7,court_color="#444C60",court_line_color="#E6E8ED",court_material="SmoothPlastic",court_reflectance=0,court_part_name="CourtFloor",court_color_lines=true,court_remove_texture=true,
+        ball_color="#D1D6E0",ball_material="SmoothPlastic",ball_reflectance=0,ball_remove_texture=true,ball_glow=true,ball_glow_strength=.8,ball_bloom=.7,court_color="#444C60",court_line_color="#E6E8ED",court_material="SmoothPlastic",court_reflectance=0,court_part_name="CourtFloor",court_color_lines=true,court_remove_texture=true,court_three_color="#E6E8ED",court_free_color="#E6E8ED",court_three_enabled=true,court_free_enabled=true,court_rebuild_markings=true,court_three_radius=34,court_three_angle=128,court_free_radius=8,court_free_distance=21.5,court_corner_depth=6,court_line_width=.18,
         outline_color="#C0C9DC",outline_fill_color="#C0C9DC",outline_opacity=1,outline_fill_opacity=0,outline_through_walls=false,sky_preset="Night",sky_asset="",sky_tint="#8799BB",sky_decay="#283650",sky_stars=3000,sky_density=.22,sky_haze=.5,
         model_preset="Tung Tung",model_asset="",model_height=6,model_offset=0,model_rotation=0,model_follow_pose=true,model_motion=true,model_hide_avatar=true,
-        theme_custom=false,ui_accent="#C0C9DC",ui_font_size=14,ui_rounding=6,ui_opacity=1,refine_good=true,shot_hud=true},ranges={ball_glow_strength={.05,1},ball_bloom={0,2},crosshair_size={2,24},crosshair_gap={0,20},crosshair_thickness={1,6},crosshair_opacity={.1,1},ball_trail_lifetime={.05,2},ball_trail_width={.1,4},ball_trail_opacity={.05,1},player_trail_lifetime={.05,2},player_trail_width={.1,4},player_trail_opacity={.05,1},ball_reflectance={0,1},court_reflectance={0,1},outline_opacity={0,1},outline_fill_opacity={0,1},sky_stars={0,5000},sky_density={0,.6},sky_haze={0,5},model_height={2,12},model_offset={-6,6},model_rotation={0,360},ui_font_size={14,20},ui_rounding={0,14},ui_opacity={.2,1},guard_strength={.5,2},block_delay={0,.5},shot_range={5,60},glide_speed={4,60},ankle_range={2,20},ankle_delay={.5,5},combo_delay={20,500},ping_factor={0,1},takeover_threshold={1,100},walk_speed={4,60},jump_power={10,120},fly_speed={4,100},spin_speed={10,360},fov={40,110},time={0,24},range={5,60},esp_distance={30,1000},guard_distance={2,10},guard_range={5,60},block_range={3,18},steal_range={2,8},on_ball_speed={4,60},off_ball_speed={4,60},rebound_range={3,15}},definitions={},recording={version=1,steps={}}}
+        theme_custom=false,ui_accent="#C0C9DC",ui_font_size=14,ui_rounding=6,ui_opacity=1,refine_good=true,shot_hud=true},ranges={court_three_radius={20,45},court_three_angle={90,180},court_free_radius={3,12},court_free_distance={10,30},court_corner_depth={0,12},court_line_width={.05,.8},ball_glow_strength={.05,1},ball_bloom={0,2},crosshair_size={2,24},crosshair_gap={0,20},crosshair_thickness={1,6},crosshair_opacity={.1,1},ball_trail_lifetime={.05,2},ball_trail_width={.1,4},ball_trail_opacity={.05,1},player_trail_lifetime={.05,2},player_trail_width={.1,4},player_trail_opacity={.05,1},ball_reflectance={0,1},court_reflectance={0,1},outline_opacity={0,1},outline_fill_opacity={0,1},sky_stars={0,5000},sky_density={0,.6},sky_haze={0,5},model_height={2,12},model_offset={-6,6},model_rotation={0,360},ui_font_size={14,20},ui_rounding={0,14},ui_opacity={.2,1},guard_strength={.5,2},block_delay={0,.5},shot_range={5,60},glide_speed={4,60},ankle_range={2,20},ankle_delay={.5,5},combo_delay={20,500},ping_factor={0,1},takeover_threshold={1,100},walk_speed={4,60},jump_power={10,120},fly_speed={4,100},spin_speed={10,360},fov={40,110},time={0,24},range={5,60},esp_distance={30,1000},guard_distance={2,10},guard_range={5,60},block_range={3,18},steal_range={2,8},on_ball_speed={4,60},off_ball_speed={4,60},rebound_range={3,15}},definitions={},recording={version=1,steps={}}}
     local registry=Core.module_registry(ctx.report); Engine.registry=registry
     local players,input,run=ctx.players,ctx.input,ctx.run
     local lighting=game:GetService("Lighting")
@@ -1085,6 +1085,143 @@ local function create_pivot_modules(ctx)
         for part,glow in pairs(state.glows) do if not seen[part] then glow:Destroy(); state.glows[part]=nil end end
         state.bloom.Enabled=glowing>0; state.bloom.Intensity=s.ball_bloom; state.bloom.Size=18; state.bloom.Threshold=.9
     end,interval=.1})
+    local function court_line_kind(object)
+        local text=""; local current=object
+        for _=1,4 do
+            if not current or current==workspace then break end
+            text=text.." "..current.Name:lower():gsub("[^%w]",""); current=current.Parent
+        end
+        local name=object.Name:lower()
+        if name=="shooter" or name:find("trigger",1,true) or name:find("zone",1,true) or name:find("sensor",1,true) then return nil end
+        if text:find("threepoint",1,true) or text:find("3point",1,true) or text:find("threept",1,true) or text:find("3pt",1,true) then return "three" end
+        if text:find("freethrow",1,true) or text:find("foulcircle",1,true) or text:find("ftline",1,true) then return "free" end
+        if name:find("line",1,true) or name:find("arc",1,true) or name:find("circle",1,true) or name=="paint" or name=="key" then return "other" end
+    end
+    local function court_line_nodes(state)
+        local groups={three={},free={},other={}}; local seen={}
+        local function add(object)
+            if seen[object] then return end
+            local kind=court_line_kind(object)
+            if kind and (object:IsA("BasePart") or object:IsA("Decal") or object:IsA("Texture") or object:IsA("ImageLabel") or object:IsA("Frame")) then
+                seen[object]=true; groups[kind][#groups[kind]+1]=object
+            end
+        end
+        for _,object in ipairs(state.lines) do add(object); for _,child in ipairs(object:GetDescendants()) do add(child) end end
+        for _,surface in ipairs(state.surfaces) do for _,object in ipairs(surface:GetDescendants()) do add(object) end end
+        return groups
+    end
+    local function paint_court_line(scope,object,color,enabled)
+        local property=object:IsA("BasePart") and "Color" or (object:IsA("Decal") or object:IsA("Texture")) and "Color3" or object:IsA("ImageLabel") and "ImageColor3" or "BackgroundColor3"
+        if enabled then scope:set(object,property,color) else scope:restore(object,property) end
+        if object:IsA("Decal") or object:IsA("Texture") then scope:restore(object,"Transparency") end
+    end
+    local function marking_anchors(state)
+        local rims,free={},{}; local seen={}; local roots={}
+        for _,name in ipairs({"Map","Courts","Court","Hoops"}) do local object=workspace:FindFirstChild(name); if object then roots[#roots+1]=object end end
+        for _,folder in ipairs(roots) do
+            for _,object in ipairs(folder:GetDescendants()) do
+                if object:IsA("BasePart") and not seen[object] then
+                    seen[object]=true
+                    if object.Name=="Rim" then
+                        local duplicate=false
+                        for _,prior in ipairs(rims) do if (prior.Position-object.Position).Magnitude<1 then duplicate=true; break end end
+                        if not duplicate then rims[#rims+1]=object end
+                    elseif object.Name:lower()=="shooter" and object.Parent and object.Parent.Name:lower():gsub("[^%w]",""):find("freethrow",1,true) then free[#free+1]=object end
+                end
+            end
+        end
+        local anchors={}
+        for _,rim in ipairs(rims) do
+            local floor,y
+            for _,surface in ipairs(state.surfaces) do
+                if surface.Parent then
+                    local point=surface.CFrame:PointToObjectSpace(rim.Position); local top=surface.Position.Y+surface.Size.Y/2; local height=rim.Position.Y-top
+                    if math.abs(point.X)<=surface.Size.X/2+6 and math.abs(point.Z)<=surface.Size.Z/2+6 and height>=2 and height<=30 then floor=surface; y=top+.035; break end
+                end
+            end
+            if floor then
+                local center=Vector3.new(rim.Position.X,y,rim.Position.Z); local marker,distance
+                for _,object in ipairs(free) do
+                    local d=Vector3.new(object.Position.X-center.X,0,object.Position.Z-center.Z).Magnitude
+                    if d>5 and d<35 and (not distance or d<distance) then marker=object; distance=d end
+                end
+                local toward
+                if marker then toward=Vector3.new(marker.Position.X-center.X,0,marker.Position.Z-center.Z)
+                else
+                    local other,best
+                    for _,object in ipairs(rims) do
+                        local d=(object.Position-rim.Position).Magnitude
+                        if object~=rim and d>30 and (not best or d<best) then other=object; best=d end
+                    end
+                    toward=other and Vector3.new(other.Position.X-center.X,0,other.Position.Z-center.Z) or Vector3.new(floor.Position.X-center.X,0,floor.Position.Z-center.Z)
+                end
+                if toward.Magnitude>.1 then
+                    anchors[#anchors+1]={center=center,forward=toward.Unit,free_distance=marker and toward.Magnitude or nil}
+                    if #anchors>=8 then break end
+                end
+            end
+        end
+        return anchors
+    end
+    local function update_court_markings(scope,state,s)
+        local groups=court_line_nodes(state)
+        for kind,objects in pairs(groups) do
+            local enabled=s.court_color_lines and (kind=="three" and s.court_three_enabled or kind=="free" and s.court_free_enabled or kind=="other")
+            local color=cosmetic_color(kind=="three" and s.court_three_color or kind=="free" and s.court_free_color or s.court_line_color)
+            for _,object in ipairs(objects) do paint_court_line(scope,object,color,enabled) end
+        end
+        local three=s.court_color_lines and s.court_three_enabled and s.court_rebuild_markings and #groups.three==0
+        local free=s.court_color_lines and s.court_free_enabled and s.court_rebuild_markings and #groups.free==0
+        local anchors=(three or free) and marking_anchors(state) or {}
+        local signature=table.concat({tostring(three),tostring(free),s.court_three_radius,s.court_three_angle,s.court_free_radius,s.court_free_distance,s.court_corner_depth,s.court_line_width},"/")
+        for _,anchor in ipairs(anchors) do signature=signature..string.format("/%.2f/%.2f/%.2f/%.2f/%.2f/%.2f",anchor.center.X,anchor.center.Y,anchor.center.Z,anchor.forward.X,anchor.forward.Z,anchor.free_distance or 0) end
+        if signature~=state.marking_signature then
+            state.marking_signature=signature
+            if not state.marking_folder then state.marking_folder=new_local(scope,"Folder",workspace); state.marking_folder.Name="PivotCourtMarkings" end
+            for _,object in ipairs(state.marking_folder:GetChildren()) do object:Destroy() end
+            state.marking_parts={}
+            local function draw(a,b,kind)
+                local midpoint=(a+b)/2; local inside=false
+                for _,surface in ipairs(state.surfaces) do
+                    local point=surface.CFrame:PointToObjectSpace(midpoint)
+                    if math.abs(point.X)<=surface.Size.X/2+.1 and math.abs(point.Z)<=surface.Size.Z/2+.1 then inside=true; break end
+                end
+                local length=(b-a).Magnitude
+                if not inside or length<.001 then return end
+                local part=Instance.new("Part"); part.Name=kind=="three" and "ThreePointLine" or "FreeThrowLine"
+                part.Anchored=true; part.CanCollide=false; part.CanTouch=false; part.CanQuery=false; part.CastShadow=false; part.Material=Enum.Material.SmoothPlastic
+                part.Size=Vector3.new(s.court_line_width,.025,length+.015); part.CFrame=CFrame.new(midpoint,b); part.Parent=state.marking_folder
+                state.marking_parts[#state.marking_parts+1]={object=part,kind=kind}
+            end
+            for _,anchor in ipairs(anchors) do
+                local center=anchor.center; local forward=anchor.forward; local right=Vector3.new(-forward.Z,0,forward.X)
+                if three then
+                    local radius=s.court_three_radius; local angle=math.rad(s.court_three_angle/2); local previous
+                    for i=0,64 do
+                        local theta=-angle+2*angle*i/64
+                        local point=center+forward*(math.cos(theta)*radius)+right*(math.sin(theta)*radius)
+                        if previous then draw(previous,point,"three") end; previous=point
+                    end
+                    for _,sign in ipairs({-1,1}) do
+                        local edge=right*(sign*math.sin(angle)*radius)
+                        draw(center+forward*(math.cos(angle)*radius)+edge,center-forward*s.court_corner_depth+edge,"three")
+                    end
+                end
+                if free then
+                    local ft=center+forward*(anchor.free_distance or s.court_free_distance)
+                    local previous
+                    for i=0,48 do
+                        local theta=2*math.pi*i/48; local point=ft+forward*(math.cos(theta)*s.court_free_radius)+right*(math.sin(theta)*s.court_free_radius)
+                        if previous then draw(previous,point,"free") end; previous=point
+                    end
+                    draw(ft-right*s.court_free_radius,ft+right*s.court_free_radius,"free")
+                end
+            end
+        end
+        for _,entry in ipairs(state.marking_parts or {}) do entry.object.Color=cosmetic_color(entry.kind=="three" and s.court_three_color or s.court_free_color) end
+        state.marking_summary="Native markings: "..#groups.three.." three-point / "..#groups.free.." free-throw; "..#(state.marking_parts or {}).." replacement segments"
+    end
+
     local function named_court_parts(s)
         local surfaces,lines={},{}
         local roots={}; for _,name in ipairs({"Map","Courts","Court"}) do local object=workspace:FindFirstChild(name); if object then roots[#roots+1]=object end end
@@ -1096,7 +1233,7 @@ local function create_pivot_modules(ctx)
                     while parent and parent~=workspace do if parent.Name:lower():find("court",1,true) then in_court=true; break end; parent=parent.Parent end
                     local selected=s.court_part_name~="" and part.Name:lower()==s.court_part_name:lower()
                     if selected or name=="courtfloor" or name=="courtsurface" or name=="playingsurface" or (name=="floor" and in_court) then surfaces[#surfaces+1]=part
-                    elseif in_court and (name:find("line",1,true) or name=="paint" or name=="key") then lines[#lines+1]=part end
+                    elseif in_court and court_line_kind(part) then lines[#lines+1]=part end
                 end
             end
         end
@@ -1135,7 +1272,7 @@ local function create_pivot_modules(ctx)
                     local horizontal=math.abs(part.CFrame.UpVector.Y)>.9
                     if distance<=140 and same_plane and horizontal then
                         local name=part.Name:lower()
-                        if name:find("line",1,true) or name=="paint" or name=="key" then lines[#lines+1]=part
+                        if court_line_kind(part) then lines[#lines+1]=part
                         elseif size.X>=4 and size.Z>=4 and size.Y<=4 then surfaces[#surfaces+1]=part end
                     end
                 end
@@ -1187,9 +1324,9 @@ local function create_pivot_modules(ctx)
                 end
             end
         end
-        for _,part in ipairs(state.lines) do if part.Parent then if s.court_color_lines then scope:set(part,"Color",line_color) else scope:restore(part,"Color") end end end
+        update_court_markings(scope,state,s)
     end
-    add("court_appearance","Court appearance","Cosmetics","Detects the floor under you when names differ. Texture removal reveals the color but can hide baked court markings.",{start=function(scope,s)
+    add("court_appearance","Court appearance","Cosmetics","Separate three-point/free-throw colors. Baked markings use adjustable local replacements; align them under Marking alignment.",{start=function(scope,s)
         local surfaces,lines=choose_court(s)
         local state={surfaces=surfaces,lines=lines,selector=s.court_part_name,appearances={}}
         apply_court(scope,state,s); ctx.report("Court appearance: "..#surfaces.." floor surfaces / "..#lines.." separate line parts")
@@ -1304,7 +1441,7 @@ local function create_pivot_modules(ctx)
         ball_trail={{"ball_trail_color","Color / #RRGGBB"},{"ball_trail_lifetime","Lifetime / seconds"},{"ball_trail_width","Width"},{"ball_trail_opacity","Opacity"}},
         player_trail={{"player_trail_color","Color / #RRGGBB"},{"player_trail_lifetime","Lifetime / seconds"},{"player_trail_width","Width"},{"player_trail_opacity","Opacity"}},
         ball_appearance={{"ball_color","Color / #RRGGBB"},{"ball_reflectance","Reflectance"},{"ball_glow_strength","Ball surface glow"},{"ball_bloom","Neon bloom strength"}},
-        court_appearance={{"court_color","Floor / #RRGGBB"},{"court_line_color","Lines / #RRGGBB"},{"court_reflectance","Reflectance"},{"court_part_name","Exact surface part name"}},
+        court_appearance={{"court_color","Floor / #RRGGBB"},{"court_line_color","Other lines / #RRGGBB"},{"court_three_color","Three-point / #RRGGBB"},{"court_free_color","Free throw / #RRGGBB"},{"court_reflectance","Reflectance"},{"court_part_name","Exact surface part name"}},
         self_outline={{"outline_color","Outline / #RRGGBB"},{"outline_fill_color","Fill / #RRGGBB"},{"outline_opacity","Outline opacity"},{"outline_fill_opacity","Fill opacity"}},
         sky={{"sky_asset","Custom sky model asset ID"},{"sky_tint","Sky tint / #RRGGBB"},{"sky_decay","Atmosphere / #RRGGBB"},{"sky_stars","Star count"},{"sky_density","Atmosphere density"},{"sky_haze","Haze"}},
         custom_model={{"model_asset","Custom model asset ID"},{"model_height","Model height / studs"},{"model_offset","Height offset"},{"model_rotation","Rotation"}}
@@ -1316,7 +1453,7 @@ local function create_pivot_modules(ctx)
         sky={{"sky_preset","Sky preset",{"Night","Galaxy","Sunset","Day","Custom"}}},
         custom_model={{"model_preset","Model",{"Tung Tung","Sasuke","Custom"}}}
     }
-    Engine.cosmetic_toggles={ball_appearance={{"ball_remove_texture","Remove ball texture"},{"ball_glow","Neon glow"}},court_appearance={{"court_color_lines","Color separate line parts"},{"court_remove_texture","Remove floor textures"}},self_outline={{"outline_through_walls","Show through walls"}},custom_model={{"model_motion","Run / jump motion"},{"model_hide_avatar","Hide your normal avatar"},{"model_follow_pose","Follow matching body parts"}}}
+    Engine.cosmetic_toggles={ball_appearance={{"ball_remove_texture","Remove ball texture"},{"ball_glow","Neon glow"}},court_appearance={{"court_color_lines","Customize court markings"},{"court_remove_texture","Remove floor textures"},{"court_three_enabled","Custom three-point color"},{"court_free_enabled","Custom free-throw color"},{"court_rebuild_markings","Rebuild baked markings"}},self_outline={{"outline_through_walls","Show through walls"}},custom_model={{"model_motion","Run / jump motion"},{"model_hide_avatar","Hide your normal avatar"},{"model_follow_pose","Follow matching body parts"}}}
 
     Engine.shot_stats={total=0,perfect=0,good=0,early=0,late=0,skipped=0,releases=0,unconfirmed=0,last="Waiting for a shot",history={}}
     function Engine:record_shot(event)
@@ -2139,7 +2276,7 @@ do
     local category="All"; local rows={}; local fields={}; local y=0
     local container=page
     local collapsed={}
-    local expanded,choosing,section_button,record_tools
+    local expanded,choosing,section_button,record_tools,court_alignment
     local auxiliary={}; local capture_switch
     local function clear()
         for _,object in ipairs(rows) do object:Destroy() end; rows={}; fields={}; auxiliary={}; y=46
@@ -2359,7 +2496,14 @@ do
                             toggle_action("Ball handler only",function() return engine.settings.ball_handler_only end,function(on) engine.settings.ball_handler_only=on end)
                             toggle_action("Team check",function() return engine.settings.team_check end,function(on) engine.settings.team_check=on end)
                         end
-                        if id=="court_appearance" then action("Select floor beneath me",function() engine:select_court_under_player() end) end
+                        if id=="court_appearance" then
+                            action("Select floor beneath me",function() engine:select_court_under_player() end)
+                            action(court_alignment and "Marking alignment  −" or "Marking alignment  +",function() court_alignment=not court_alignment; rebuild() end)
+                            if court_alignment then
+                                field("court_three_radius","Three-point radius"); field("court_three_angle","Three-point arc angle"); field("court_free_radius","Free-throw circle radius"); field("court_free_distance","Free-throw fallback distance"); field("court_corner_depth","Corner line depth"); field("court_line_width","Line width")
+                            end
+                            action("Check detected markings",function() local active=engine.registry.active.court_appearance; report(active and active.state.marking_summary or "Enable Court appearance first") end)
+                        end
                         if id=="dribble_macros" then action("Run custom combo",function() engine:run_combo() end) end
                         if id=="guard" then action("Use nearest rim as defensive goal",function() engine:select_defensive_rim() end) end
                         y=y+7
