@@ -391,10 +391,10 @@ local function create_pivot_modules(ctx)
         guard_distance=4,guard_range=25,block_range=12,steal_range=5,steal_key="",spectate="",
         on_ball_speed=20,off_ball_speed=20,guard_target="",jump_key="Space",rebound_range=8,team_check=true,guard_sprint=false,ball_handler_only=false,guard_strength=1,block_delay=0,shot_range=34,glide_speed=20,ankle_range=8,ankle_delay=1.2,ankle_combo="ZX",custom_combo="Z X C",combo_delay=110,combo_bind="F5",meter_style="Vertical",auto_calibrate=true,ping_compensation=false,ping_factor=.5,takeover_threshold=100,theme_mode="Graphite",crosshair_shape="Cross",crosshair_color="#E6E8ED",crosshair_size=6,crosshair_gap=4,crosshair_thickness=2,crosshair_opacity=1,
         ball_trail_color="#AAC8FF",ball_trail_lifetime=.35,ball_trail_width=.6,ball_trail_opacity=.7,player_trail_color="#C6CFFF",player_trail_lifetime=.3,player_trail_width=.7,player_trail_opacity=.5,
-        ball_color="#D1D6E0",ball_material="SmoothPlastic",ball_reflectance=0,ball_remove_texture=true,court_color="#444C60",court_line_color="#E6E8ED",court_material="SmoothPlastic",court_reflectance=0,court_part_name="CourtFloor",court_color_lines=true,
+        ball_color="#D1D6E0",ball_material="SmoothPlastic",ball_reflectance=0,ball_remove_texture=true,ball_glow=true,ball_glow_brightness=2,ball_glow_range=10,ball_bloom=.7,court_color="#444C60",court_line_color="#E6E8ED",court_material="SmoothPlastic",court_reflectance=0,court_part_name="CourtFloor",court_color_lines=true,court_remove_texture=true,
         outline_color="#C0C9DC",outline_fill_color="#C0C9DC",outline_opacity=1,outline_fill_opacity=0,outline_through_walls=false,sky_preset="Night",sky_asset="",sky_tint="#8799BB",sky_decay="#283650",sky_stars=3000,sky_density=.22,sky_haze=.5,
-        model_preset="Tung Tung",model_asset="",model_height=6,model_offset=0,model_rotation=0,model_follow_pose=false,model_hide_avatar=true,
-        theme_custom=false,ui_accent="#C0C9DC",ui_font_size=14,ui_rounding=6,ui_opacity=1,refine_good=true,shot_hud=true},ranges={crosshair_size={2,24},crosshair_gap={0,20},crosshair_thickness={1,6},crosshair_opacity={.1,1},ball_trail_lifetime={.05,2},ball_trail_width={.1,4},ball_trail_opacity={.05,1},player_trail_lifetime={.05,2},player_trail_width={.1,4},player_trail_opacity={.05,1},ball_reflectance={0,1},court_reflectance={0,1},outline_opacity={0,1},outline_fill_opacity={0,1},sky_stars={0,5000},sky_density={0,.6},sky_haze={0,5},model_height={2,12},model_offset={-6,6},model_rotation={0,360},ui_font_size={14,20},ui_rounding={0,14},ui_opacity={.2,1},guard_strength={.5,2},block_delay={0,.5},shot_range={5,60},glide_speed={4,60},ankle_range={2,20},ankle_delay={.5,5},combo_delay={20,500},ping_factor={0,1},takeover_threshold={1,100},walk_speed={4,60},jump_power={10,120},fly_speed={4,100},spin_speed={10,360},fov={40,110},time={0,24},range={5,60},esp_distance={30,1000},guard_distance={2,10},guard_range={5,60},block_range={3,18},steal_range={2,8},on_ball_speed={4,60},off_ball_speed={4,60},rebound_range={3,15}},definitions={},recording={version=1,steps={}}}
+        model_preset="Tung Tung",model_asset="",model_height=6,model_offset=0,model_rotation=0,model_follow_pose=true,model_motion=true,model_hide_avatar=true,
+        theme_custom=false,ui_accent="#C0C9DC",ui_font_size=14,ui_rounding=6,ui_opacity=1,refine_good=true,shot_hud=true},ranges={ball_glow_brightness={0,5},ball_glow_range={2,20},ball_bloom={0,2},crosshair_size={2,24},crosshair_gap={0,20},crosshair_thickness={1,6},crosshair_opacity={.1,1},ball_trail_lifetime={.05,2},ball_trail_width={.1,4},ball_trail_opacity={.05,1},player_trail_lifetime={.05,2},player_trail_width={.1,4},player_trail_opacity={.05,1},ball_reflectance={0,1},court_reflectance={0,1},outline_opacity={0,1},outline_fill_opacity={0,1},sky_stars={0,5000},sky_density={0,.6},sky_haze={0,5},model_height={2,12},model_offset={-6,6},model_rotation={0,360},ui_font_size={14,20},ui_rounding={0,14},ui_opacity={.2,1},guard_strength={.5,2},block_delay={0,.5},shot_range={5,60},glide_speed={4,60},ankle_range={2,20},ankle_delay={.5,5},combo_delay={20,500},ping_factor={0,1},takeover_threshold={1,100},walk_speed={4,60},jump_power={10,120},fly_speed={4,100},spin_speed={10,360},fov={40,110},time={0,24},range={5,60},esp_distance={30,1000},guard_distance={2,10},guard_range={5,60},block_range={3,18},steal_range={2,8},on_ball_speed={4,60},off_ball_speed={4,60},rebound_range={3,15}},definitions={},recording={version=1,steps={}}}
     local registry=Core.module_registry(ctx.report); Engine.registry=registry
     local players,input,run=ctx.players,ctx.input,ctx.run
     local lighting=game:GetService("Lighting")
@@ -458,7 +458,7 @@ local function create_pivot_modules(ctx)
     add("fullbright","Fullbright","World","Lighting, ambient, shadows, fog and daytime",{start=fullbright,step=fullbright,interval=.2,conflicts={"time","shadows","fog"}})
     local function effects(scope)
         for _,parent in ipairs({lighting,camera_service()}) do
-            for _,obj in ipairs(parent:GetDescendants()) do if obj:IsA("PostEffect") then scope:set(obj,"Enabled",false) end end
+            for _,obj in ipairs(parent:GetDescendants()) do if obj:IsA("PostEffect") and obj.Name~="PivotBallBloom" then scope:set(obj,"Enabled",false) end end
         end
     end
     add("post_effects","Remove post effects","World","Disables blur, bloom, depth of field and color effects locally",{start=effects,step=effects,interval=1})
@@ -1044,34 +1044,49 @@ local function create_pivot_modules(ctx)
     end
     trail_module("ball_trail","Ball trail",true)
     trail_module("player_trail","Player trail",false)
-    add("ball_appearance","Ball appearance","Cosmetics","Changes local ball color and material; optional texture removal",{start=function() return {} end,step=function(scope,_,s)
-        local color=cosmetic_color(s.ball_color); local chosen=material(s.ball_material); local parts={}
+    add("ball_appearance","Ball appearance","Cosmetics","Local color/material override; Neon glow adds a local light and bloom",{start=function(scope)
+        local state={lights={}}
+        local bloom=Instance.new("BloomEffect"); bloom.Name="PivotBallBloom"; bloom.Enabled=false; bloom.Parent=lighting; state.bloom=bloom
+        scope:defer(function() bloom:Destroy(); for _,light in pairs(state.lights) do light:Destroy() end end)
+        return state
+    end,step=function(scope,state,s)
+        local color=cosmetic_color(s.ball_color); local chosen=material(s.ball_material); local parts={}; local seen={}; local glowing=0
         for _,item in ipairs(candidates("balls")) do parts[#parts+1]=item.object end
         local own=held_ball(rig()); if own then parts[#parts+1]=own end
         for _,part in ipairs(parts) do
-            scope:set(part,"Color",color); scope:set(part,"Material",chosen); scope:set(part,"Reflectance",s.ball_reflectance)
-            if s.ball_remove_texture then
-                if part:IsA("MeshPart") then scope:set(part,"TextureID","") end
-                for _,object in ipairs(part:GetDescendants()) do
-                    if object:IsA("SpecialMesh") then scope:set(object,"TextureId","")
-                    elseif object:IsA("Decal") or object:IsA("Texture") then scope:set(object,"Transparency",1) end
+            if not seen[part] then
+                seen[part]=true
+                scope:set(part,"Color",color); scope:set(part,"Material",chosen); scope:set(part,"Reflectance",s.ball_reflectance)
+                if s.ball_remove_texture then
+                    if part:IsA("MeshPart") then scope:set(part,"TextureID","") end
+                    for _,object in ipairs(part:GetDescendants()) do
+                        if object:IsA("SpecialMesh") then scope:set(object,"TextureId","")
+                        elseif object:IsA("Decal") or object:IsA("Texture") then scope:set(object,"Transparency",1) end
+                    end
+                else
+                    if part:IsA("MeshPart") then scope:restore(part,"TextureID") end
+                    for _,object in ipairs(part:GetDescendants()) do
+                        if object:IsA("SpecialMesh") then scope:restore(object,"TextureId")
+                        elseif object:IsA("Decal") or object:IsA("Texture") then scope:restore(object,"Transparency") end
+                    end
                 end
-            else
-                if part:IsA("MeshPart") then scope:restore(part,"TextureID") end
-                for _,object in ipairs(part:GetDescendants()) do
-                    if object:IsA("SpecialMesh") then scope:restore(object,"TextureId")
-                    elseif object:IsA("Decal") or object:IsA("Texture") then scope:restore(object,"Transparency") end
-                end
+                local light=state.lights[part]
+                local enabled=s.ball_glow and s.ball_material=="Neon"
+                if enabled and not light then light=Instance.new("PointLight"); light.Name="PivotBallGlow"; light.Shadows=false; light.Parent=part; state.lights[part]=light end
+                if light then light.Enabled=enabled; light.Color=color; light.Brightness=s.ball_glow_brightness; light.Range=s.ball_glow_range end
+                if enabled then glowing=glowing+1 end
             end
         end
-    end,interval=.2})
-    local function court_parts(s)
+        for part,light in pairs(state.lights) do if not seen[part] then light:Destroy(); state.lights[part]=nil end end
+        state.bloom.Enabled=glowing>0; state.bloom.Intensity=s.ball_bloom; state.bloom.Size=24; state.bloom.Threshold=.9
+    end,interval=.1})
+    local function named_court_parts(s)
         local surfaces,lines={},{}
         local roots={}; for _,name in ipairs({"Map","Courts","Court"}) do local object=workspace:FindFirstChild(name); if object then roots[#roots+1]=object end end
         local seen={}
         for _,folder in ipairs(roots) do
             for _,part in ipairs(folder:GetDescendants()) do
-                if part:IsA("BasePart") and not seen[part] then
+                if part:IsA("BasePart") and not seen[part] and part.Transparency<.95 then
                     seen[part]=true; local name=part.Name:lower(); local parent=part.Parent; local in_court=false
                     while parent and parent~=workspace do if parent.Name:lower():find("court",1,true) then in_court=true; break end; parent=parent.Parent end
                     local selected=s.court_part_name~="" and part.Name:lower()==s.court_part_name:lower()
@@ -1082,13 +1097,99 @@ local function create_pivot_modules(ctx)
         end
         return surfaces,lines
     end
-    local function apply_court(scope,_,s)
-        local surfaces,lines=court_parts(s); assert(#surfaces>0,"Court surface not found; enter its exact part name in details")
-        local color=cosmetic_color(s.court_color); local line_color=cosmetic_color(s.court_line_color); local chosen=material(s.court_material)
-        for _,part in ipairs(surfaces) do scope:set(part,"Color",color); scope:set(part,"Material",chosen); scope:set(part,"Reflectance",s.court_reflectance) end
-        for _,part in ipairs(lines) do if s.court_color_lines then scope:set(part,"Color",line_color) else scope:restore(part,"Color") end end
+    local function floor_under_player()
+        local origin=assert(root(),"Enter a court first").Position+Vector3.new(0,3,0)
+        local excluded={}
+        for _,name in ipairs({"Characters","Basketballs","Hoops","Assets","PivotCosmeticModel"}) do local object=workspace:FindFirstChild(name); if object then excluded[#excluded+1]=object end end
+        if ctx.player.Character then excluded[#excluded+1]=ctx.player.Character end
+        local params=RaycastParams.new(); params.FilterType=Enum.RaycastFilterType.Exclude; params.IgnoreWater=true
+        local hit
+        for _=1,12 do
+            params.FilterDescendantsInstances=excluded
+            hit=workspace:Raycast(origin,Vector3.new(0,-80,0),params)
+            if not hit then break end
+            local part=hit.Instance
+            if part and part:IsA("BasePart") and part.Transparency<.95 and hit.Normal.Y>.8 then break end
+            excluded[#excluded+1]=part; hit=nil
+        end
+        local floor=hit and hit.Instance
+        assert(floor and floor:IsA("BasePart"),"No visible floor beneath you; stand on the court and enable again")
+        local surfaces,lines={floor},{}; local seen={[floor]=true}
+        local container=floor.Parent
+        local parent=container
+        while parent and parent~=workspace do
+            if parent.Name:lower():match("^court%d*$") then container=parent; break end
+            parent=parent.Parent
+        end
+        local top=floor.Position.Y+floor.Size.Y/2
+        if container and container~=workspace then
+            for _,part in ipairs(container:GetDescendants()) do
+                if part:IsA("BasePart") and not seen[part] and part.Transparency<.95 then
+                    local size=part.Size; local distance=(part.Position-floor.Position).Magnitude
+                    local same_plane=math.abs((part.Position.Y+size.Y/2)-top)<=.6
+                    local horizontal=math.abs(part.CFrame.UpVector.Y)>.9
+                    if distance<=140 and same_plane and horizontal then
+                        local name=part.Name:lower()
+                        if name:find("line",1,true) or name=="paint" or name=="key" then lines[#lines+1]=part
+                        elseif size.X>=4 and size.Z>=4 and size.Y<=4 then surfaces[#surfaces+1]=part end
+                    end
+                end
+            end
+        end
+        return surfaces,lines
     end
-    add("court_appearance","Court appearance","Cosmetics","Colors named court surfaces and separate line parts; baked textures cannot be recolored separately",{start=function(scope,s) apply_court(scope,nil,s) end,step=apply_court,interval=1})
+    local function choose_court(s)
+        if Engine.court_selection then
+            local valid=true; for _,part in ipairs(Engine.court_selection.surfaces) do if not part.Parent then valid=false; break end end
+            if valid then return Engine.court_selection.surfaces,Engine.court_selection.lines end
+            Engine.court_selection=nil
+        end
+        local surfaces,lines=named_court_parts(s)
+        if #surfaces==0 then return floor_under_player() end
+        return surfaces,lines
+    end
+    function Engine:select_court_under_player()
+        local surfaces,lines=floor_under_player()
+        self.court_selection={surfaces=surfaces,lines=lines}
+        local active=registry.active.court_appearance
+        if active then registry:disable("court_appearance"); local ok,err=registry:enable("court_appearance",self.settings); assert(ok,err) end
+        ctx.report("Selected court floor: "..surfaces[1]:GetFullName())
+    end
+    local function apply_court(scope,state,s)
+        if state.selector~=s.court_part_name then
+            Engine.court_selection=nil; state.surfaces,state.lines=choose_court(s); state.selector=s.court_part_name
+        end
+        local color=cosmetic_color(s.court_color); local line_color=cosmetic_color(s.court_line_color); local chosen=material(s.court_material)
+        for object in pairs(state.appearances) do if not s.court_remove_texture then scope:restore(object,"Parent") end end
+        for _,part in ipairs(state.surfaces) do
+            if part.Parent then
+                scope:set(part,"Color",color); scope:set(part,"Material",chosen); scope:set(part,"Reflectance",s.court_reflectance)
+                if s.court_remove_texture then
+                    scope:set(part,"MaterialVariant","")
+                    if part:IsA("MeshPart") then pcall(function() scope:set(part,"TextureID","") end) end
+                else
+                    scope:restore(part,"MaterialVariant")
+                    if part:IsA("MeshPart") then scope:restore(part,"TextureID") end
+                end
+                for _,object in ipairs(part:GetDescendants()) do
+                    if object:IsA("SurfaceAppearance") then
+                        if s.court_remove_texture then state.appearances[object]=true; scope:set(object,"Parent",nil) end
+                    elseif object:IsA("Texture") or object:IsA("Decal") then
+                        if s.court_remove_texture then scope:set(object,"Transparency",1) else scope:restore(object,"Transparency") end
+                    elseif object:IsA("SpecialMesh") then
+                        if s.court_remove_texture then scope:set(object,"TextureId","") else scope:restore(object,"TextureId") end
+                    end
+                end
+            end
+        end
+        for _,part in ipairs(state.lines) do if part.Parent then if s.court_color_lines then scope:set(part,"Color",line_color) else scope:restore(part,"Color") end end end
+    end
+    add("court_appearance","Court appearance","Cosmetics","Detects the floor under you when names differ. Texture removal reveals the color but can hide baked court markings.",{start=function(scope,s)
+        local surfaces,lines=choose_court(s)
+        local state={surfaces=surfaces,lines=lines,selector=s.court_part_name,appearances={}}
+        apply_court(scope,state,s); ctx.report("Court appearance: "..#surfaces.." floor surfaces / "..#lines.." separate line parts")
+        return state
+    end,step=apply_court,interval=.5})
     add("self_outline","Player outline","Cosmetics","Outline and optional fill around your local character",{start=function(scope)
         character(); return new_local(scope,"Highlight",workspace)
     end,step=function(_,object,s)
@@ -1129,7 +1230,7 @@ local function create_pivot_modules(ctx)
         local definition=registry.definitions[id]; definition.conflicts=definition.conflicts or {}; definition.conflicts[#definition.conflicts+1]="sky"
     end
     local model_presets={["Tung Tung"]="138151705692565",Sasuke="361481267"}
-    add("custom_model","Custom player model","Cosmetics","Local cosmetic model; scripts are stripped. Compatible body parts can follow your pose",{start=function(scope,s)
+    add("custom_model","Custom player model","Cosmetics","Isolated viewport costume with no world physics; matching parts can copy your pose. Single meshes use run/jump motion",{start=function(scope,s)
         local asset=model_presets[s.model_preset] or s.model_asset
         asset=tostring(asset):match("^%s*(%d+)%s*$"); assert(asset and #asset<=18,"Enter a numeric Roblox model asset ID")
         local objects=game:GetObjects("rbxassetid://"..asset); assert(type(objects)=="table" and #objects>0,"Model asset could not be loaded")
@@ -1139,7 +1240,7 @@ local function create_pivot_modules(ctx)
             scope:defer(function() object:Destroy() end)
             local candidates_to_check={object}; for _,descendant in ipairs(object:GetDescendants()) do candidates_to_check[#candidates_to_check+1]=descendant end
             for _,descendant in ipairs(candidates_to_check) do
-                if descendant:IsA("LuaSourceContainer") or descendant:IsA("Script") or descendant:IsA("LocalScript") or descendant:IsA("ModuleScript") or descendant:IsA("RemoteEvent") or descendant:IsA("RemoteFunction") or descendant:IsA("ClickDetector") or descendant:IsA("ProximityPrompt") then descendant:Destroy() end
+                if descendant:IsA("Humanoid") or descendant:IsA("AnimationController") or descendant:IsA("JointInstance") or descendant:IsA("Motor6D") or descendant:IsA("WeldConstraint") or descendant:IsA("Constraint") or descendant:IsA("BodyMover") or descendant:IsA("BodyVelocity") or descendant:IsA("BodyPosition") or descendant:IsA("BodyGyro") or descendant:IsA("BodyForce") or descendant:IsA("LuaSourceContainer") or descendant:IsA("Script") or descendant:IsA("LocalScript") or descendant:IsA("ModuleScript") or descendant:IsA("RemoteEvent") or descendant:IsA("RemoteFunction") or descendant:IsA("ClickDetector") or descendant:IsA("ProximityPrompt") then descendant:Destroy() end
             end
             if object.Parent or object:IsA("BasePart") or object:IsA("Model") or object:IsA("Folder") then
                 if not object:IsA("LuaSourceContainer") and not object:IsA("Script") and not object:IsA("LocalScript") and not object:IsA("ModuleScript") then object.Parent=model end
@@ -1154,16 +1255,39 @@ local function create_pivot_modules(ctx)
         end
         assert(first,"Asset contains no displayable parts"); model.PrimaryPart=first
         local size=model:GetExtentsSize(); assert(size.Y>.01,"Invalid model dimensions")
-        model:ScaleTo(s.model_height/size.Y); model.Parent=workspace
+        model:ScaleTo(s.model_height/size.Y)
+        local viewport=new_local(scope,"ViewportFrame",ctx.gui); viewport.Name="PivotModelViewport"; viewport.Size=UDim2.fromScale(1,1); viewport.BackgroundTransparency=1; viewport.BorderSizePixel=0; viewport.ZIndex=0; viewport.Active=false
+        viewport.Ambient=Color3.fromRGB(180,180,180); viewport.LightColor=Color3.fromRGB(255,255,255); viewport.LightDirection=Vector3.new(-1,-1,-1)
+        local world=Instance.new("WorldModel"); world.Name="PivotModelWorld"; world.Parent=viewport
+        local camera=Instance.new("Camera"); camera.Parent=viewport; viewport.CurrentCamera=camera
+        model.Parent=world
+        local binding="PivotCostumeCamera"
+        run:BindToRenderStep(binding,Enum.RenderPriority.Last.Value+2,function()
+            local current_camera=workspace.CurrentCamera
+            if current_camera then camera.CFrame=current_camera.CFrame; camera.FieldOfView=current_camera.FieldOfView end
+        end)
+        scope:defer(function() run:UnbindFromRenderStep(binding) end)
         local current=assert(root(),"Enter a court first"); model:PivotTo(current.CFrame)
-        return {model=model,parts=parts,source=rig(),height=s.model_height}
-    end,step=function(scope,state,s)
+        return {model=model,parts=parts,source=rig(),height=s.model_height,viewport=viewport,camera=camera,last_position=current.Position,phase=0,speed=0}
+    end,step=function(scope,state,s,dt)
         local source=rig(); local part=root(); assert(source and part,"Character unavailable")
+        local camera=camera_service(); state.camera.CFrame=camera.CFrame; state.camera.FieldOfView=camera.FieldOfView
+        state.viewport.Visible=true
         if s.model_height~=state.height then state.model:ScaleTo(state.model:GetScale()*s.model_height/state.height); state.height=s.model_height end
-        state.model:PivotTo(part.CFrame*CFrame.new(0,s.model_offset,0)*CFrame.Angles(0,math.rad(s.model_rotation),0))
+        dt=math.max(.001,tonumber(dt) or 1/60)
+        local delta=part.Position-state.last_position; state.last_position=part.Position
+        local speed=math.min(40,Vector3.new(delta.X,0,delta.Z).Magnitude/dt)
+        state.speed=state.speed+(speed-state.speed)*math.min(1,dt*12)
+        state.phase=state.phase+dt*(6+state.speed*.4)
+        local amount=math.min(1,state.speed/16)
+        local airborne=math.abs(delta.Y)/dt>2
+        local bob=s.model_motion and not airborne and math.sin(state.phase*2)*.09*amount or 0
+        local lean=s.model_motion and -math.min(.12,state.speed*.004) or 0
+        state.model:PivotTo(part.CFrame*CFrame.new(0,s.model_offset+bob,0)*CFrame.Angles(lean,math.rad(s.model_rotation),0))
         if s.model_follow_pose then
             for _,cosmetic in ipairs(state.parts) do
-                local original=source:FindFirstChild(cosmetic.Name,true)
+                local aliases={Torso="UpperTorso",["Left Arm"]="LeftUpperArm",["Right Arm"]="RightUpperArm",["Left Leg"]="LeftUpperLeg",["Right Leg"]="RightUpperLeg"}
+                local original=source:FindFirstChild(cosmetic.Name,true) or aliases[cosmetic.Name] and source:FindFirstChild(aliases[cosmetic.Name],true)
                 if original and original:IsA("BasePart") and original.Name~="HumanoidRootPart" then cosmetic.CFrame=original.CFrame end
             end
         end
@@ -1174,7 +1298,7 @@ local function create_pivot_modules(ctx)
         crosshair={{"crosshair_color","Color / #RRGGBB"},{"crosshair_size","Size"},{"crosshair_gap","Gap"},{"crosshair_thickness","Thickness"},{"crosshair_opacity","Opacity"}},
         ball_trail={{"ball_trail_color","Color / #RRGGBB"},{"ball_trail_lifetime","Lifetime / seconds"},{"ball_trail_width","Width"},{"ball_trail_opacity","Opacity"}},
         player_trail={{"player_trail_color","Color / #RRGGBB"},{"player_trail_lifetime","Lifetime / seconds"},{"player_trail_width","Width"},{"player_trail_opacity","Opacity"}},
-        ball_appearance={{"ball_color","Color / #RRGGBB"},{"ball_reflectance","Reflectance"}},
+        ball_appearance={{"ball_color","Color / #RRGGBB"},{"ball_reflectance","Reflectance"},{"ball_glow_brightness","Neon light brightness"},{"ball_glow_range","Neon light range"},{"ball_bloom","Neon bloom strength"}},
         court_appearance={{"court_color","Floor / #RRGGBB"},{"court_line_color","Lines / #RRGGBB"},{"court_reflectance","Reflectance"},{"court_part_name","Exact surface part name"}},
         self_outline={{"outline_color","Outline / #RRGGBB"},{"outline_fill_color","Fill / #RRGGBB"},{"outline_opacity","Outline opacity"},{"outline_fill_opacity","Fill opacity"}},
         sky={{"sky_asset","Custom sky model asset ID"},{"sky_tint","Sky tint / #RRGGBB"},{"sky_decay","Atmosphere / #RRGGBB"},{"sky_stars","Star count"},{"sky_density","Atmosphere density"},{"sky_haze","Haze"}},
@@ -1187,7 +1311,7 @@ local function create_pivot_modules(ctx)
         sky={{"sky_preset","Sky preset",{"Night","Galaxy","Sunset","Day","Custom"}}},
         custom_model={{"model_preset","Model",{"Tung Tung","Sasuke","Custom"}}}
     }
-    Engine.cosmetic_toggles={ball_appearance={{"ball_remove_texture","Remove ball texture"}},court_appearance={{"court_color_lines","Color separate line parts"}},self_outline={{"outline_through_walls","Show through walls"}},custom_model={{"model_hide_avatar","Hide your normal avatar"},{"model_follow_pose","Follow matching body parts"}}}
+    Engine.cosmetic_toggles={ball_appearance={{"ball_remove_texture","Remove ball texture"},{"ball_glow","Neon glow"}},court_appearance={{"court_color_lines","Color separate line parts"},{"court_remove_texture","Remove floor textures"}},self_outline={{"outline_through_walls","Show through walls"}},custom_model={{"model_motion","Run / jump motion"},{"model_hide_avatar","Hide your normal avatar"},{"model_follow_pose","Follow matching body parts"}}}
 
     Engine.shot_stats={total=0,perfect=0,good=0,early=0,late=0,skipped=0,releases=0,unconfirmed=0,last="Waiting for a shot",history={}}
     function Engine:record_shot(event)
@@ -2230,6 +2354,7 @@ do
                             toggle_action("Ball handler only",function() return engine.settings.ball_handler_only end,function(on) engine.settings.ball_handler_only=on end)
                             toggle_action("Team check",function() return engine.settings.team_check end,function(on) engine.settings.team_check=on end)
                         end
+                        if id=="court_appearance" then action("Select floor beneath me",function() engine:select_court_under_player() end) end
                         if id=="dribble_macros" then action("Run custom combo",function() engine:run_combo() end) end
                         if id=="guard" then action("Use nearest rim as defensive goal",function() engine:select_defensive_rim() end) end
                         y=y+7
