@@ -2256,6 +2256,17 @@ local function create_pivot_modules(ctx)
         assert(type(writefile)=="function","File saving unavailable")
         local value,err=self:validate_saved_modules(self.saved_modules); assert(value,err)
         writefile("pivot_saved_modules.json",game:GetService("HttpService"):JSONEncode(value))
+        assert(type(readfile)=="function","Cannot verify saved file: readfile unavailable")
+        local stored,reason=self:validate_saved_modules(game:GetService("HttpService"):JSONDecode(readfile("pivot_saved_modules.json")))
+        assert(stored,reason)
+        local function equal(a,b)
+            if type(a)~=type(b) then return false end
+            if type(a)~="table" then return a==b end
+            for key,item in pairs(a) do if not equal(item,b[key]) then return false end end
+            for key in pairs(b) do if a[key]==nil then return false end end
+            return true
+        end
+        assert(equal(value,stored),"Saved file did not retain the current presets")
     end
     function Engine:read_saved_modules()
         assert(type(readfile)=="function","File loading unavailable")
@@ -2271,25 +2282,27 @@ local function create_pivot_modules(ctx)
         for i,old in ipairs(self.saved_modules.presets) do if old.name:lower()==name:lower() then value.presets[i]=item; replaced=true else value.presets[i]=old end end
         if not replaced then value.presets[#value.presets+1]=item end
         local valid,err=self:validate_saved_modules(value); assert(valid,err); self.saved_modules=valid
-        local ok=pcall(function() self:write_saved_modules() end)
-        ctx.report("Saved "..#item.enabled.." modules: "..name..(ok and "" or " / session only; file saving unavailable")); return #item.enabled
+        local ok,failure=pcall(function() self:write_saved_modules() end)
+        self.module_preset_status="Saved "..#item.enabled.." modules: "..name..(ok and " / file verified" or " / session only: "..tostring(failure))
+        ctx.report(self.module_preset_status); return #item.enabled
     end
     function Engine:load_saved_modules(index)
         local data,err=self:validate_saved_modules(self.saved_modules); assert(data,err)
-        local item=assert(data.presets[index],"Saved module preset not found"); local previous=capture_modules("Previous")
+        local item=assert(data.presets[index],"Saved module preset not found")
         assert(#item.enabled>0,"This preset is empty. Enable the modules you want and save it again")
         assert(ctx.runner:cancel(),"Input release pending; press F8 and retry")
         assert(self:stop(),"Input release pending; press F8 and retry")
         for key,value in pairs(item.settings) do self.settings[key]=value end
+        local loaded,failures=0,{}
         for _,id in ipairs(item.enabled) do
             local ok,failure=registry:enable(id,self.settings)
             if not ok then
-                self:stop(); for key,value in pairs(previous.settings) do self.settings[key]=value end
-                for _,old in ipairs(previous.enabled) do registry:enable(old,self.settings) end
-                error("Could not enable "..registry.definitions[id].title..": "..tostring(failure))
-            end
+                failures[#failures+1]=registry.definitions[id].title..": "..tostring(failure)
+            else loaded=loaded+1 end
         end
-        self.settings.module_preset_name=item.name; ctx.report("Loaded "..item.name.." / "..#item.enabled.." modules enabled"); return #item.enabled
+        self.settings.module_preset_name=item.name
+        self.module_preset_status="Loaded "..item.name.." / "..loaded.." of "..#item.enabled.." enabled"..(#failures>0 and " / Failed: "..table.concat(failures,"; ") or "")
+        ctx.report(self.module_preset_status); return loaded,failures
     end
     function Engine:remove_saved_modules(index)
         assert(self.saved_modules.presets[index],"Preset not found"); table.remove(self.saved_modules.presets,index)
@@ -3292,10 +3305,11 @@ do
             action("Load recording from disk",function() assert(type(readfile)=="function","Disk read unavailable"); local raw=readfile("pivot_recording.json"); assert(#raw<=32768,"Recording exceeds size limit"); local value,err=Core.validate_recording(http:JSONDecode(raw)); assert(value,err); stop_capture(); engine.recording=value; report("Loaded recording") end)
             end
         elseif category=="Saved modules" then
+            if engine.module_preset_status then text(engine.module_preset_status,12,theme.muted,76) end
             module_selection_label=text("Selected: checking enabled modules…",12,theme.muted,38)
             field("module_preset_name","Preset name")
-            action("Save enabled modules",function() engine:save_enabled_modules(engine.settings.module_preset_name); rebuild() end)
-            action("Reload saved module presets",function() local count=engine:read_saved_modules(); report("Loaded "..count.." module presets"); rebuild() end)
+            action("Save enabled modules",function() engine:save_enabled_modules(fields.module_preset_name.Text); rebuild() end)
+            action("Refresh preset list from disk",function() local count=engine:read_saved_modules(); report("Read "..count.." presets / click a preset's Load to enable its modules"); rebuild() end)
             for i,item in ipairs(engine.saved_modules.presets) do
                 local index=i
                 local button=action(item.name.." · "..#item.enabled.." modules · Load",function() engine:load_saved_modules(index); ui.set_theme(engine.settings.theme_mode); ui.edit_theme(engine.settings); rebuild() end)
