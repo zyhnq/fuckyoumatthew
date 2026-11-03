@@ -412,7 +412,7 @@ local function create_pivot_modules(ctx)
         ball_trail_color="#AAC8FF",ball_trail_lifetime=.35,ball_trail_width=.6,ball_trail_opacity=.7,player_trail_color="#C6CFFF",player_trail_lifetime=.3,player_trail_width=.7,player_trail_opacity=.5,
         ball_color="#D1D6E0",ball_material="SmoothPlastic",ball_reflectance=0,ball_remove_texture=true,ball_glow=true,ball_glow_strength=.8,ball_bloom=.7,court_color="#444C60",court_line_color="#E6E8ED",court_material="SmoothPlastic",court_reflectance=0,court_part_name="CourtFloor",court_color_lines=true,court_remove_texture=true,court_three_color="#E6E8ED",court_free_color="#E6E8ED",court_three_enabled=true,court_free_enabled=true,court_rebuild_markings=true,court_three_radius=34,court_three_angle=128,court_free_radius=8,court_free_distance=21.5,court_corner_depth=6,court_line_width=.18,
         outline_color="#C0C9DC",outline_fill_color="#C0C9DC",outline_opacity=1,outline_fill_opacity=0,outline_through_walls=false,sky_preset="Night",sky_asset="",sky_tint="#8799BB",sky_decay="#283650",sky_stars=3000,sky_density=.22,sky_haze=.5,
-        model_preset="Sasuke",model_catalog="Curated",model_save_name="",model_style="Basketball",model_renderer="Native world",model_high_detail=true,model_show_hair=true,model_show_hats=true,model_show_masks=true,model_show_capes=true,model_show_weapons=true,model_show_extras=true,coverage_radius=12,coverage_display="Both",coverage_scale=1,coverage_height=2.6,coverage_response=12,model_fit_pb=true,model_fit_scale=1.015,model_accessory_scale=1,model_asset="",model_height=6,model_offset=0,model_rotation=0,model_follow_pose=true,model_motion=true,model_hide_avatar=true,
+        module_preset_name="Favorites",model_preset="Sasuke",model_catalog="Curated",model_save_name="",model_style="Basketball",model_renderer="Native world",model_high_detail=true,model_show_hair=true,model_show_hats=true,model_show_masks=true,model_show_capes=true,model_show_weapons=true,model_show_extras=true,coverage_radius=12,coverage_display="Both",coverage_scale=1,coverage_height=2.6,coverage_response=12,model_fit_pb=true,model_fit_scale=1.015,model_accessory_scale=1,model_asset="",model_height=6,model_offset=0,model_rotation=0,model_follow_pose=true,model_motion=true,model_hide_avatar=true,
         theme_custom=false,ui_accent="#C0C9DC",ui_font_size=14,ui_rounding=6,ui_opacity=1,refine_good=true,shot_hud=true},ranges={coverage_scale={.75,1.5},coverage_height={1,5},coverage_response={2,25},model_accessory_scale={.5,1.5},coverage_radius={4,20},model_fit_scale={.95,1.12},court_three_radius={20,45},court_three_angle={90,180},court_free_radius={3,12},court_free_distance={10,30},court_corner_depth={0,12},court_line_width={.05,.8},ball_glow_strength={.05,1},ball_bloom={0,2},crosshair_size={2,24},crosshair_gap={0,20},crosshair_thickness={1,6},crosshair_opacity={.1,1},ball_trail_lifetime={.05,2},ball_trail_width={.1,4},ball_trail_opacity={.05,1},player_trail_lifetime={.05,2},player_trail_width={.1,4},player_trail_opacity={.05,1},ball_reflectance={0,1},court_reflectance={0,1},outline_opacity={0,1},outline_fill_opacity={0,1},sky_stars={0,5000},sky_density={0,.6},sky_haze={0,5},model_height={2,12},model_offset={-6,6},model_rotation={0,360},ui_font_size={14,20},ui_rounding={0,14},ui_opacity={.2,1},guard_strength={.5,2},block_delay={0,.5},shot_range={5,60},glide_speed={4,60},ankle_range={2,20},ankle_delay={.5,5},combo_delay={20,500},ping_factor={0,1},takeover_threshold={1,100},walk_speed={4,60},jump_power={10,120},fly_speed={4,100},spin_speed={10,360},fov={40,110},time={0,24},range={5,60},esp_distance={30,1000},guard_distance={2,10},guard_range={5,60},block_range={3,18},steal_range={2,8},on_ball_speed={4,60},off_ball_speed={4,60},rebound_range={3,15}},definitions={},recording={version=1,steps={}}}
     local registry=Core.module_registry(ctx.report); Engine.registry=registry
     local players,input,run=ctx.players,ctx.input,ctx.run
@@ -2079,6 +2079,79 @@ local function create_pivot_modules(ctx)
         if next(held) then return false,"Module key release pending; press F8" end
         return original_start(self,action,done)
     end
+    Engine.saved_modules={version=1,presets={}}
+    local preset_defaults={}; for key,value in pairs(Engine.settings) do preset_defaults[key]=value end
+    local function capture_modules(name)
+        local value={name=name,enabled={},settings={}}
+        for _,definition in ipairs(Engine.definitions) do if registry.active[definition.id] then value.enabled[#value.enabled+1]=definition.id end end
+        for key in pairs(preset_defaults) do value.settings[key]=Engine.settings[key] end
+        return value
+    end
+    function Engine:capture_enabled_modules() return capture_modules("Favorites") end
+    function Engine:validate_saved_modules(data)
+        if type(data)~="table" or data.version~=1 or type(data.presets)~="table" then return nil,"Invalid saved modules file" end
+        local count=0; for key in pairs(data.presets) do if type(key)~="number" or key<1 or key%1~=0 then return nil,"Presets must be a list" end; count=count+1 end
+        if count>16 then return nil,"Up to 16 module presets are supported" end
+        local valid={version=1,presets={}}; local names={}
+        for i=1,count do
+            local item=data.presets[i]
+            if type(item)~="table" or type(item.name)~="string" or #item.name<1 or #item.name>40 or not item.name:find("%S") or item.name:find("[%c]") or names[item.name:lower()] then return nil,"Invalid or duplicate preset name" end
+            local settings,err=Core.validate_module_settings(item.settings or {},preset_defaults,self.ranges); if not settings then return nil,err end
+            if settings.theme_mode~="Graphite" and settings.theme_mode~="Slate" and settings.theme_mode~="Light" then return nil,"Invalid theme" end
+            if type(item.enabled)~="table" then return nil,"Enabled modules must be a list" end
+            local enabled={}; local total=0
+            for key in pairs(item.enabled) do if type(key)~="number" or key<1 or key%1~=0 then return nil,"Enabled modules must be a list" end; total=total+1 end
+            if total>#self.definitions then return nil,"Too many enabled modules" end
+            for n=1,total do local id=item.enabled[n]; if type(id)~="string" or not registry.definitions[id] or enabled[id] then return nil,"Unknown or duplicate module" end; enabled[id]=true end
+            for id in pairs(enabled) do for _,other in ipairs(registry.definitions[id].conflicts or {}) do if enabled[other] then return nil,"Conflicting saved modules: "..id.." / "..other end end end
+            local ids={}; for _,definition in ipairs(self.definitions) do if enabled[definition.id] then ids[#ids+1]=definition.id end end
+            names[item.name:lower()]=true; valid.presets[i]={name=item.name,enabled=ids,settings=settings}
+        end
+        return valid
+    end
+    function Engine:write_saved_modules()
+        assert(type(writefile)=="function","File saving unavailable")
+        local value,err=self:validate_saved_modules(self.saved_modules); assert(value,err)
+        writefile("pivot_saved_modules.json",game:GetService("HttpService"):JSONEncode(value))
+    end
+    function Engine:read_saved_modules()
+        assert(type(readfile)=="function","File loading unavailable")
+        local raw=readfile("pivot_saved_modules.json"); assert(type(raw)=="string" and #raw<=262144,"Saved modules file exceeds 256 KB")
+        local value,err=self:validate_saved_modules(game:GetService("HttpService"):JSONDecode(raw)); assert(value,err)
+        self.saved_modules=value; return #value.presets
+    end
+    function Engine:save_enabled_modules(name,selection)
+        name=tostring(name or ""):match("^%s*(.-)%s*$"); if name=="" then name="Favorites" end
+        local captured=selection or capture_modules(name)
+        local item={name=name,enabled=captured.enabled,settings=captured.settings}; local value={version=1,presets={}}; local replaced=false
+        for i,old in ipairs(self.saved_modules.presets) do if old.name:lower()==name:lower() then value.presets[i]=item; replaced=true else value.presets[i]=old end end
+        if not replaced then value.presets[#value.presets+1]=item end
+        local valid,err=self:validate_saved_modules(value); assert(valid,err); self.saved_modules=valid
+        local ok=pcall(function() self:write_saved_modules() end)
+        ctx.report("Saved "..#item.enabled.." modules: "..name..(ok and "" or " / session only; file saving unavailable")); return #item.enabled
+    end
+    function Engine:load_saved_modules(index)
+        local data,err=self:validate_saved_modules(self.saved_modules); assert(data,err)
+        local item=assert(data.presets[index],"Saved module preset not found"); local previous=capture_modules("Previous")
+        assert(ctx.runner:cancel(),"Input release pending; press F8 and retry")
+        assert(self:stop(),"Input release pending; press F8 and retry")
+        for key,value in pairs(item.settings) do self.settings[key]=value end
+        for _,id in ipairs(item.enabled) do
+            local ok,failure=registry:enable(id,self.settings)
+            if not ok then
+                self:stop(); for key,value in pairs(previous.settings) do self.settings[key]=value end
+                for _,old in ipairs(previous.enabled) do registry:enable(old,self.settings) end
+                error("Could not enable "..registry.definitions[id].title..": "..tostring(failure))
+            end
+        end
+        self.settings.module_preset_name=item.name; ctx.report("Loaded "..item.name.." / "..#item.enabled.." modules enabled"); return #item.enabled
+    end
+    function Engine:remove_saved_modules(index)
+        assert(self.saved_modules.presets[index],"Preset not found"); table.remove(self.saved_modules.presets,index)
+        local ok=pcall(function() self:write_saved_modules() end); ctx.report(ok and "Removed module preset" or "Removed preset for this session")
+    end
+    if type(readfile)=="function" then pcall(function() Engine:read_saved_modules() end) end
+
     local last_rig=rig()
     ctx.connect(run.Heartbeat,function(dt)
         local current=rig(); if current~=last_rig then
@@ -2849,12 +2922,12 @@ do
         return button
     end
     local page=make("ScrollingFrame",{Name="PivotModules",Position=UDim2.fromOffset(20,112),Size=UDim2.new(1,-34,1,-174),BackgroundTransparency=1,BorderSizePixel=0,ScrollBarThickness=2,Visible=false,CanvasSize=UDim2.fromOffset(0,0)},window)
-    local tabs={"All","Shooting","Dribbling","Cosmetics","Character","Player","Defense","Visuals","World","Camera","Recorder","Options"}
+    local tabs={"All","Saved modules","Shooting","Dribbling","Cosmetics","Character","Player","Defense","Visuals","World","Camera","Recorder","Options"}
     local category="All"; local rows={}; local fields={}; local y=0
     local container=page
     local collapsed={}
     local expanded,choosing,section_button,record_tools,court_alignment
-    local character_open=false; local library_open=false
+    local character_open=false; local library_open=false; local module_preset_draft
     local auxiliary={}; local capture_switch; local character_status; local library_status
     local function clear()
         for _,object in ipairs(rows) do object:Destroy() end; rows={}; fields={}; auxiliary={}; character_status=nil; library_status=nil; y=46
@@ -3049,7 +3122,7 @@ do
         clear(); buttons={}
         if section_button then section_button.Text=(category=="All" and "All modules" or category).."  ▾" end
         if choosing then
-            for _,name in ipairs(tabs) do action(name,function() category=name; choosing=false; expanded=nil; page.CanvasPosition=Vector2.new(0,0); rebuild() end) end
+            for _,name in ipairs(tabs) do action(name,function() category=name; if name=="Saved modules" then module_preset_draft=engine:capture_enabled_modules() end; choosing=false; expanded=nil; page.CanvasPosition=Vector2.new(0,0); rebuild() end) end
         elseif category=="Recorder" then
             text("Z X C V H + Shift / 64 steps / 60 seconds",11,theme.muted)
             toggle_action("Record dribbles",function() return engine.capturing==true end,function(on)
@@ -3067,6 +3140,21 @@ do
             action("Import pasted recording",function() assert(#box.Text<=32768,"JSON exceeds 32 KB"); local value,err=Core.validate_recording(http:JSONDecode(box.Text)); assert(value,err); stop_capture(); engine.recording=value; report("Imported "..#value.steps.." steps") end)
             action("Save recording to disk",function() assert(type(writefile)=="function","Disk write unavailable"); local value,err=Core.validate_recording(engine.recording); assert(value,err); writefile("pivot_recording.json",http:JSONEncode(value)); report("Saved pivot_recording.json") end)
             action("Load recording from disk",function() assert(type(readfile)=="function","Disk read unavailable"); local raw=readfile("pivot_recording.json"); assert(#raw<=32768,"Recording exceeds size limit"); local value,err=Core.validate_recording(http:JSONDecode(raw)); assert(value,err); stop_capture(); engine.recording=value; report("Loaded recording") end)
+            end
+        elseif category=="Saved modules" then
+            module_preset_draft=module_preset_draft or engine:capture_enabled_modules()
+            local selected={}; for _,id in ipairs(module_preset_draft.enabled) do selected[#selected+1]=engine.registry.definitions[id].title end
+            text("Selected: "..(#selected>0 and table.concat(selected,", ") or "All modules off"),12,theme.muted,38)
+            field("module_preset_name","Preset name")
+            action("Save enabled modules",function() engine:save_enabled_modules(engine.settings.module_preset_name,module_preset_draft); rebuild() end)
+            action("Reload saved module presets",function() local count=engine:read_saved_modules(); report("Loaded "..count.." module presets"); rebuild() end)
+            for i,item in ipairs(engine.saved_modules.presets) do
+                local index=i
+                local button=action(item.name.." · "..#item.enabled.." modules · Load",function() engine:load_saved_modules(index); module_preset_draft=engine:capture_enabled_modules(); ui.set_theme(engine.settings.theme_mode); ui.edit_theme(engine.settings); rebuild() end)
+                button.Size=UDim2.new(1,-50,0,30)
+                local remove=own(ui.button(container,"×",function() engine:remove_saved_modules(index); rebuild() end)); remove.Position=UDim2.new(1,-42,0,y-36); remove.Size=UDim2.fromOffset(34,30)
+                local names={}; for _,id in ipairs(item.enabled) do names[#names+1]=engine.registry.definitions[id].title end
+                text(#names>0 and table.concat(names,", ") or "All modules off",11,theme.muted,32)
             end
         elseif category=="Options" then
             text("Settings load without enabling modules.",11,theme.muted)
