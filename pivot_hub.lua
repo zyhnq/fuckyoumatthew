@@ -801,14 +801,14 @@ make("UICorner",{CornerRadius=UDim.new(0,14)},window)
 make("UIStroke",{Color=Color3.fromRGB(49,61,79),Thickness=1},window)
 local scale=make("UIScale",{Scale=1},window)
 local function label(owner, value, height, color)
-    return make("TextLabel",{Size=UDim2.new(1,-8,0,height or 28),BackgroundTransparency=1,Text=value,TextColor3=color or white,Font=Enum.Font.BuilderSans,TextSize=14,TextWrapped=true,TextXAlignment=Enum.TextXAlignment.Left},owner)
+    return make("TextLabel",{Size=UDim2.new(1,-8,0,height or 28),BackgroundTransparency=1,Text=value,TextColor3=color or white,Font=Enum.Font.SourceSans,TextSize=14,TextWrapped=true,TextXAlignment=Enum.TextXAlignment.Left},owner)
 end
 local function box(owner, value, height)
     local object=make("TextBox",{Size=UDim2.new(1,-8,0,height or 34),BackgroundColor3=card,BorderSizePixel=0,Text=value,TextColor3=white,Font=Enum.Font.RobotoMono,TextSize=15,ClearTextOnFocus=false,TextWrapped=true},owner)
     make("UICorner",{CornerRadius=UDim.new(0,6)},object); return object
 end
 local function button(owner,value,callback)
-    local object=make("TextButton",{Size=UDim2.new(1,-8,0,34),BackgroundColor3=card,BorderSizePixel=0,Text=value,TextColor3=accent,Font=Enum.Font.BuilderSansBold,TextSize=14,AutoButtonColor=true},owner)
+    local object=make("TextButton",{Size=UDim2.new(1,-8,0,34),BackgroundColor3=card,BorderSizePixel=0,Text=value,TextColor3=accent,Font=Enum.Font.SourceSansBold,TextSize=14,AutoButtonColor=true},owner)
     make("UICorner",{CornerRadius=UDim.new(0,6)},object)
     connect(object.Activated,callback); return object
 end
@@ -1136,12 +1136,12 @@ do
     end
     local function label(parent,value,x,y,w,h,size,color)
         return make("TextLabel",{Text=value,Position=UDim2.fromOffset(x,y),Size=UDim2.fromOffset(w,h),BackgroundTransparency=1,
-            TextColor3=color or theme.text,Font=Enum.Font.BuilderSans,TextSize=size or 12,TextXAlignment=Enum.TextXAlignment.Left,
+            TextColor3=color or theme.text,Font=Enum.Font.SourceSans,TextSize=size or 12,TextXAlignment=Enum.TextXAlignment.Left,
             TextYAlignment=Enum.TextYAlignment.Center,TextWrapped=true,BorderSizePixel=0},parent)
     end
     local function small_button(parent,value,callback)
         local b=make("TextButton",{Text=value,Size=UDim2.fromOffset(110,28),BackgroundColor3=theme.panel,BorderSizePixel=0,
-            TextColor3=theme.text,TextSize=11,Font=Enum.Font.BuilderSans,AutoButtonColor=false},parent)
+            TextColor3=theme.text,TextSize=11,Font=Enum.Font.SourceSans,AutoButtonColor=false},parent)
         corner(b,5)
         on(b.Activated,callback)
         on(b.MouseEnter,function() if not b:GetAttribute("RailItem") then animate(b,{BackgroundColor3=theme.selected}) end end)
@@ -1169,11 +1169,11 @@ do
     local rail=frame(shell,0,0,68,548,theme.rail); rail.ZIndex=0; rail.Visible=false; corner(rail,0)
     local rail_line=frame(shell,20,97,660,1,theme.line)
     local top_line=frame(shell,20,54,660,1,theme.line)
-    local logo=label(shell,"Pivot",20,12,100,28,19,theme.text); logo.Font=Enum.Font.BuilderSansBold; logo.TextXAlignment=Enum.TextXAlignment.Left
-    local heading=label(shell,"Practical Basketball",94,14,240,26,11,theme.muted); heading.Font=Enum.Font.BuilderSansMedium
+    local logo=label(shell,"Pivot",20,12,100,28,19,theme.text); logo.Font=Enum.Font.SourceSansBold; logo.TextXAlignment=Enum.TextXAlignment.Left
+    local heading=label(shell,"Practical Basketball",94,14,240,26,11,theme.muted); heading.Font=Enum.Font.SourceSansSemibold
     close.BackgroundColor3=theme.rail; close.TextColor3=theme.muted; close.TextSize=12; corner(close,4)
     local search=make("TextBox",{Text="",PlaceholderText="Find a control...",PlaceholderColor3=theme.muted,Position=UDim2.fromOffset(484,10),Size=UDim2.fromOffset(166,23),
-        ClearTextOnFocus=false,TextSize=11,TextColor3=theme.text,BackgroundColor3=theme.input,BorderSizePixel=0,Font=Enum.Font.BuilderSans},shell)
+        ClearTextOnFocus=false,TextSize=11,TextColor3=theme.text,BackgroundColor3=theme.input,BorderSizePixel=0,Font=Enum.Font.SourceSans},shell)
     corner(search,4)
     search.TextXAlignment=Enum.TextXAlignment.Left
     make("UIPadding",{PaddingLeft=UDim.new(0,26),PaddingRight=UDim.new(0,8)},search)
@@ -1206,7 +1206,7 @@ do
                     if d and box and box:IsA("TextBox") then
                         local multi=d[3]=="macro"
                         local row=frame(page,0,0,0,multi and 108 or 52); row.Size=UDim2.new(1,-6,0,multi and 108 or 52); row.LayoutOrder=child.LayoutOrder; corner(row,4)
-                        child.Parent=row; child.Text=d[1]; child.TextSize=12; child.Font=Enum.Font.BuilderSans; child.TextColor3=theme.text; child.Position=UDim2.fromOffset(12,6); child.Size=UDim2.new(1,-128,0,20)
+                        child.Parent=row; child.Text=d[1]; child.TextSize=12; child.Font=Enum.Font.SourceSans; child.TextColor3=theme.text; child.Position=UDim2.fromOffset(12,6); child.Size=UDim2.new(1,-128,0,20)
                         local helper=label(row,d[2],12,27,220,16,10,theme.muted); helper.Size=UDim2.new(1,-128,0,16)
                         box.Parent=row; box.TextSize=12; box.BackgroundColor3=theme.input; box.TextColor3=theme.text; box.Font=Enum.Font.RobotoMono; corner(box,3)
                         box.Position=multi and UDim2.fromOffset(12,51) or UDim2.new(1,-104,0,12); box.Size=multi and UDim2.new(1,-24,0,44) or UDim2.fromOffset(92,28); box.MultiLine=multi
@@ -1236,7 +1236,7 @@ do
     local account=frame(home,0,0,0,84); account.Size=UDim2.new(1,-6,0,84); corner(account,7)
     local name=player.DisplayName or player.Name
     local kicker=label(account,"Account",16,10,420,16,10,theme.muted)
-    local display_name=label(account,name,16,28,450,25,18); display_name.Font=Enum.Font.BuilderSansBold
+    local display_name=label(account,name,16,28,450,25,18); display_name.Font=Enum.Font.SourceSansBold
     local greeting=label(account,"@"..player.Name,16,55,430,17,11,theme.muted)
     local badge=frame(account,0,0,1,1); badge.Visible=false
     local session_label=label(account,"",0,0,1,1); session_label.Visible=false
@@ -1245,7 +1245,7 @@ do
     for index,title in ipairs({"Players","Session","FPS","Ping","Enabled"}) do
         local cell=frame(stats,0,0,0,54); cell.Position=UDim2.new((index-1)/5,0,0,0); cell.Size=UDim2.new(.2,0,1,0); cell.BackgroundTransparency=1
         local caption=label(cell,title,10,8,100,16,10,theme.muted); caption.Size=UDim2.new(1,-14,0,16)
-        local value=label(cell,"--",10,26,100,20,15); value.Font=Enum.Font.BuilderSansMedium; value.Size=UDim2.new(1,-14,0,20); stat_values[title]=value
+        local value=label(cell,"--",10,26,100,20,15); value.Font=Enum.Font.SourceSansSemibold; value.Size=UDim2.new(1,-14,0,20); stat_values[title]=value
         if index>1 then local line=frame(cell,0,9,1,36,theme.line) end
     end
     local server=frame(home,0,158,0,108); server.Size=UDim2.new(1,-6,0,108); corner(server,7)
