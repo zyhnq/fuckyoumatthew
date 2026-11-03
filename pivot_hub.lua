@@ -393,7 +393,7 @@ local function create_pivot_modules(ctx)
         ball_trail_color="#AAC8FF",ball_trail_lifetime=.35,ball_trail_width=.6,ball_trail_opacity=.7,player_trail_color="#C6CFFF",player_trail_lifetime=.3,player_trail_width=.7,player_trail_opacity=.5,
         ball_color="#D1D6E0",ball_material="SmoothPlastic",ball_reflectance=0,ball_remove_texture=true,ball_glow=true,ball_glow_strength=.8,ball_bloom=.7,court_color="#444C60",court_line_color="#E6E8ED",court_material="SmoothPlastic",court_reflectance=0,court_part_name="CourtFloor",court_color_lines=true,court_remove_texture=true,court_three_color="#E6E8ED",court_free_color="#E6E8ED",court_three_enabled=true,court_free_enabled=true,court_rebuild_markings=true,court_three_radius=34,court_three_angle=128,court_free_radius=8,court_free_distance=21.5,court_corner_depth=6,court_line_width=.18,
         outline_color="#C0C9DC",outline_fill_color="#C0C9DC",outline_opacity=1,outline_fill_opacity=0,outline_through_walls=false,sky_preset="Night",sky_asset="",sky_tint="#8799BB",sky_decay="#283650",sky_stars=3000,sky_density=.22,sky_haze=.5,
-        model_preset="Tung Tung",model_fit_pb=true,model_fit_scale=1.015,model_asset="",model_height=6,model_offset=0,model_rotation=0,model_follow_pose=true,model_motion=true,model_hide_avatar=true,
+        model_preset="Tung Tung",model_renderer="Native world",model_high_detail=true,model_fit_pb=true,model_fit_scale=1.015,model_asset="",model_height=6,model_offset=0,model_rotation=0,model_follow_pose=true,model_motion=true,model_hide_avatar=true,
         theme_custom=false,ui_accent="#C0C9DC",ui_font_size=14,ui_rounding=6,ui_opacity=1,refine_good=true,shot_hud=true},ranges={model_fit_scale={.95,1.12},court_three_radius={20,45},court_three_angle={90,180},court_free_radius={3,12},court_free_distance={10,30},court_corner_depth={0,12},court_line_width={.05,.8},ball_glow_strength={.05,1},ball_bloom={0,2},crosshair_size={2,24},crosshair_gap={0,20},crosshair_thickness={1,6},crosshair_opacity={.1,1},ball_trail_lifetime={.05,2},ball_trail_width={.1,4},ball_trail_opacity={.05,1},player_trail_lifetime={.05,2},player_trail_width={.1,4},player_trail_opacity={.05,1},ball_reflectance={0,1},court_reflectance={0,1},outline_opacity={0,1},outline_fill_opacity={0,1},sky_stars={0,5000},sky_density={0,.6},sky_haze={0,5},model_height={2,12},model_offset={-6,6},model_rotation={0,360},ui_font_size={14,20},ui_rounding={0,14},ui_opacity={.2,1},guard_strength={.5,2},block_delay={0,.5},shot_range={5,60},glide_speed={4,60},ankle_range={2,20},ankle_delay={.5,5},combo_delay={20,500},ping_factor={0,1},takeover_threshold={1,100},walk_speed={4,60},jump_power={10,120},fly_speed={4,100},spin_speed={10,360},fov={40,110},time={0,24},range={5,60},esp_distance={30,1000},guard_distance={2,10},guard_range={5,60},block_range={3,18},steal_range={2,8},on_ball_speed={4,60},off_ball_speed={4,60},rebound_range={3,15}},definitions={},recording={version=1,steps={}}}
     local registry=Core.module_registry(ctx.report); Engine.registry=registry
     local players,input,run=ctx.players,ctx.input,ctx.run
@@ -1242,7 +1242,7 @@ local function create_pivot_modules(ctx)
     local function floor_under_player()
         local origin=assert(root(),"Enter a court first").Position+Vector3.new(0,3,0)
         local excluded={}
-        for _,name in ipairs({"Characters","Basketballs","Hoops","Assets","PivotCosmeticModel"}) do local object=workspace:FindFirstChild(name); if object then excluded[#excluded+1]=object end end
+        for _,name in ipairs({"Characters","Basketballs","Hoops","Assets","PivotCosmeticModel","PivotCharacterVisuals"}) do local object=workspace:FindFirstChild(name); if object then excluded[#excluded+1]=object end end
         if ctx.player.Character then excluded[#excluded+1]=ctx.player.Character end
         local params=RaycastParams.new(); params.FilterType=Enum.RaycastFilterType.Exclude; params.IgnoreWater=true
         local hit
@@ -1372,10 +1372,10 @@ local function create_pivot_modules(ctx)
         local definition=registry.definitions[id]; definition.conflicts=definition.conflicts or {}; definition.conflicts[#definition.conflicts+1]="sky"
     end
     Engine.characters={
-        {name="Tung Tung",asset="138151705692565"},{name="Sasuke",asset="361481267"},
-        {name="Gojo",asset="17831020168"},{name="Naruto",asset="17834725125"},{name="Itachi",asset="17834706994"},
-        {name="Sukuna",asset="17831030739"},{name="Goku",asset="137907999221430"},{name="Luffy",asset="9645978594"},
-        {name="Saitama",asset="8223087561"},{name="Sonic",asset="96290299914524"},{name="Shadow",asset="8301293499"},
+        {name="Tung Tung",asset="138151705692565"},{name="Sasuke",asset="12070631248"},
+        {name="Gojo",asset="81832554167933"},{name="Naruto",asset="120654451966123"},{name="Itachi",asset="8297138758"},
+        {name="Sukuna",asset="98979275032934"},{name="Goku",asset="1467391816"},{name="Luffy",asset="15350196603"},
+        {name="Saitama",asset="74043844094306"},{name="Sonic",asset="96290299914524"},{name="Shadow",asset="8301293499"},
         {name="Spider-Man",asset="93697227789268"},{name="SpongeBob",asset="9727402003"},{name="Shrek",asset="5191546948"},
         {name="LeBron",asset="14515350167"},{name="Michael Jordan",asset="11456119979"},{name="Custom",asset=false}
     }
@@ -1511,7 +1511,7 @@ local function create_pivot_modules(ctx)
             end
         end
         if not model.PrimaryPart then model.PrimaryPart=parts[1] end
-        -- A fresh, state-disabled helper renders the copied classic clothes only inside the viewport.
+        -- A fresh, state-disabled helper renders clothes without controlling the visual shell.
         local humanoid=Instance.new("Humanoid"); humanoid.Name="PivotAppearanceHumanoid"; humanoid.AutoRotate=false; humanoid.PlatformStand=true; humanoid.RequiresNeck=false; humanoid.BreakJointsOnDeath=false; humanoid.DisplayDistanceType=Enum.HumanoidDisplayDistanceType.None
         pcall(function() humanoid.EvaluateStateMachine=false; humanoid.AutomaticScalingEnabled=false end)
         pcall(function() humanoid.RigType=source:FindFirstChild("UpperTorso") and Enum.HumanoidRigType.R15 or Enum.HumanoidRigType.R6 end)
@@ -1596,27 +1596,45 @@ local function create_pivot_modules(ctx)
         local height=s.model_fit_pb and assert(rig(),"Character unavailable"):GetExtentsSize().Y or s.model_height
         local rig_scale=pb_costume and 1 or height/size.Y*(s.model_fit_pb and s.model_fit_scale or 1)
         if not pb_costume then model:ScaleTo(rig_scale) end
-        local viewport=new_local(scope,"ViewportFrame",ctx.gui); viewport.Name="PivotModelViewport"; viewport.Size=UDim2.fromScale(1,1); viewport.BackgroundTransparency=1; viewport.BorderSizePixel=0; viewport.ZIndex=0; viewport.Active=false
-        viewport.Ambient=Color3.fromRGB(180,180,180); viewport.LightColor=Color3.fromRGB(255,255,255); viewport.LightDirection=Vector3.new(-1,-1,-1)
-        local world=Instance.new("WorldModel"); world.Name="PivotModelWorld"; world.Parent=viewport
-        local camera=Instance.new("Camera"); camera.Parent=viewport; viewport.CurrentCamera=camera
+        local viewport,world,camera
+        if s.model_renderer=="Native world" then
+            world=new_local(scope,"Folder",workspace); world.Name="PivotCharacterVisuals"
+        else
+            assert(s.model_renderer=="Viewport","Unknown character renderer")
+            viewport=new_local(scope,"ViewportFrame",ctx.gui); viewport.Name="PivotModelViewport"; viewport.Size=UDim2.fromScale(1,1); viewport.BackgroundTransparency=1; viewport.BorderSizePixel=0; viewport.ZIndex=0; viewport.Active=false
+            viewport.Ambient=Color3.fromRGB(110,110,110); viewport.LightColor=Color3.fromRGB(255,255,255); viewport.LightDirection=Vector3.new(-1,-1,-1)
+            world=Instance.new("WorldModel"); world.Name="PivotModelWorld"; world.Parent=viewport
+            camera=Instance.new("Camera"); camera.Parent=viewport; viewport.CurrentCamera=camera
+        end
         model.Parent=world
         local state
         local binding="PivotCostumeCamera"
         run:BindToRenderStep(binding,Enum.RenderPriority.Last.Value+2,function()
             local current_camera=workspace.CurrentCamera
-            if current_camera then camera.CFrame=current_camera.CFrame; camera.FieldOfView=current_camera.FieldOfView end
+            if camera and current_camera then camera.CFrame=current_camera.CFrame; camera.FieldOfView=current_camera.FieldOfView end
             if state and rig() then if state.pb_costume then Engine:pose_pb_costume(state,rig(),s) elseif s.model_follow_pose then Engine:pose_character(state,rig()) end end
         end)
         scope:defer(function() run:UnbindFromRenderStep(binding) end)
         local current=assert(root(),"Enter a court first"); model:PivotTo(current.CFrame)
         local rig_type=motors>0 and (model:FindFirstChild("UpperTorso",true) and "R15 joint rig" or model:FindFirstChild("Torso",true) and "R6 joint rig" or "Joint rig") or #bones>0 and "Bone rig" or "Static / welded model"
         state={model=model,parts=parts,source=rig(),height=s.model_height,viewport=viewport,camera=camera,last_position=current.Position,phase=0,speed=0,joints=joints,bones=bones,motor_count=motors,rig_scale=rig_scale,pb_costume=pb_costume,fit_scale=s.model_fit_scale,rig_label=pb_costume and "PB costume · live body proportions and poses" or s.model_fit_pb and motors==0 and #bones==0 and "Single-piece fitted costume · limited limb animation" or rig_type.." · "..motors.." animated joints / "..#bones.." bones"}
+        state.mesh_fidelity={}
+        for _,part in ipairs(parts) do if part:IsA("MeshPart") then state.mesh_fidelity[part]=part.RenderFidelity; if s.model_high_detail then pcall(function() part.RenderFidelity=Enum.RenderFidelity.Precise end) end end end
+        local provider=game:GetService("ContentProvider")
+        if provider then
+            local active=true; scope:defer(function() active=false end)
+            task.spawn(function()
+                local failed=0
+                local ok=pcall(function() provider:PreloadAsync({model},function(_,status) if status~=Enum.AssetFetchStatus.Success then failed=failed+1 end end) end)
+                if active then state.textures_ready=ok and failed==0; if not state.textures_ready then ctx.report("Some costume textures could not be preloaded") end end
+            end)
+        end
         return state
     end,step=function(scope,state,s,dt)
         local source=rig(); local part=root(); assert(source and part,"Character unavailable")
-        local camera=camera_service(); state.camera.CFrame=camera.CFrame; state.camera.FieldOfView=camera.FieldOfView
-        state.viewport.Visible=true
+        local camera=camera_service(); if state.camera then state.camera.CFrame=camera.CFrame; state.camera.FieldOfView=camera.FieldOfView end
+        if state.viewport then state.viewport.Visible=true end
+        for part,original in pairs(state.mesh_fidelity) do pcall(function() part.RenderFidelity=s.model_high_detail and Enum.RenderFidelity.Precise or original end) end
         if not s.model_fit_pb and s.model_height~=state.height then local factor=s.model_height/state.height; state.model:ScaleTo(state.model:GetScale()*factor); state.rig_scale=state.rig_scale*factor; state.height=s.model_height end
         if s.model_fit_pb and not state.pb_costume and state.fit_scale~=s.model_fit_scale then local factor=s.model_fit_scale/state.fit_scale; state.model:ScaleTo(state.model:GetScale()*factor); state.rig_scale=state.rig_scale*factor; state.fit_scale=s.model_fit_scale end
         dt=math.max(.001,tonumber(dt) or 1/60)
@@ -1648,9 +1666,9 @@ local function create_pivot_modules(ctx)
         ball_appearance={{"ball_material","Material",{"SmoothPlastic","Plastic","Neon","Metal","Glass"}}},
         court_appearance={{"court_material","Material",{"SmoothPlastic","Wood","WoodPlanks","Concrete","Neon"}}},
         sky={{"sky_preset","Sky preset",{"Night","Galaxy","Sunset","Day","Custom"}}},
-        custom_model={}
+        custom_model={{"model_renderer","Rendering",{"Native world","Viewport"}}}
     }
-    Engine.cosmetic_toggles={ball_appearance={{"ball_remove_texture","Remove ball texture"},{"ball_glow","Neon glow"}},court_appearance={{"court_color_lines","Customize court markings"},{"court_remove_texture","Remove floor textures"},{"court_three_enabled","Custom three-point color"},{"court_free_enabled","Custom free-throw color"},{"court_rebuild_markings","Rebuild baked markings"}},self_outline={{"outline_through_walls","Show through walls"}},custom_model={{"model_fit_pb","Fit costume to PB body"},{"model_motion","Single-piece motion"},{"model_hide_avatar","Hide your normal avatar"},{"model_follow_pose","Follow player pose"}}}
+    Engine.cosmetic_toggles={ball_appearance={{"ball_remove_texture","Remove ball texture"},{"ball_glow","Neon glow"}},court_appearance={{"court_color_lines","Customize court markings"},{"court_remove_texture","Remove floor textures"},{"court_three_enabled","Custom three-point color"},{"court_free_enabled","Custom free-throw color"},{"court_rebuild_markings","Rebuild baked markings"}},self_outline={{"outline_through_walls","Show through walls"}},custom_model={{"model_high_detail","High mesh detail"},{"model_fit_pb","Fit costume to PB body"},{"model_motion","Single-piece motion"},{"model_hide_avatar","Hide your normal avatar"},{"model_follow_pose","Follow player pose"}}}
 
     Engine.shot_stats={total=0,perfect=0,good=0,early=0,late=0,skipped=0,releases=0,unconfirmed=0,last="Waiting for a shot",history={}}
     function Engine:record_shot(event)
@@ -2607,7 +2625,7 @@ do
             engine.settings[key]=values[current%#values+1]
             if key=="theme_mode" then ui.set_theme(engine.settings[key]) end
             if key=="sky_preset" and engine.registry.active.sky then engine.registry:disable("sky"); local ok,err=engine.registry:enable("sky",engine.settings); if not ok then report(tostring(err)) end end
-            if key=="model_preset" and engine.registry.active.custom_model then engine.registry:disable("custom_model"); local ok,err=engine.registry:enable("custom_model",engine.settings); if not ok then report(tostring(err)) end end
+            if (key=="model_preset" or key=="model_renderer") and engine.registry.active.custom_model then engine.registry:disable("custom_model"); local ok,err=engine.registry:enable("custom_model",engine.settings); if not ok then report(tostring(err)) end end
             rebuild()
         end)
     end
@@ -2838,4 +2856,3 @@ do
     connect(window:GetPropertyChangedSignal("Size"),function() if page.Visible then rebuild() end end)
     rebuild()
 end
-
