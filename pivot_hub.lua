@@ -1085,8 +1085,8 @@ do
         object.Parent=parent; return object
     end
     local function rgb(r,g,b) return Color3.fromRGB(r,g,b) end
-    local theme={base=rgb(16,19,20),rail=rgb(16,19,20),panel=rgb(25,29,30),input=rgb(19,23,24),line=rgb(48,54,54),
-        text=rgb(239,235,221),muted=rgb(143,154,151),accent=rgb(240,155,86),selected=rgb(58,43,32),green=rgb(163,199,163)}
+    local theme={base=rgb(20,21,24),rail=rgb(20,21,24),panel=rgb(28,30,34),input=rgb(24,26,30),line=rgb(43,46,52),
+        text=rgb(230,232,237),muted=rgb(145,151,163),accent=rgb(192,201,220),selected=rgb(39,44,54),green=rgb(159,190,170)}
     local function corner(object,n)
         local c=object:FindFirstChildWhichIsA("UICorner") or make("UICorner",{},object); c.CornerRadius=UDim.new(0,n)
     end
@@ -1100,7 +1100,7 @@ do
     local function animate(object,properties)
         local service=game:GetService("TweenService")
         if service then
-            local ok=pcall(function() service:Create(object,TweenInfo.new(.12,Enum.EasingStyle.Quad,Enum.EasingDirection.Out),properties):Play() end)
+            local ok=pcall(function() service:Create(object,TweenInfo.new(.18,Enum.EasingStyle.Quad,Enum.EasingDirection.Out),properties):Play() end)
             if ok then return end
         end
         for key,value in pairs(properties) do object[key]=value end
@@ -1162,15 +1162,15 @@ do
     end
     assert(header and status and pages.Diagnostics,"Unsupported Pivot layout.")
     make("Folder",{Name="CompactVisuals"},gui)
-    shell.BackgroundColor3=theme.base; corner(shell,3); border(shell)
+    shell.BackgroundColor3=theme.base; corner(shell,9); border(shell)
     header.Text=""; header.Position=UDim2.fromOffset(68,0); header.Size=UDim2.new(1,-112,0,42)
     subtitle.Visible=false
     nav.Visible=false
     local rail=frame(shell,0,0,68,548,theme.rail); rail.ZIndex=0; rail.Visible=false; corner(rail,0)
     local rail_line=frame(shell,20,97,660,1,theme.line)
     local top_line=frame(shell,20,54,660,1,theme.line)
-    local logo=label(shell,"PIVOT /",20,12,122,28,23,theme.text); logo.Font=Enum.Font.BuilderSansBold; logo.TextXAlignment=Enum.TextXAlignment.Left
-    local heading=label(shell,"COURTSIDE CONTROL",151,14,240,26,10,theme.muted); heading.Font=Enum.Font.BuilderSansMedium
+    local logo=label(shell,"Pivot",20,12,100,28,19,theme.text); logo.Font=Enum.Font.BuilderSansBold; logo.TextXAlignment=Enum.TextXAlignment.Left
+    local heading=label(shell,"Practical Basketball",94,14,240,26,11,theme.muted); heading.Font=Enum.Font.BuilderSansMedium
     close.BackgroundColor3=theme.rail; close.TextColor3=theme.muted; close.TextSize=12; corner(close,4)
     local search=make("TextBox",{Text="",PlaceholderText="Find a control...",PlaceholderColor3=theme.muted,Position=UDim2.fromOffset(484,10),Size=UDim2.fromOffset(166,23),
         ClearTextOnFocus=false,TextSize=11,TextColor3=theme.text,BackgroundColor3=theme.input,BorderSizePixel=0,Font=Enum.Font.BuilderSans},shell)
@@ -1233,21 +1233,14 @@ do
     group({"SAVE SELECTED SLOT","LOAD SELECTED SLOT"})
     local home=pages.Diagnostics
     home:FindFirstChildWhichIsA("UIListLayout"):Destroy()
-    local account=frame(home,0,0,0,124); account.Size=UDim2.new(1,-6,0,124); corner(account,3)
+    local account=frame(home,0,0,0,84); account.Size=UDim2.new(1,-6,0,84); corner(account,7)
     local name=player.DisplayName or player.Name
-    local kicker=label(account,"PRACTICAL BASKETBALL  /  LIVE SESSION",18,12,420,18,10,theme.accent)
-    local display_name=label(account,"READ THE FLOOR.",18,34,450,40,29); display_name.Font=Enum.Font.BuilderSansBold
-    local greeting=label(account,"Your court. Your controls.  /  @"..player.Name,18,83,430,20,11,theme.muted)
+    local kicker=label(account,"Account",16,10,420,16,10,theme.muted)
+    local display_name=label(account,name,16,28,450,25,18); display_name.Font=Enum.Font.BuilderSansBold
+    local greeting=label(account,"@"..player.Name,16,55,430,17,11,theme.muted)
     local badge=frame(account,0,0,1,1); badge.Visible=false
     local session_label=label(account,"",0,0,1,1); session_label.Visible=false
-    local court=frame(account,0,14,144,96); court.Position=UDim2.new(1,-162,0,14); court.BackgroundTransparency=1; border(court,theme.line)
-    local mid=frame(court,71,0,1,96,theme.line)
-    local center=frame(court,52,29,40,40); center.BackgroundTransparency=1; corner(center,20); border(center,theme.line)
-    for _,x in ipairs({0,116}) do
-        local key=frame(court,x,26,28,44); key.BackgroundTransparency=1; border(key,theme.line)
-        local hoop=frame(court,x==0 and 7 or 129,44,7,7); hoop.BackgroundTransparency=1; corner(hoop,4); border(hoop,theme.accent)
-    end
-    local stats=frame(home,0,134,0,54); stats.Size=UDim2.new(1,-6,0,54); corner(stats,7)
+    local stats=frame(home,0,94,0,54); stats.Size=UDim2.new(1,-6,0,54); corner(stats,7)
     local stat_values={}
     for index,title in ipairs({"Players","Session","FPS","Ping","Enabled"}) do
         local cell=frame(stats,0,0,0,54); cell.Position=UDim2.new((index-1)/5,0,0,0); cell.Size=UDim2.new(.2,0,1,0); cell.BackgroundTransparency=1
@@ -1255,8 +1248,8 @@ do
         local value=label(cell,"--",10,26,100,20,15); value.Font=Enum.Font.BuilderSansMedium; value.Size=UDim2.new(1,-14,0,20); stat_values[title]=value
         if index>1 then local line=frame(cell,0,9,1,36,theme.line) end
     end
-    local server=frame(home,0,198,0,108); server.Size=UDim2.new(1,-6,0,108); corner(server,7)
-    label(server,"SESSION DETAILS",14,12,240,20,13)
+    local server=frame(home,0,158,0,108); server.Size=UDim2.new(1,-6,0,108); corner(server,7)
+    label(server,"Session",14,12,240,20,13)
     label(server,"Practical Basketball",14,33,240,17,10,theme.muted)
     local place_text=label(server,"Place  "..string.format("%.0f",game.PlaceId),14,59,270,17,10,theme.muted)
     local server_text=label(server,"Server  "..tostring(game.JobId or "Local session"),14,78,270,16,10,theme.muted)
@@ -1268,11 +1261,11 @@ do
     local copy_place=small_button(server,"Copy place ID",function() copy(string.format("%.0f",game.PlaceId)) end)
     local copy_server=small_button(server,"Copy server ID",function() copy(game.JobId or "") end)
     border(copy_place); border(copy_server)
-    local runtime=frame(home,0,314,0,52); runtime.Size=UDim2.new(1,-6,0,52); corner(runtime,4)
+    local runtime=frame(home,0,274,0,52); runtime.Size=UDim2.new(1,-6,0,52); corner(runtime,4)
     label(runtime,"Quick controls",14,8,240,18,12)
     local native=type(keypress)=="function" and type(keyrelease)=="function"
     local runtime_text=label(runtime,"Right Shift  Menu     F8  Stop all",14,27,500,16,10,theme.muted); runtime_text.Size=UDim2.new(1,-28,0,16)
-    local bottom=frame(home,0,374,0,60); bottom.Size=UDim2.new(1,-6,0,60); bottom.BackgroundTransparency=1
+    local bottom=frame(home,0,334,0,60); bottom.Size=UDim2.new(1,-6,0,60); bottom.BackgroundTransparency=1
     local storage=frame(bottom,0,0,0,60); storage.Size=UDim2.new(.5,-4,1,0); corner(storage,4)
     label(storage,"Profiles",12,9,180,18,12)
     local storage_text=label(storage,"3 profile slots",12,30,250,17,10,theme.muted); storage_text.Size=UDim2.new(1,-24,0,17)
@@ -1302,7 +1295,7 @@ do
     show=function(name)
         selected=name; result_page.Visible=false; if PivotUI and PivotUI.hide_extra then PivotUI.hide_extra() end
         for key,page in pairs(pages) do page.Visible=key==name end
-        heading.Text="COURTSIDE CONTROL"
+        heading.Text="Practical Basketball"
         for key,item in pairs(rail_items) do
             local active=key==name; item.button.BackgroundColor3=active and theme.selected or theme.rail
             icon_color(item.icon,active and theme.accent or theme.muted); item.label.TextColor3=active and theme.accent or theme.muted
@@ -1328,7 +1321,7 @@ do
         local query=search.Text:lower(); if PivotUI and PivotUI.hide_extra then PivotUI.hide_extra() end
         if query=="" then show(selected); return end
         for _,page in pairs(pages) do page.Visible=false end
-        result_page.Visible=true; heading.Text="FIND A CONTROL"
+        result_page.Visible=true; heading.Text="Search"
         local count=0
         for _,item in ipairs(result_buttons) do
             local match=(item.entry.name.." "..item.entry.description.." "..item.entry.page):lower():find(query,1,true)~=nil
@@ -1343,7 +1336,7 @@ do
     local footer=frame(shell,20,0,0,1,theme.line)
     status.TextSize=10; status.TextColor3=theme.muted
     cancel.TextTransparency=1; cancel.BackgroundColor3=theme.selected; corner(cancel,4)
-    local cancel_text=label(cancel,"STOP ALL / F8",0,0,96,28,11); cancel_text.TextXAlignment=Enum.TextXAlignment.Center
+    local cancel_text=label(cancel,"Stop all  ·  F8",0,0,96,28,11); cancel_text.TextXAlignment=Enum.TextXAlignment.Center
     local scale=shell:FindFirstChildWhichIsA("UIScale")
     local function layout_nav()
         local w=shell.Size.X.Offset
@@ -1364,14 +1357,14 @@ do
     local function fit()
         local camera=workspace.CurrentCamera; if not camera then return end
         local v=camera.ViewportSize
-        local w=math.max(340,math.min(760,v.X-24)); local h=math.max(430,math.min(620,v.Y-32))
+        local w=math.max(340,math.min(760,v.X-24)); local h=math.max(430,math.min(580,v.Y-32))
         scale.Scale=math.min(1,(v.X-12)/w,(v.Y-12)/h); shell.Size=UDim2.fromOffset(w,h)
         rail_line.Size=UDim2.new(1,-40,0,1); top_line.Size=UDim2.new(1,-40,0,1)
         layout_nav()
         local narrow=w<560
         search.Visible=not narrow; search.Position=UDim2.new(1,-214,0,10)
         search_symbol.Visible=not narrow; search_symbol.Position=UDim2.new(1,-211,0,12)
-        heading.Visible=not narrow; heading.Size=UDim2.new(1,-395,0,26)
+        heading.Visible=not narrow; heading.Size=UDim2.new(1,-320,0,26)
         close.Position=UDim2.new(1,-35,0,10); close.Size=UDim2.fromOffset(23,23)
         for _,page in pairs(pages) do page.Position=UDim2.fromOffset(20,112); page.Size=UDim2.new(1,-34,1,-174) end
         result_page.Position=UDim2.fromOffset(20,112); result_page.Size=UDim2.new(1,-34,1,-174)
@@ -1380,20 +1373,20 @@ do
         status.Position=UDim2.new(0,20,1,-43); status.Size=UDim2.new(1,-145,0,34)
         cancel.Position=UDim2.new(1,-116,1,-39); cancel.Size=UDim2.fromOffset(96,28)
         local compact=w<560
-        court.Visible=not compact; kicker.Size=UDim2.new(1,-28,0,18)
-        display_name.Size=UDim2.new(1,-(compact and 30 or 182),0,40); display_name.TextSize=compact and 24 or 29; greeting.Size=UDim2.new(1,-30,0,20)
-        account.Size=UDim2.new(1,-6,0,124)
+        kicker.Size=UDim2.new(1,-28,0,16)
+        display_name.Size=UDim2.new(1,-30,0,25); display_name.TextSize=18; greeting.Size=UDim2.new(1,-30,0,17)
+        account.Size=UDim2.new(1,-6,0,84)
         copy_place.Position=compact and UDim2.fromOffset(12,108) or UDim2.new(1,-126,0,18)
         copy_server.Position=compact and UDim2.new(.5,3,0,108) or UDim2.new(1,-126,0,55)
         copy_place.Size=compact and UDim2.new(.5,-15,0,28) or UDim2.fromOffset(112,28); copy_server.Size=copy_place.Size
         server.Size=UDim2.new(1,-6,0,compact and 148 or 108)
         place_text.Size=UDim2.new(1,-(compact and 28 or 146),0,17); server_text.Size=UDim2.new(1,-(compact and 28 or 146),0,16)
-        runtime.Position=UDim2.fromOffset(0,compact and 354 or 314); bottom.Position=UDim2.fromOffset(0,compact and 414 or 374)
+        runtime.Position=UDim2.fromOffset(0,compact and 314 or 274); bottom.Position=UDim2.fromOffset(0,compact and 374 or 334)
         bottom.Size=UDim2.new(1,-6,0,compact and 126 or 60)
         storage.Size=compact and UDim2.new(1,0,0,60) or UDim2.new(.5,-4,1,0)
         report_card.Position=compact and UDim2.fromOffset(0,66) or UDim2.new(.5,4,0,0)
         report_card.Size=storage.Size
-        home.CanvasSize=UDim2.fromOffset(0,compact and 550 or 444)
+        home.CanvasSize=UDim2.fromOffset(0,compact and 510 or 404)
         local p=shell.Position; local hw=w*scale.Scale/2; local hh=h*scale.Scale/2
         shell.Position=UDim2.fromOffset(math.max(hw+6,math.min(v.X-hw-6,p.X.Scale*v.X+p.X.Offset)),math.max(hh+6,math.min(v.Y-hh-6,p.Y.Scale*v.Y+p.Y.Offset)))
     end
