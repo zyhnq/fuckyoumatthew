@@ -198,7 +198,7 @@ function Core.animation_release(scope,deps)
             local initial=.60
             if attributes and attributes.Action=="Dunking" then initial=.36 end
             if name=="InsideHandLayup1R" then initial=.70 end
-            state.profiles[key]={ratio=initial}
+            state.profiles[key]={ratio=initial,dunk=attributes and attributes.Action=="Dunking"}
         end
         return state.profiles[key]
     end
@@ -209,7 +209,24 @@ function Core.animation_release(scope,deps)
         local p=pending.profile; local early=code<=3; local late=code>=6
         if early then p.early=math.max(p.early or .25,pending.ratio)
         elseif late then p.late=math.min(p.late or .85,pending.ratio)
-        else deps.report(code==5 and "Perfect release / keeping timing" or "Good release / keeping timing"); return end
+        else
+            if code==5 then
+                p.perfect=true; p.good_center=nil; p.good_attempt=0
+                deps.report("Perfect release / keeping timing")
+            elseif p.dunk and not p.perfect then
+                p.good_center=p.good_center or pending.ratio
+                p.good_attempt=(p.good_attempt or 0)+1
+                local attempt=p.good_attempt
+                local offset=math.ceil(attempt/2)*.01*(attempt%2==1 and 1 or -1)
+                local minimum=math.max(.25,(p.early or .24)+.001)
+                local maximum=math.min(p.ceiling or .85,(p.late or .86)-.001)
+                if minimum<=maximum then p.ratio=math.max(minimum,math.min(maximum,p.good_center+offset)) end
+                if attempt>=6 then p.good_attempt=0 end
+                deps.report("Good dunk / testing a nearby release phase")
+            else deps.report("Good release / keeping timing") end
+            return
+        end
+        p.perfect=false; p.good_center=nil; p.good_attempt=0
         if p.early and p.late and p.early>=p.late then
             if early then p.late=nil else p.early=nil end
         end
@@ -224,7 +241,8 @@ function Core.animation_release(scope,deps)
     local function release_time(track)
         if state.metadata[track]==nil then
             local ok,time=pcall(function() return track:GetTimeOfKeyframe("Release") end)
-            state.metadata[track]=ok and Core.bounded(time,.0001,30) or false
+            local valid=ok and Core.bounded(time,.0001,30)
+            if valid then state.metadata[track]=valid end
         end
         return state.metadata[track] or nil
     end
@@ -271,12 +289,13 @@ function Core.animation_release(scope,deps)
             present[track]=true
             local shot=eligible(track)
             local prior=self.watched[track]
-            if prior and shot and prior.shot~=shot and track.TimePosition<=(prior.position or 0) then disconnect(track) end
+            if prior and shot and prior.shot~=shot then disconnect(track) end
             if shot and not self.watched[track] then
                 local entry={connections={},shot=shot,release_time=release_time(track)}; self.watched[track]=entry
                 entry.connections[#entry.connections+1]=track:GetMarkerReachedSignal("Release"):Connect(function() release(track,"Release") end)
             end
             local entry=self.watched[track]
+            if entry and not entry.release_time then entry.release_time=release_time(track) end
             if entry and entry.release_time and type(track.TimePosition)=="number" and track.TimePosition>0 then
                 local attributes=deps.attributes()
                 if attributes and type(attributes.BaseAnimation)=="string" then
@@ -660,7 +679,11 @@ local function create_pivot_modules(ctx)
         end
         return {
             attributes=function() local c=current(); return c and c.data and c.data.Attributes end,
-            tracks=function() assert(current()==value,"Character changed"); return animator:GetPlayingAnimationTracks() end,
+            tracks=function()
+                local c=current()
+                local active=c and c.Animation and c.Animation.Animator
+                return active and active:GetPlayingAnimationTracks() or {}
+            end,
             held=function()
                 for _,device in ipairs(devices) do
                     for _,action in ipairs(device.actions) do
@@ -676,7 +699,8 @@ local function create_pivot_modules(ctx)
                 local signal=service and service.ShowFeedback
                 if not signal or type(signal.Connect)~="function" then return false end
                 local connection=signal:Connect(function(model,_,timing)
-                    if model==value.data.model then callback(tonumber(timing)) end
+                    local c=current()
+                    if c and c.data and model==c.data.model then callback(tonumber(timing)) end
                 end)
                 scope:defer(function() connection:Disconnect() end); return true
             end,
