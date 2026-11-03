@@ -203,6 +203,7 @@ function Core.animation_release(scope,deps)
         return state.profiles[key]
     end
     function state:feedback(code)
+        if deps.calibrate and not deps.calibrate() then self.pending={}; return end
         code=tonumber(code)
         if not code or code%1~=0 or code<1 or code>8 or #self.pending==0 then return end
         local pending=table.remove(self.pending,1)
@@ -253,10 +254,12 @@ function Core.animation_release(scope,deps)
         local shot=Core.bounded(attributes.ShotStartTime,0,math.huge)
         local name=attributes.BaseAnimation
         if not shot or type(name)~="string" or name=="" or state.sent[shot] then return nil end
+        local expected=deps.active_track and deps.active_track(name)
+        if expected and track~=expected then return nil end
         local animation=track.Animation
         local named=track.Name==name or animation and animation.Name==name
         local generic=track.Name=="Animation" and animation and animation.Name=="Animation" and release_time(track)~=nil
-        if not named and not generic then return nil end
+        if not named and not generic and track~=expected then return nil end
         return shot,name
     end
     local function release(track,marker)
@@ -289,9 +292,9 @@ function Core.animation_release(scope,deps)
             present[track]=true
             local shot=eligible(track)
             local prior=self.watched[track]
-            if prior and shot and prior.shot~=shot then disconnect(track) end
+            if prior and shot and (prior.shot~=shot or prior.name~=select(2,eligible(track))) then disconnect(track) end
             if shot and not self.watched[track] then
-                local entry={connections={},shot=shot,release_time=release_time(track)}; self.watched[track]=entry
+                local entry={connections={},shot=shot,name=select(2,eligible(track)),release_time=release_time(track)}; self.watched[track]=entry
                 entry.connections[#entry.connections+1]=track:GetMarkerReachedSignal("Release"):Connect(function() release(track,"Release") end)
             end
             local entry=self.watched[track]
@@ -305,6 +308,7 @@ function Core.animation_release(scope,deps)
                         p.ratio=math.min(p.ratio,p.ceiling)
                     end
                     local position=track.TimePosition
+                    if deps.lead and type(track.Speed)=="number" and track.Speed>0 then position=position+track.Speed*deps.lead() end
                     if attributes.Action=="Dunking" and type(track.Speed)=="number" and track.Speed>0 then
                         position=position+track.Speed*math.min(1/60,math.max(0,tonumber(dt) or 0))
                     end
@@ -351,7 +355,7 @@ end
 local function create_pivot_modules(ctx)
     local Engine={settings={walk_speed=20,jump_power=50,fly_speed=32,spin_speed=90,fov=85,time=14,range=34,esp_distance=300,
         guard_distance=4,guard_range=25,block_range=12,steal_range=5,steal_key="",spectate="",
-        on_ball_speed=20,off_ball_speed=20,guard_target="",jump_key="Space",rebound_range=8,team_check=true},ranges={walk_speed={4,60},jump_power={10,120},fly_speed={4,100},spin_speed={10,360},fov={40,110},time={0,24},range={5,60},esp_distance={30,1000},guard_distance={2,10},guard_range={5,60},block_range={3,18},steal_range={2,8},on_ball_speed={4,60},off_ball_speed={4,60},rebound_range={3,15}},definitions={},recording={version=1,steps={}}}
+        on_ball_speed=20,off_ball_speed=20,guard_target="",jump_key="Space",rebound_range=8,team_check=true,guard_sprint=false,ball_handler_only=false,guard_strength=1,block_delay=0,shot_range=34,glide_speed=20,ankle_range=8,ankle_delay=1.2,ankle_combo="ZX",custom_combo="Z X C",combo_delay=110,combo_bind="F5",meter_style="Vertical",auto_calibrate=true,ping_compensation=false,ping_factor=.5,takeover_threshold=100,theme_mode="Graphite"},ranges={guard_strength={.5,2},block_delay={0,.5},shot_range={5,60},glide_speed={4,60},ankle_range={2,20},ankle_delay={.5,5},combo_delay={20,500},ping_factor={0,1},takeover_threshold={1,100},walk_speed={4,60},jump_power={10,120},fly_speed={4,100},spin_speed={10,360},fov={40,110},time={0,24},range={5,60},esp_distance={30,1000},guard_distance={2,10},guard_range={5,60},block_range={3,18},steal_range={2,8},on_ball_speed={4,60},off_ball_speed={4,60},rebound_range={3,15}},definitions={},recording={version=1,steps={}}}
     local registry=Core.module_registry(ctx.report); Engine.registry=registry
     local players,input,run=ctx.players,ctx.input,ctx.run
     local lighting=game:GetService("Lighting")
@@ -428,24 +432,36 @@ local function create_pivot_modules(ctx)
         for _,obj in ipairs(terrain:GetChildren()) do if obj:IsA("Clouds") then scope:set(obj,"Cover",0); scope:set(obj,"Density",0) end end
     end
     add("clouds","Clear clouds","World","Local cloud cover and density",{start=clouds,step=clouds,interval=1})
+    local cached_controller
+    local function client_attributes()
+        if not cached_controller then
+            local scripts=ctx.player:FindFirstChild("PlayerScripts"); local aero=scripts and scripts:FindFirstChild("Aero")
+            local folder=aero and aero:FindFirstChild("Controllers"); local module=folder and folder:FindFirstChild("Player")
+            if module then local ok,value=pcall(require,module); if ok then cached_controller=value end end
+        end
+        local c=cached_controller and cached_controller:GetCharacter()
+        return c and c.data and c.data.Attributes
+    end
     local function attribute_module(id,title,values,description,conflicts)
         local function apply(scope,state,s)
             local model=character()
             if state and model~=state then error("Character changed; re-enable the module") end
             for key,value in pairs(values) do
                 assert(model:GetAttribute(key)~=nil,"Observed attribute unavailable: "..key)
-                scope:attribute(model,key,type(value)=="function" and value(s) or value)
+                local applied=type(value)=="function" and value(s) or value
+                scope:attribute(model,key,applied)
+                local attributes=client_attributes(); if attributes and attributes[key]~=nil then scope:set(attributes,key,applied) end
             end
             return model
         end
         add(id,title,"Player",description.." / client attributes; game or server may replace them",{start=function(scope,s) return apply(scope,nil,s) end,step=apply,interval=0,conflicts=conflicts})
     end
-    attribute_module("speed","Client speed override",{WalkSpeed=function(s) return s.walk_speed end},"Observed WalkSpeed attribute",{"split_speed"})
-    attribute_module("stamina","Client stamina override",{Stamina=100},"Observed Stamina attribute")
-    attribute_module("movement_lock","Remove client movement lock",{CanMove=true},"Observed CanMove attribute")
+    attribute_module("speed","Speed boost",{WalkSpeed=function(s) return s.walk_speed end},"Observed WalkSpeed attribute",{"split_speed"})
+    attribute_module("stamina","Infinite stamina",{Stamina=100},"Observed Stamina attribute")
+    attribute_module("movement_lock","No stun",{CanMove=true},"Observed CanMove attribute")
     attribute_module("turn_lock","Remove client turn lock",{CanTurn=true},"Observed CanTurn attribute")
-    attribute_module("debounce","Remove client debounce",{Debounce=false},"Observed Debounce attribute")
-    attribute_module("cold","Remove client cold state",{Cold=false},"Observed Cold attribute")
+    attribute_module("debounce","No debounce",{Debounce=false},"Observed Debounce attribute")
+    attribute_module("cold","No cold zone",{Cold=false},"Observed Cold attribute")
     attribute_module("sprint","Client sprint state",{Sprinting=true},"Observed Sprinting attribute")
     local function held_ball(model)
         if not model then return nil end
@@ -526,7 +542,7 @@ local function create_pivot_modules(ctx)
                     if not visual then
                         if names then
                             local billboard=Instance.new("BillboardGui"); billboard.Adornee=part; billboard.AlwaysOnTop=true; billboard.Size=UDim2.fromOffset(180,26); billboard.StudsOffset=Vector3.new(0,3,0); billboard.Parent=state.folder
-                            local text=Instance.new("TextLabel"); text.BackgroundTransparency=1; text.Size=UDim2.fromScale(1,1); text.TextColor3=Color3.fromRGB(215,195,232); text.TextSize=12; text.Font=Enum.Font.BuilderSans; text.TextStrokeTransparency=.4; text.Parent=billboard
+                            local text=Instance.new("TextLabel"); text.BackgroundTransparency=1; text.Size=UDim2.fromScale(1,1); text.TextColor3=Color3.fromRGB(215,195,232); text.TextSize=14; text.Font=Enum.Font.BuilderSans; text.TextStrokeTransparency=.4; text.Parent=billboard
                             visual={object=billboard,text=text}; state.items[item.object]=visual
                         else
                             local highlight=Instance.new("Highlight"); highlight.Adornee=item.object; highlight.DepthMode=Enum.HighlightDepthMode.AlwaysOnTop; highlight.FillColor=Color3.fromRGB(164,132,190); highlight.OutlineColor=Color3.fromRGB(215,195,232); highlight.FillTransparency=.7; highlight.Parent=state.folder
@@ -564,7 +580,20 @@ local function create_pivot_modules(ctx)
         ctx.report("Selected nearest rim as defensive goal")
     end
     local function selected_target(s)
-        assert(s.guard_target~="","Enter a defense target username")
+        if s.guard_target=="" then
+            local mine=assert(root(),"Local root unavailable"); local team=rig():GetAttribute("Team"); local best,best_part,distance
+            for _,who in ipairs(players:GetPlayers()) do
+                if who~=ctx.player then
+                    local model=rig(who); local part=root(who)
+                    local teammate=s.team_check and team and team~=0 and model and model:GetAttribute("Team")==team
+                    if model and part and not teammate and (not s.ball_handler_only or held_ball(model)) then
+                        local d=(part.Position-mine.Position).Magnitude
+                        if not distance or d<distance then best=model; best_part=part; distance=d end
+                    end
+                end
+            end
+            assert(best,"No eligible opponent nearby"); return best,best_part
+        end
         local matches={}
         for _,who in ipairs(players:GetPlayers()) do if who~=ctx.player and who.Name:lower():sub(1,#s.guard_target)==s.guard_target:lower() then matches[#matches+1]=who end end
         assert(#matches==1,"Defense target must match one other player")
@@ -583,6 +612,11 @@ local function create_pivot_modules(ctx)
         character(); local model,part=selected_target(s); assert(Engine.defensive_rim and Engine.defensive_rim.Parent,"Select your defensive rim first")
         scope:defer(function() release_owned(scope) end); return {model=model,part=part}
     end,step=function(scope,state,s)
+        if s.guard_target=="" then
+            local ok,model,part=pcall(selected_target,s)
+            if not ok then release_owned(scope); return end
+            state.model=model; state.part=part
+        end
         local mine=assert(root(),"Local root unavailable"); assert(state.part.Parent and Engine.defensive_rim.Parent,"Target or rim removed")
         local distance=(state.part.Position-mine.Position).Magnitude
         local delta=Engine.defensive_rim.Position-state.part.Position; delta=Vector3.new(delta.X,0,delta.Z)
@@ -590,9 +624,14 @@ local function create_pivot_modules(ctx)
         local direction=desired-mine.Position; direction=Vector3.new(direction.X,0,direction.Z)
         local camera=camera_service(); local forward=camera.CFrame.LookVector; forward=Vector3.new(forward.X,0,forward.Z)
         local right=camera.CFrame.RightVector; right=Vector3.new(right.X,0,right.Z)
-        local enabled=distance<=s.guard_range and direction.Magnitude>1 and not input:GetFocusedTextBox() and not ctx.runner.current and forward.Magnitude>.01
+        local team=rig():GetAttribute("Team")
+        local teammate=s.team_check and team and team~=0 and state.model:GetAttribute("Team")==team
+        local allowed=not teammate and (not s.ball_handler_only or held_ball(state.model)~=nil)
+        local enabled=allowed and distance<=s.guard_range and direction.Magnitude>1 and not input:GetFocusedTextBox() and not ctx.runner.current and forward.Magnitude>.01
         local f=enabled and direction.Unit:Dot(forward.Unit) or 0; local r=enabled and direction.Unit:Dot(right.Unit) or 0
-        hold(scope,"W",f>.3); hold(scope,"S",f<-.3); hold(scope,"D",r>.3); hold(scope,"A",r<-.3)
+        local threshold=.3/math.max(.5,s.guard_strength)
+        hold(scope,"W",f>threshold); hold(scope,"S",f< -threshold); hold(scope,"D",r>threshold); hold(scope,"A",r< -threshold)
+        hold(scope,"LeftShift",enabled and s.guard_sprint)
     end,conflicts={"fly","spin"}})
     add("block","Block selected shooter","Defense","Pulses your jump key after a new observed ShotStartTime and InAir state",{start=function(scope,s)
         character(); local model,part=selected_target(s); jump_key(s)
@@ -603,7 +642,7 @@ local function create_pivot_modules(ctx)
         finish_pulse(scope,state); assert(state.part.Parent,"Defense target removed")
         local shot=state.model:GetAttribute("ShotStartTime")
         if type(shot)=="number" and shot~=state.shot then state.shot=shot; state.pending=os.clock() end
-        if state.pending and os.clock()-state.pending<.8 and state.model:GetAttribute("InAir")==true and os.clock()-state.last>1 then
+        if state.pending and os.clock()-state.pending>=s.block_delay and os.clock()-state.pending<.8 and state.model:GetAttribute("InAir")==true and os.clock()-state.last>1 then
             local mine=assert(root(),"Local root unavailable")
             if (state.part.Position-mine.Position).Magnitude<=s.block_range and not ctx.runner.current then pulse(scope,state,jump_key(s)); state.last=os.clock(); state.pending=nil end
         end
@@ -684,7 +723,21 @@ local function create_pivot_modules(ctx)
                 local active=c and c.Animation and c.Animation.Animator
                 return active and active:GetPlayingAnimationTracks() or {}
             end,
+            active_track=function(name)
+                local c=current(); local animations=c and c.Animation and c.Animation.Animations
+                local wrapper=animations and rawget(animations,name)
+                local track=wrapper and wrapper.AnimationObject
+                return track and track.IsPlaying~=false and wrapper.IsPlaying~=false and track or nil
+            end,
+            begin=function() shoot:Fire({Shoot=true,Input="E"}) end,
+            lead=function()
+                if not Engine.settings.ping_compensation then return 0 end
+                local ok,ping=pcall(function() return ctx.player:GetNetworkPing() end)
+                return ok and math.max(0,math.min(.25,ping*Engine.settings.ping_factor)) or 0
+            end,
+            calibrate=function() return Engine.settings.auto_calibrate end,
             held=function()
+                if Engine.auto_shoot_held then return true end
                 for _,device in ipairs(devices) do
                     for _,action in ipairs(device.actions) do
                         local ok,down=pcall(device.component.IsActionDown,device.component,action)
@@ -693,7 +746,7 @@ local function create_pivot_modules(ctx)
                 end
                 return false
             end,
-            release=function() shoot:Fire({Shoot=false}) end,
+            release=function() shoot:Fire({Shoot=false}); Engine.auto_shoot_held=false end,
             feedback=function(scope,callback)
                 local service=services.InterfaceService
                 local signal=service and service.ShowFeedback
@@ -729,6 +782,164 @@ local function create_pivot_modules(ctx)
     add("hide_meters","Hide local meter graphics","Visuals","Restores the local meter Enabled states on disable",{start=function(scope)
         local model=character(); for _,obj in ipairs(model:GetDescendants()) do if obj:IsA("BillboardGui") and obj.Name:find("Meter",1,true) then scope:set(obj,"Enabled",false) end end
     end})
+-- Additional controls use the existing game adapter and restore local changes on disable.
+    local function client_parts()
+        local scripts=ctx.player:FindFirstChild("PlayerScripts")
+        local aero=scripts and scripts:FindFirstChild("Aero")
+        assert(aero,"Game client unavailable")
+        local controller=require(assert(aero:FindFirstChild("Controllers"):FindFirstChild("Player"),"Player controller unavailable"))
+        local keyboard=require(assert(aero:FindFirstChild("Modules"):FindFirstChild("Components"):FindFirstChild("Input"):FindFirstChild("Keyboard"),"Keyboard adapter unavailable"))
+        return controller,keyboard
+    end
+    local function local_state() local controller=client_parts(); return assert(controller:GetCharacter(),"Enter a court first") end
+    local function opponent_near(distance,handler_only)
+        local mine=root(); if not mine then return nil end
+        local mymodel=rig(); local team=mymodel and mymodel:GetAttribute("Team")
+        local best,best_distance
+        for _,who in ipairs(players:GetPlayers()) do
+            if who~=ctx.player then
+                local model=rig(who); local part=root(who)
+                local teammate=Engine.settings.team_check and team and team~=0 and model and model:GetAttribute("Team")==team
+                if part and model and not teammate and (not handler_only or held_ball(model)) then
+                    local d=(part.Position-mine.Position).Magnitude
+                    if d<=distance and (not best_distance or d<best_distance) then best={model=model,part=part,who=who}; best_distance=d end
+                end
+            end
+        end
+        return best
+    end
+    function Engine:run_combo()
+        local s=self.settings
+        local steps,err=Core.parse(s.custom_combo,40,s.combo_delay); assert(steps,err)
+        local ok,message=ctx.runner:start(function(token)
+            for _,step in ipairs(steps) do
+                if not ctx.runner:step(step.keys,step.hold,token) or not ctx.runner:wait(step.gap,token) then return end
+            end
+        end,function(success,result) ctx.report(success and "Combo finished" or tostring(result)) end)
+        assert(ok,message)
+    end
+    add("dribble_macros","Dribble macros","Dribbling","Runs your custom sequence from its assigned keybind",{start=function(scope,s)
+        assert(s.combo_bind~="F8" and s.combo_bind:match("^F%d+$"),"Choose an F1–F12 combo key other than F8")
+        local n=tonumber(s.combo_bind:sub(2)); assert(n and n>=1 and n<=12,"Choose F1–F12")
+        assert(Core.parse(s.custom_combo,40,s.combo_delay))
+        local link=input.InputBegan:Connect(function(event,processed)
+            if not processed and not input:GetFocusedTextBox() and event.KeyCode.Name==s.combo_bind and not ctx.runner.current then
+                local ok,err=pcall(function() Engine:run_combo() end); if not ok then ctx.report(tostring(err)) end
+            end
+        end)
+        scope:defer(function() link:Disconnect() end)
+    end})
+    add("auto_ankle","Auto ankle breaker","Dribbling","Attempts your dribble combo near an opponent; the game decides ankle breaks",{start=function(scope,s)
+        local _,keyboard=client_parts(); assert(keyboard.Services.InputService.Dribble,"Dribble endpoint unavailable")
+        assert(s.ankle_combo:match("^[ZXCVH]+$") and #s.ankle_combo<=8,"Use up to 8 Z/X/C/V/H inputs")
+        return {keyboard=keyboard,last=-10}
+    end,step=function(_,state,s)
+        local c=local_state(); local attributes=c.data.Attributes
+        if not ctx.runner.current and not input:GetFocusedTextBox() and held_ball(rig()) and attributes.Action=="" and opponent_near(s.ankle_range,false) and os.clock()-state.last>=s.ankle_delay then
+            state.last=os.clock(); state.keyboard.Services.InputService.Dribble:Fire(s.ankle_combo,true,c.Movement and c.Movement.lastMoveDirection or Vector3.zero)
+        end
+    end,interval=.1})
+    add("dribble_glide","Dribble glide","Dribbling","Adjusts the local movement velocity during dribble actions",{start=function()
+        local c=local_state(); assert(c.Movement and c.Movement.MovementVelocity,"Movement velocity unavailable")
+    end,step=function(scope,_,s)
+        local c=local_state(); local a=c.data.Attributes
+        if type(a.Action)=="string" and a.Action:lower():find("drib",1,true) then
+            local movement=c.Movement; local direction=movement and movement.lastMoveDirection; local mover=movement and movement.MovementVelocity
+            if mover and direction and direction.Magnitude>.1 then
+                local velocity=mover.Velocity; local flat=Vector3.new(direction.X,0,direction.Z)
+                if flat.Magnitude>.1 then scope:set(mover,"Velocity",flat.Unit*s.glide_speed+Vector3.new(0,velocity.Y,0)) end
+            end
+        end
+    end,conflicts={"fly"}})
+    add("auto_takeover","Auto takeover","Player","Sets the observed local Takeover state when TakeoverFill reaches your threshold; server effects are not guaranteed",{start=function()
+        local a=local_state().data.Attributes
+        assert(type(a.TakeoverFill)=="number" and type(a.Takeover)=="boolean","Takeover state unavailable")
+    end,step=function(scope,_,s)
+        local a=local_state().data.Attributes
+        if a.TakeoverFill>=s.takeover_threshold and not a.Takeover then scope:set(a,"Takeover",true) end
+    end,interval=.1})
+    add("auto_shoot","Auto shoot","Shooting","Starts a shot while holding the ball within range; requires Auto Green",{start=function(scope)
+        assert(registry.active.meter_release,"Enable Auto Green first")
+        local adapter=shooting_adapter()
+        scope:defer(function() if Engine.auto_shoot_held then pcall(adapter.release); Engine.auto_shoot_held=false end end)
+        return {adapter=adapter,last=-10}
+    end,step=function(_,state,s)
+        if not registry.active.meter_release then registry:disable("auto_shoot"); return end
+        local a=state.adapter.attributes(); local mine=root()
+        if not a or not mine or input:GetFocusedTextBox() or ctx.runner.current then return end
+        if Engine.auto_shoot_held then
+            if os.clock()-state.last>1 then state.adapter.release() end
+            return
+        end
+        local _,distance=nearest_rim(mine.Position)
+        if held_ball(rig()) and a.Action=="" and a.ReleasedShot~=false and distance and distance<=s.shot_range and os.clock()-state.last>=1.2 and not state.adapter.held() then
+            state.last=os.clock(); Engine.auto_shoot_held=true; state.adapter.begin()
+        end
+    end,interval=.03})
+    add("rim_range","Range circle visualizer","Shooting","Draws the auto-shoot radius around the nearest rim",{start=function(scope)
+        local folder=Instance.new("Folder"); folder.Parent=ctx.gui; scope:defer(function() folder:Destroy() end)
+        local lines={}; for i=1,48 do lines[i]=line(folder) end; return lines
+    end,step=function(_,lines,s)
+        local mine=root(); local rim=mine and nearest_rim(mine.Position); local camera=camera_service()
+        for i,object in ipairs(lines) do
+            object.Visible=false
+            if rim and mine then
+                local a=(i-1)*math.pi*2/#lines; local b=i*math.pi*2/#lines; local center=Vector3.new(rim.Position.X,mine.Position.Y-2.8,rim.Position.Z)
+                local pa,va=camera:WorldToViewportPoint(center+Vector3.new(math.cos(a)*s.shot_range,0,math.sin(a)*s.shot_range))
+                local pb,vb=camera:WorldToViewportPoint(center+Vector3.new(math.cos(b)*s.shot_range,0,math.sin(b)*s.shot_range))
+                if va and vb then draw_line(object,Vector2.new(pa.X,pa.Y),Vector2.new(pb.X,pb.Y)) end
+            end
+        end
+    end})
+    local meter_styles={Vertical=true,Rocket=true,Bat=true,Funnel=true,Hoop=true,Roblox=true,None=true}
+    add("meter_style","Meter changer","Shooting","Displays your selected local meter style; does not alter shot timing",{start=function(scope,s)
+        assert(meter_styles[s.meter_style],"Choose a supported meter style")
+        local model=character(); local packet_controller
+        local scripts=ctx.player:FindFirstChild("PlayerScripts"); local aero=scripts and scripts:FindFirstChild("Aero")
+        local controllers=aero and aero:FindFirstChild("Controllers")
+        if controllers and controllers:FindFirstChild("Meter") then packet_controller=require(controllers:FindFirstChild("Meter")) end
+        return {model=model,controller=packet_controller}
+    end,step=function(scope,state,s)
+        assert(state.model.Parent,"Character removed")
+        if state.style~=s.meter_style then
+            if state.clone then state.clone:Destroy(); state.clone=nil end
+            state.style=s.meter_style
+            if s.meter_style~="None" then
+                local source=state.model:FindFirstChild(s.meter_style.."Meter",true)
+                assert(source and source:IsA("BillboardGui"),"Selected meter is unavailable on this character")
+                local clone=source:Clone(); clone.Name="PivotMeter"; clone.Parent=source.Parent; state.clone=clone
+                scope:defer(function() clone:Destroy() end)
+                local _,keyboard=client_parts(); local configs=keyboard.Modules and keyboard.Modules.Config and keyboard.Modules.Config.Meters
+                local config=configs and configs[s.meter_style]
+                if config and config.ShowData then
+                    for name,properties in pairs(config.ShowData) do
+                        local object=clone:FindFirstChild(name,true)
+                        if object then for property,value in pairs(properties) do object[property]=value end end
+                    end
+                else
+                    for _,object in ipairs(clone:GetDescendants()) do if object:IsA("ImageLabel") then object.ImageTransparency=0 end end
+                end
+            end
+        end
+        local active=false
+        for _,object in ipairs(state.model:GetDescendants()) do
+            if object:IsA("BillboardGui") and object~=state.clone and object.Name:match("Meter$") then
+                if object:GetAttribute("Active")==true then active=true end
+                scope:set(object,"Enabled",false)
+            end
+        end
+        if state.clone then
+            state.clone.Enabled=active
+            local fill=state.clone:FindFirstChild("FillGradient",true)
+            local offset=state.model:GetAttribute("meterOffset")
+            if fill and offset then fill.Offset=offset; fill.Rotation=state.model:GetAttribute("meterRotation") or 0 end
+            local packet=state.controller and state.controller.ActivePackets[state.model]
+            local green=state.clone:FindFirstChild("Meter_Green",true)
+            local gradient=green and green:FindFirstChildWhichIsA("UIGradient",true)
+            if gradient and packet and packet.greenGradient then gradient.Transparency=packet.greenGradient.Transparency end
+        end
+    end,conflicts={"hide_meters"}})
+
     Engine.emit=emit; Engine.held=held
     function Engine:stop()
         self.registry:stop_all(); for _,owner in pairs(held) do release_owned(owner) end
@@ -750,10 +961,13 @@ local function create_pivot_modules(ctx)
     end
     local last_rig=rig()
     ctx.connect(run.Heartbeat,function(dt)
-        local current=rig(); if current~=last_rig then Engine:stop(); last_rig=current end
+        local current=rig(); if current~=last_rig then
+            local ids={}; for id in pairs(registry.active) do if id~="meter_release" then ids[#ids+1]=id end end
+            for _,id in ipairs(ids) do registry:disable(id) end
+            last_rig=current
+        end
         registry:step(dt)
     end)
-    ctx.connect(input.WindowFocusReleased,function() Engine:stop() end)
     ctx.connect(input.TextBoxFocused,function() Engine:stop_controls() end)
     ctx.connect(input.InputBegan,function(event) if event.KeyCode==Enum.KeyCode.F8 then Engine:stop() end end)
     return Engine
@@ -825,14 +1039,14 @@ make("UICorner",{CornerRadius=UDim.new(0,14)},window)
 make("UIStroke",{Color=Color3.fromRGB(49,61,79),Thickness=1},window)
 local scale=make("UIScale",{Scale=1},window)
 local function label(owner, value, height, color)
-    return make("TextLabel",{Size=UDim2.new(1,-8,0,height or 28),BackgroundTransparency=1,Text=value,TextColor3=color or white,Font=Enum.Font.SourceSans,TextSize=14,TextWrapped=true,TextXAlignment=Enum.TextXAlignment.Left},owner)
+    return make("TextLabel",{Size=UDim2.new(1,-8,0,height or 28),BackgroundTransparency=1,Text=value,TextColor3=color or white,Font=Enum.Font.SourceSans,TextSize=16,TextWrapped=true,TextXAlignment=Enum.TextXAlignment.Left},owner)
 end
 local function box(owner, value, height)
-    local object=make("TextBox",{Size=UDim2.new(1,-8,0,height or 34),BackgroundColor3=card,BorderSizePixel=0,Text=value,TextColor3=white,Font=Enum.Font.RobotoMono,TextSize=15,ClearTextOnFocus=false,TextWrapped=true},owner)
+    local object=make("TextBox",{Size=UDim2.new(1,-8,0,height or 34),BackgroundColor3=card,BorderSizePixel=0,Text=value,TextColor3=white,Font=Enum.Font.RobotoMono,TextSize=17,ClearTextOnFocus=false,TextWrapped=true},owner)
     make("UICorner",{CornerRadius=UDim.new(0,6)},object); return object
 end
 local function button(owner,value,callback)
-    local object=make("TextButton",{Size=UDim2.new(1,-8,0,34),BackgroundColor3=card,BorderSizePixel=0,Text=value,TextColor3=accent,Font=Enum.Font.SourceSansBold,TextSize=14,AutoButtonColor=true},owner)
+    local object=make("TextButton",{Size=UDim2.new(1,-8,0,34),BackgroundColor3=card,BorderSizePixel=0,Text=value,TextColor3=accent,Font=Enum.Font.SourceSansBold,TextSize=16,AutoButtonColor=true},owner)
     make("UICorner",{CornerRadius=UDim.new(0,6)},object)
     connect(object.Activated,callback); return object
 end
@@ -1031,7 +1245,7 @@ connect(gui.Destroying,function()
     for _,connection in ipairs(connections) do connection:Disconnect() end
 end)
 connect(player.CharacterRemoving,function() cancel("Character removed; input cancelled.") end)
-connect(input.WindowFocusReleased,function() cancel("Window lost focus; input cancelled.") end)
+
 connect(input.TextBoxFocused,function() cancel("Editing controls; input cancelled.") end)
 connect(input.InputBegan,function(event,processed)
     local key=event.KeyCode.Name
@@ -1160,12 +1374,12 @@ do
     end
     local function label(parent,value,x,y,w,h,size,color)
         return make("TextLabel",{Text=value,Position=UDim2.fromOffset(x,y),Size=UDim2.fromOffset(w,h),BackgroundTransparency=1,
-            TextColor3=color or theme.text,Font=Enum.Font.SourceSans,TextSize=size or 12,TextXAlignment=Enum.TextXAlignment.Left,
+            TextColor3=color or theme.text,Font=Enum.Font.SourceSans,TextSize=math.max(14,(size or 12)+2),TextXAlignment=Enum.TextXAlignment.Left,
             TextYAlignment=Enum.TextYAlignment.Center,TextWrapped=true,BorderSizePixel=0},parent)
     end
     local function small_button(parent,value,callback)
         local b=make("TextButton",{Text=value,Size=UDim2.fromOffset(110,28),BackgroundColor3=theme.panel,BorderSizePixel=0,
-            TextColor3=theme.text,TextSize=11,Font=Enum.Font.SourceSans,AutoButtonColor=false},parent)
+            TextColor3=theme.text,TextSize=14,Font=Enum.Font.SourceSans,AutoButtonColor=false},parent)
         corner(b,5)
         on(b.Activated,callback)
         on(b.MouseEnter,function() if not b:GetAttribute("RailItem") then animate(b,{BackgroundColor3=theme.selected}) end end)
@@ -1195,9 +1409,9 @@ do
     local top_line=frame(shell,20,54,660,1,theme.line)
     local logo=label(shell,"Pivot",20,12,100,28,19,theme.text); logo.Font=Enum.Font.SourceSansBold; logo.TextXAlignment=Enum.TextXAlignment.Left
     local heading=label(shell,"Practical Basketball",94,14,240,26,11,theme.muted); heading.Font=Enum.Font.SourceSansSemibold
-    close.BackgroundColor3=theme.rail; close.TextColor3=theme.muted; close.TextSize=12; corner(close,4)
+    close.BackgroundColor3=theme.rail; close.TextColor3=theme.muted; close.TextSize=14; corner(close,4)
     local search=make("TextBox",{Text="",PlaceholderText="Find a control...",PlaceholderColor3=theme.muted,Position=UDim2.fromOffset(484,10),Size=UDim2.fromOffset(166,23),
-        ClearTextOnFocus=false,TextSize=11,TextColor3=theme.text,BackgroundColor3=theme.input,BorderSizePixel=0,Font=Enum.Font.SourceSans},shell)
+        ClearTextOnFocus=false,TextSize=14,TextColor3=theme.text,BackgroundColor3=theme.input,BorderSizePixel=0,Font=Enum.Font.SourceSans},shell)
     corner(search,4)
     search.TextXAlignment=Enum.TextXAlignment.Left
     make("UIPadding",{PaddingLeft=UDim.new(0,26),PaddingRight=UDim.new(0,8)},search)
@@ -1230,9 +1444,9 @@ do
                     if d and box and box:IsA("TextBox") then
                         local multi=d[3]=="macro"
                         local row=frame(page,0,0,0,multi and 108 or 52); row.Size=UDim2.new(1,-6,0,multi and 108 or 52); row.LayoutOrder=child.LayoutOrder; corner(row,4)
-                        child.Parent=row; child.Text=d[1]; child.TextSize=12; child.Font=Enum.Font.SourceSans; child.TextColor3=theme.text; child.Position=UDim2.fromOffset(12,6); child.Size=UDim2.new(1,-128,0,20)
+                        child.Parent=row; child.Text=d[1]; child.TextSize=14; child.Font=Enum.Font.SourceSans; child.TextColor3=theme.text; child.Position=UDim2.fromOffset(12,6); child.Size=UDim2.new(1,-128,0,20)
                         local helper=label(row,d[2],12,27,220,16,10,theme.muted); helper.Size=UDim2.new(1,-128,0,16)
-                        box.Parent=row; box.TextSize=12; box.BackgroundColor3=theme.input; box.TextColor3=theme.text; box.Font=Enum.Font.RobotoMono; corner(box,3)
+                        box.Parent=row; box.TextSize=14; box.BackgroundColor3=theme.input; box.TextColor3=theme.text; box.Font=Enum.Font.RobotoMono; corner(box,3)
                         box.Position=multi and UDim2.fromOffset(12,51) or UDim2.new(1,-104,0,12); box.Size=multi and UDim2.new(1,-24,0,44) or UDim2.fromOffset(92,28); box.MultiLine=multi
                         local outline=border(box)
                         if multi then child.Size=UDim2.new(1,-24,0,20); helper.Size=UDim2.new(1,-24,0,16) end
@@ -1241,7 +1455,7 @@ do
                     elseif names[child.Text] or name=="Diagnostics" then child.Visible=false
                     else
                         if child.Text:find("Calibrate against live shot feedback",1,true) then child.Text="Manual shot lab  /  F6 action"; child.Size=UDim2.new(1,-6,0,22) end
-                        child.TextSize=11; child.TextColor3=theme.muted; child.TextYAlignment=Enum.TextYAlignment.Top
+                        child.TextSize=14; child.TextColor3=theme.muted; child.TextYAlignment=Enum.TextYAlignment.Top
                     end
                 elseif child:IsA("TextButton") then decorate_button(child); if name=="Diagnostics" then child.Visible=false end end
             end
@@ -1358,7 +1572,7 @@ do
     local rail_name=label(shell,tostring(name),5,0,58,15,9,theme.muted); rail_name.TextXAlignment=Enum.TextXAlignment.Center
     profile_circle.Visible=false; rail_name.Visible=false
     local footer=frame(shell,20,0,0,1,theme.line)
-    status.TextSize=10; status.TextColor3=theme.muted
+    status.TextSize=14; status.TextColor3=theme.muted
     cancel.TextTransparency=1; cancel.BackgroundColor3=theme.selected; corner(cancel,4)
     local cancel_text=label(cancel,"Stop all  ·  F8",0,0,96,28,11); cancel_text.TextXAlignment=Enum.TextXAlignment.Center
     local scale=shell:FindFirstChildWhichIsA("UIScale")
@@ -1377,6 +1591,13 @@ do
             end
         end
     end
+    local minimized=small_button(gui,"Pivot  ·  Restore",function() shell.Visible=true end)
+    minimized.Name="PivotMinimized"; minimized.Size=UDim2.fromOffset(164,34); minimized.AnchorPoint=Vector2.new(.5,.5); minimized.Visible=false; border(minimized)
+    local minimize=small_button(shell,"−",function()
+        minimized.Position=shell.Position; minimized.Visible=true; shell.Visible=false
+    end)
+    minimize.Name="Minimize"; minimize.Position=UDim2.new(1,-64,0,10); minimize.Size=UDim2.fromOffset(23,23); minimize.TextSize=18
+    on(shell:GetPropertyChangedSignal("Visible"),function() if shell.Visible then minimized.Visible=false end end)
     local camera_link
     local function fit()
         local camera=workspace.CurrentCamera; if not camera then return end
@@ -1386,8 +1607,8 @@ do
         rail_line.Size=UDim2.new(1,-40,0,1); top_line.Size=UDim2.new(1,-40,0,1)
         layout_nav()
         local narrow=w<560
-        search.Visible=not narrow; search.Position=UDim2.new(1,-214,0,10)
-        search_symbol.Visible=not narrow; search_symbol.Position=UDim2.new(1,-211,0,12)
+        search.Visible=not narrow; search.Position=UDim2.new(1,-244,0,10)
+        search_symbol.Visible=not narrow; search_symbol.Position=UDim2.new(1,-241,0,12)
         heading.Visible=not narrow; heading.Size=UDim2.new(1,-320,0,26)
         close.Position=UDim2.new(1,-35,0,10); close.Size=UDim2.fromOffset(23,23)
         for _,page in pairs(pages) do page.Position=UDim2.fromOffset(20,112); page.Size=UDim2.new(1,-34,1,-174) end
@@ -1398,7 +1619,7 @@ do
         cancel.Position=UDim2.new(1,-116,1,-39); cancel.Size=UDim2.fromOffset(96,28)
         local compact=w<560
         kicker.Size=UDim2.new(1,-28,0,16)
-        display_name.Size=UDim2.new(1,-30,0,25); display_name.TextSize=18; greeting.Size=UDim2.new(1,-30,0,17)
+        display_name.Size=UDim2.new(1,-30,0,25); display_name.TextSize=20; greeting.Size=UDim2.new(1,-30,0,17)
         account.Size=UDim2.new(1,-6,0,84)
         copy_place.Position=compact and UDim2.fromOffset(12,108) or UDim2.new(1,-126,0,18)
         copy_server.Position=compact and UDim2.new(.5,3,0,108) or UDim2.new(1,-126,0,55)
@@ -1435,7 +1656,24 @@ do
         runtime_text.Text=tostring(fields.menu.Text).."  Menu     F8  Stop all"
         elapsed=0; frames=0
     end)
-    PivotUI={theme=theme,label=label,button=small_button,pages=pages,rail_items=rail_items,show=show,heading=heading,search=search,cancel=cancel,actions=actions,icon=icon,icon_color=icon_color,animate=animate,add_search=add_search,layout_nav=layout_nav}
+    local function set_theme(mode)
+        local palettes={
+            Graphite={base=rgb(20,21,24),rail=rgb(20,21,24),panel=rgb(28,30,34),input=rgb(24,26,30),line=rgb(43,46,52),text=rgb(230,232,237),muted=rgb(145,151,163),accent=rgb(192,201,220),selected=rgb(39,44,54),green=rgb(159,190,170)},
+            Slate={base=rgb(23,28,35),rail=rgb(23,28,35),panel=rgb(31,38,47),input=rgb(26,32,40),line=rgb(48,57,70),text=rgb(229,234,242),muted=rgb(151,163,182),accent=rgb(172,193,220),selected=rgb(43,54,69),green=rgb(159,190,170)},
+            Light={base=rgb(241,242,244),rail=rgb(241,242,244),panel=rgb(250,250,251),input=rgb(232,234,238),line=rgb(213,216,223),text=rgb(33,37,44),muted=rgb(102,110,124),accent=rgb(67,83,111),selected=rgb(221,227,237),green=rgb(64,124,88)}
+        }
+        local next_theme=assert(palettes[mode],"Unknown theme")
+        for _,object in ipairs(gui:GetDescendants()) do
+            for _,property in ipairs({"BackgroundColor3","TextColor3","ScrollBarImageColor3","Color"}) do
+                pcall(function()
+                    local color=object[property]
+                    for key,value in pairs(theme) do if color==value then object[property]=next_theme[key]; break end end
+                end)
+            end
+        end
+        for key,value in pairs(next_theme) do theme[key]=value end
+    end
+    PivotUI={theme=theme,label=label,button=small_button,pages=pages,rail_items=rail_items,show=show,heading=heading,search=search,cancel=cancel,actions=actions,icon=icon,icon_color=icon_color,animate=animate,add_search=add_search,layout_nav=layout_nav,set_theme=set_theme}
     on(gui.Destroying,function() for _,c in ipairs(connections) do c:Disconnect() end end)
 end
 
@@ -1452,7 +1690,7 @@ do
         ui.animate(track,{BackgroundColor3=on and theme.accent or theme.line})
         ui.animate(knob,{BackgroundColor3=on and theme.base or theme.muted,Position=UDim2.fromOffset(on and 20 or 2,2)})
         local row=button.Parent
-        if row and row.Name:sub(1,10)=="ModuleRow_" then row.BackgroundColor3=on and theme.selected or theme.panel; row.BackgroundTransparency=on and .4 or 0 end
+        if row and row.Name:sub(1,10)=="ModuleRow_" then row.BackgroundColor3=on and theme.selected or theme.panel; row.BackgroundTransparency=on and .4 or 1 end
     end
     local function switch(parent,callback)
         local button=make("TextButton",{Name="Toggle",Text="",AutoButtonColor=false,BackgroundTransparency=1,BorderSizePixel=0,Size=UDim2.fromOffset(44,26)},parent)
@@ -1464,8 +1702,10 @@ do
         return button
     end
     local page=make("ScrollingFrame",{Name="PivotModules",Position=UDim2.fromOffset(20,112),Size=UDim2.new(1,-34,1,-174),BackgroundTransparency=1,BorderSizePixel=0,ScrollBarThickness=2,Visible=false,CanvasSize=UDim2.fromOffset(0,0)},window)
-    local tabs={"Shooting","Player","Defense","Visuals","World","Camera","Recorder","Options"}
-    local category="Shooting"; local rows={}; local fields={}; local y=0
+    local tabs={"All","Shooting","Dribbling","Player","Defense","Visuals","World","Camera","Recorder","Options"}
+    local category="All"; local rows={}; local fields={}; local y=0
+    local container=page
+    local collapsed={}
     local expanded,choosing,section_button,record_tools
     local auxiliary={}; local capture_switch
     local function clear()
@@ -1473,17 +1713,46 @@ do
     end
     local function own(object) rows[#rows+1]=object; return object end
     local function text(value,size,color,height)
-        local object=own(ui.label(page,value,2,y,500,height or 22,size or 12,color or theme.text)); object.Size=UDim2.new(1,-12,0,height or 22); y=y+(height or 22)+5; return object
+        local object=own(ui.label(container,value,2,y,500,height or 22,size or 12,color or theme.text)); object.Size=UDim2.new(1,-12,0,height or 22); y=y+(height or 22)+5; return object
     end
     local function action(value,callback)
-        local object=own(ui.button(page,value,function() local ok,err=pcall(callback); if not ok then report(tostring(err)) end end))
+        local object=own(ui.button(container,value,function() local ok,err=pcall(callback); if not ok then report(tostring(err)) end end))
         object.Position=UDim2.fromOffset(0,y); object.Size=UDim2.new(1,-6,0,30); y=y+36; return object
     end
     local function field(key,caption)
-        local row=own(make("Frame",{Position=UDim2.fromOffset(0,y),Size=UDim2.new(1,-6,0,36),BackgroundColor3=theme.panel,BorderSizePixel=0},page))
+        local row=own(make("Frame",{Position=UDim2.fromOffset(0,y),Size=UDim2.new(1,-6,0,36),BackgroundColor3=theme.panel,BorderSizePixel=0},container))
         local label=ui.label(row,caption,10,8,220,20,11,theme.muted); label.Size=UDim2.new(.6,-14,0,20)
-        local box=make("TextBox",{Name="Module_"..key,Text=tostring(engine.settings[key]),ClearTextOnFocus=false,Font=Enum.Font.RobotoMono,TextSize=11,TextColor3=theme.text,BackgroundColor3=theme.input,BorderSizePixel=0,Position=UDim2.new(.6,0,0,4),Size=UDim2.new(.4,-6,0,28)},row)
+        local box=make("TextBox",{Name="Module_"..key,Text=tostring(engine.settings[key]),ClearTextOnFocus=false,Font=Enum.Font.RobotoMono,TextSize=14,TextColor3=theme.text,BackgroundColor3=theme.input,BorderSizePixel=0,Position=UDim2.new(.6,0,0,4),Size=UDim2.new(.4,-6,0,28)},row)
         fields[key]=box; y=y+42
+        local range=engine.ranges[key]
+        if range then
+            row.Size=UDim2.new(1,-6,0,50); y=y+14
+            local slider=make("TextButton",{Name="Slider_"..key,Text="",AutoButtonColor=false,Position=UDim2.fromOffset(10,37),Size=UDim2.new(1,-20,0,6),BackgroundColor3=theme.line,BorderSizePixel=0},row)
+            make("UICorner",{CornerRadius=UDim.new(0,3)},slider)
+            local fill=make("Frame",{BackgroundColor3=theme.accent,BorderSizePixel=0,Size=UDim2.new((engine.settings[key]-range[1])/(range[2]-range[1]),0,1,0)},slider)
+            make("UICorner",{CornerRadius=UDim.new(0,3)},fill)
+            local dragging
+            local function update(position)
+                local width=slider.AbsoluteSize.X; if width<=0 then return end
+                local fraction=math.max(0,math.min(1,(position.X-slider.AbsolutePosition.X)/width))
+                local value=range[1]+fraction*(range[2]-range[1])
+                value=range[2]<=5 and math.floor(value*100+.5)/100 or math.floor(value+.5)
+                engine.settings[key]=value; box.Text=tostring(value); fill.Size=UDim2.new((value-range[1])/(range[2]-range[1]),0,1,0)
+            end
+            connect(slider.InputBegan,function(event)
+                if event.UserInputType==Enum.UserInputType.MouseButton1 or event.UserInputType==Enum.UserInputType.Touch then dragging=event; update(event.Position) end
+            end)
+            local move_link=input.InputChanged:Connect(function(event)
+                if row.Parent and dragging and (event==dragging or event.UserInputType==Enum.UserInputType.MouseMovement) then update(event.Position) end
+            end)
+            local end_link=input.InputEnded:Connect(function(event)
+                if event==dragging or event.UserInputType==Enum.UserInputType.MouseButton1 then dragging=nil end
+            end)
+            connect(row.Destroying,function() move_link:Disconnect(); end_link:Disconnect() end)
+            connect(box:GetPropertyChangedSignal("Text"),function()
+                local value=Core.bounded(box.Text,range[1],range[2]); if value then fill.Size=UDim2.new((value-range[1])/(range[2]-range[1]),0,1,0) end
+            end)
+        end
         connect(box.FocusLost,function()
             local original=engine.settings[key]; local value=box.Text
             if type(original)=="number" then local range=engine.ranges[key]; value=Core.bounded(value,range[1],range[2]); if not value then box.Text=tostring(original); report("Value outside allowed range: "..key); return end end
@@ -1500,11 +1769,19 @@ do
         if capture_switch then paint_switch(capture_switch,capture) end
     end
     local function toggle_action(caption,read,write)
-        local row=own(make("Frame",{Position=UDim2.fromOffset(0,y),Size=UDim2.new(1,-6,0,32),BackgroundTransparency=1},page))
+        local row=own(make("Frame",{Position=UDim2.fromOffset(0,y),Size=UDim2.new(1,-6,0,32),BackgroundTransparency=1},container))
         local title=ui.label(row,caption,4,0,300,30,11,theme.text); title.Size=UDim2.new(1,-60,0,30)
         local button=switch(row,function() local ok,err=pcall(write,not read()); if not ok then report(tostring(err)) end; update_buttons() end)
         button.Position=UDim2.new(1,-48,0,3); auxiliary[#auxiliary+1]={button=button,read=read}; y=y+36
         paint_switch(button,read()); return button
+    end
+    local function choice(key,caption,values)
+        action(caption.."  /  "..tostring(engine.settings[key]),function()
+            local current=1; for i,value in ipairs(values) do if value==engine.settings[key] then current=i end end
+            engine.settings[key]=values[current%#values+1]
+            if key=="theme_mode" then ui.set_theme(engine.settings[key]) end
+            rebuild()
+        end)
     end
     local capture_key,capture_started,last_ended
     local function stop_capture()
@@ -1550,11 +1827,14 @@ do
     end
     local function apply_settings(data)
         local validated,err=Core.validate_module_settings(data,engine.settings,engine.ranges); assert(validated,err)
-        engine:stop(); for key,value in pairs(validated) do engine.settings[key]=value end
+        assert(validated.theme_mode=="Graphite" or validated.theme_mode=="Slate" or validated.theme_mode=="Light","Unknown theme")
+        local meter_valid={Vertical=true,Rocket=true,Bat=true,Funnel=true,Hoop=true,Roblox=true,None=true}
+        assert(meter_valid[validated.meter_style],"Unknown meter style")
+        engine:stop(); for key,value in pairs(validated) do engine.settings[key]=value end; ui.set_theme(engine.settings.theme_mode)
     end
     rebuild=function()
         clear(); buttons={}
-        if section_button then section_button.Text=category.."  ▾" end
+        if section_button then section_button.Text=(category=="All" and "All modules" or category).."  ▾" end
         if choosing then
             for _,name in ipairs(tabs) do action(name,function() category=name; choosing=false; expanded=nil; page.CanvasPosition=Vector2.new(0,0); rebuild() end) end
         elseif category=="Recorder" then
@@ -1570,13 +1850,14 @@ do
             action(record_tools and "Files / import and export  ▴" or "Files / import and export  ▾",function() record_tools=not record_tools; rebuild() end)
             if record_tools then
             action("Copy recording JSON",function() local value,err=Core.validate_recording(engine.recording); assert(value,err); export(value) end)
-            local box=own(make("TextBox",{Name="RecordingImport",Text="",PlaceholderText="Paste recording JSON",ClearTextOnFocus=false,MultiLine=true,Font=Enum.Font.RobotoMono,TextSize=10,TextColor3=theme.text,BackgroundColor3=theme.input,BorderSizePixel=0,Position=UDim2.fromOffset(0,y),Size=UDim2.new(1,-6,0,76)},page)); y=y+82
+            local box=own(make("TextBox",{Name="RecordingImport",Text="",PlaceholderText="Paste recording JSON",ClearTextOnFocus=false,MultiLine=true,Font=Enum.Font.RobotoMono,TextSize=14,TextColor3=theme.text,BackgroundColor3=theme.input,BorderSizePixel=0,Position=UDim2.fromOffset(0,y),Size=UDim2.new(1,-6,0,76)},container)); y=y+82
             action("Import pasted recording",function() assert(#box.Text<=32768,"JSON exceeds 32 KB"); local value,err=Core.validate_recording(http:JSONDecode(box.Text)); assert(value,err); stop_capture(); engine.recording=value; report("Imported "..#value.steps.." steps") end)
             action("Save recording to disk",function() assert(type(writefile)=="function","Disk write unavailable"); local value,err=Core.validate_recording(engine.recording); assert(value,err); writefile("pivot_recording.json",http:JSONEncode(value)); report("Saved pivot_recording.json") end)
             action("Load recording from disk",function() assert(type(readfile)=="function","Disk read unavailable"); local raw=readfile("pivot_recording.json"); assert(#raw<=32768,"Recording exceeds size limit"); local value,err=Core.validate_recording(http:JSONDecode(raw)); assert(value,err); stop_capture(); engine.recording=value; report("Loaded recording") end)
             end
         elseif category=="Options" then
             text("Settings load without enabling modules.",11,theme.muted)
+            choice("theme_mode","Theme",{"Graphite","Slate","Light"})
             field("esp_distance","Overlay distance / studs")
             toggle_action("Team filter",function() return engine.settings.team_check end,function(on) engine.settings.team_check=on end)
             action("Copy module settings",function() export(settings_data()) end)
@@ -1584,36 +1865,68 @@ do
             action("Load module settings",function() assert(type(readfile)=="function","Disk read unavailable"); local raw=readfile("pivot_module_settings.json"); assert(#raw<=16384,"Settings exceed size limit"); apply_settings(http:JSONDecode(raw)); rebuild(); report("Loaded settings / all modules off") end)
             action("Disable every module / restore values",function() cancel(); engine:stop(); update_buttons(); report("All modules disabled") end)
         else
-            local options={speed={{"walk_speed","Client walk speed"}},split_speed={{"on_ball_speed","On-ball speed"},{"off_ball_speed","Off-ball speed"}},jump={{"jump_power","Jump power"}},fly={{"fly_speed","Flight speed"}},spin={{"spin_speed","Degrees / second"}},guard={{"guard_target","Target username"},{"guard_distance","Guard spacing"},{"guard_range","Activation range"}},block={{"guard_target","Target username"},{"block_range","Activation range"},{"jump_key","Jump / block key"}},rebound={{"rebound_range","Activation range"},{"jump_key","Jump key"}},range_circle={{"range","Range / studs"}},time={{"time","Time / 0-24"}},fov={{"fov","Field of view"}},spectate={{"spectate","Target username"}}}
+            local options={auto_shoot={{"shot_range","Shoot range / studs"}},rim_range={{"shot_range","Shoot range / studs"}},dribble_glide={{"glide_speed","Glide speed"}},auto_ankle={{"ankle_range","Ankle break range"},{"ankle_delay","Attempt interval / seconds"},{"ankle_combo","Dribble inputs"}},dribble_macros={{"custom_combo","Custom combo"},{"combo_delay","Combo delay / ms"},{"combo_bind","Combo keybind / F1–F12"}},auto_takeover={{"takeover_threshold","Takeover threshold"}},speed={{"walk_speed","Client walk speed"}},split_speed={{"on_ball_speed","On-ball speed"},{"off_ball_speed","Off-ball speed"}},jump={{"jump_power","Jump power"}},fly={{"fly_speed","Flight speed"}},spin={{"spin_speed","Degrees / second"}},guard={{"guard_target","Target username"},{"guard_distance","Guard spacing"},{"guard_range","Activation range"},{"guard_strength","Guard strength"}},block={{"guard_target","Target username"},{"block_range","Activation range"},{"block_delay","Block delay / seconds"},{"jump_key","Jump / block key"}},rebound={{"rebound_range","Activation range"},{"jump_key","Jump key"}},range_circle={{"range","Range / studs"}},time={{"time","Time / 0-24"}},fov={{"fov","Field of view"}},spectate={{"spectate","Target username"}}}
+            local groups=category=="All" and {"Shooting","Defense","Dribbling","Player","Visuals","Camera","World"} or {category}
+            local columns=category=="All" and window.Size.X.Offset>=620 and 2 or 1
+            local heights={46,46}
+            for _,group in ipairs(groups) do
+                local column=columns==2 and (heights[1]<=heights[2] and 1 or 2) or 1
+                local card=own(make("Frame",{Name="Group_"..group,Position=UDim2.new((column-1)/columns,(column-1)*4,0,heights[column]),Size=UDim2.new(1/columns,columns==2 and -10 or -6,0,40),BackgroundColor3=theme.panel,BorderSizePixel=0},page))
+                make("UICorner",{CornerRadius=UDim.new(0,6)},card)
+                make("UIStroke",{Color=theme.line,Thickness=1,ApplyStrokeMode=Enum.ApplyStrokeMode.Border},card)
+                local header=ui.button(card,group..(collapsed[group] and "  +" or "  −"),function() collapsed[group]=not collapsed[group]; rebuild() end)
+                header.Size=UDim2.new(1,-20,0,32); header.Position=UDim2.fromOffset(10,0); header.BackgroundTransparency=1; header.TextXAlignment=Enum.TextXAlignment.Left
+                local divider=make("Frame",{Position=UDim2.fromOffset(0,32),Size=UDim2.new(1,0,0,1),BackgroundColor3=theme.line,BorderSizePixel=0},card)
+                divider.Visible=not collapsed[group]
+                container=card; y=38
+                if not collapsed[group] then
             for _,definition in ipairs(engine.definitions) do
-                if definition.category==category then
+                if definition.category==group then
                     local id=definition.id
-                    local row=own(make("Frame",{Name="ModuleRow_"..id,Position=UDim2.fromOffset(0,y),Size=UDim2.new(1,-6,0,60),BackgroundColor3=theme.panel,BackgroundTransparency=0,BorderSizePixel=0},page))
+                    local row=own(make("Frame",{Name="ModuleRow_"..id,Position=UDim2.fromOffset(0,y),Size=UDim2.new(1,0,0,30),BackgroundColor3=theme.panel,BackgroundTransparency=1,BorderSizePixel=0},container))
                     make("UICorner",{CornerRadius=UDim.new(0,5)},row)
-                    local title=ui.label(row,definition.title,14,8,300,22,13,theme.text); title.Size=UDim2.new(1,-110,0,22)
-                    local summary=ui.label(row,definition.description,14,32,300,16,10,theme.muted); summary.Size=UDim2.new(1,-110,0,16); summary.TextWrapped=false; summary.TextTruncate=Enum.TextTruncate.AtEnd
+                    local title=ui.label(row,definition.title,12,0,300,30,12,theme.text); title.Size=UDim2.new(1,-89,0,30)
+
                     local detail=ui.button(row,expanded==id and "−" or "+",function() if expanded==id then expanded=nil else expanded=id end; rebuild() end)
-                    detail.Name="Details"; detail.Position=UDim2.new(1,-79,0,18); detail.Size=UDim2.fromOffset(24,24); detail.BackgroundTransparency=1
+                    detail.Name="Details"; detail.Position=UDim2.new(1,-76,0,3); detail.Size=UDim2.fromOffset(24,24); detail.BackgroundTransparency=1
                     buttons[id]=switch(row,function()
                         if engine.registry.active[id] then engine.registry:disable(id) else local ok,err=engine.registry:enable(id,engine.settings); if not ok then report(tostring(err)) end end
                         update_buttons()
                     end)
-                    buttons[id].Position=UDim2.new(1,-48,0,17)
+                    buttons[id].Position=UDim2.new(1,-48,0,2)
                     connect(row.MouseEnter,function() row.BackgroundColor3=theme.panel; row.BackgroundTransparency=.25 end)
-                    connect(row.MouseLeave,function() row.BackgroundColor3=engine.registry.active[id] and theme.selected or theme.panel; row.BackgroundTransparency=engine.registry.active[id] and .4 or 0 end)
-                    y=y+68
+                    connect(row.MouseLeave,function() row.BackgroundColor3=engine.registry.active[id] and theme.selected or theme.panel; row.BackgroundTransparency=engine.registry.active[id] and .4 or 1 end)
+                    y=y+32
                     if expanded==id then
-                        text(definition.description,10,theme.muted,40).TextWrapped=true
+                        text(definition.description,12,theme.muted,60).TextWrapped=true
                         for _,entry in ipairs(options[id] or {}) do field(entry[1],entry[2]) end
+                        if id=="meter_release" then
+                            toggle_action("Auto calibrate",function() return engine.settings.auto_calibrate end,function(on) engine.settings.auto_calibrate=on end)
+                            toggle_action("Ping compensation",function() return engine.settings.ping_compensation end,function(on) engine.settings.ping_compensation=on end)
+                            field("ping_factor","Ping compensation strength")
+                        elseif id=="meter_style" then choice("meter_style","Meter style",{"Vertical","Rocket","Bat","Funnel","Hoop","Roblox","None"})
+                        elseif id=="guard" then
+                            toggle_action("Guard sprint",function() return engine.settings.guard_sprint end,function(on) engine.settings.guard_sprint=on end)
+                            toggle_action("Ball handler only",function() return engine.settings.ball_handler_only end,function(on) engine.settings.ball_handler_only=on end)
+                            toggle_action("Team check",function() return engine.settings.team_check end,function(on) engine.settings.team_check=on end)
+                        end
+                        if id=="dribble_macros" then action("Run custom combo",function() engine:run_combo() end) end
                         if id=="guard" then action("Use nearest rim as defensive goal",function() engine:select_defensive_rim() end) end
                         y=y+7
                     end
                 end
             end
+                end
+                card.Size=UDim2.new(1/columns,columns==2 and -10 or -6,0,y+6)
+                heights[column]=heights[column]+y+18
+                container=page
+            end
+            y=math.max(heights[1],columns==2 and heights[2] or 0)
+
         end
         page.CanvasSize=UDim2.fromOffset(0,y+8); update_buttons()
     end
-    section_button=ui.button(page,category.."  ▾",function() choosing=not choosing; page.CanvasPosition=Vector2.new(0,0); rebuild() end)
+    section_button=ui.button(page,"All modules  ▾",function() choosing=not choosing; page.CanvasPosition=Vector2.new(0,0); rebuild() end)
     section_button.Name="ModuleCategory"; section_button.Position=UDim2.fromOffset(0,0); section_button.Size=UDim2.fromOffset(142,28)
     local rail=ui.button(window,"Modules",function()
         ui.search.Text=""; ui.show("Modules"); rebuild()
@@ -1645,6 +1958,7 @@ do
             ui.search.Text=""; category=section; expanded=id; choosing=false; ui.show("Modules"); page.CanvasPosition=Vector2.new(0,0); rebuild()
         end)
     end
+    connect(window:GetPropertyChangedSignal("Size"),function() if page.Visible then rebuild() end end)
     rebuild()
 end
 
