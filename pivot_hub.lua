@@ -2252,7 +2252,7 @@ local function create_pivot_modules(ctx)
     end,conflicts={"dribble_macros","auto_ankle"}})
     if type(readfile)=="function" then pcall(function() Engine:read_dribble_library() end) end
 
-    Engine.build="2026.11.03.8"
+    Engine.build="2026.11.04.1"
     local s=Engine.settings
     local defaults={ball_finish="Custom",court_preset="Custom",lighting_preset="Warm gym",lighting_intensity=.65,shoe_color="#B79AFF",jersey_color="#FFFFFF",shoe_trail=true,landing_particles=true,effect_strength=.5,indicator_style="Ring",indicator_color="#B79AFF",indicator_radius=2.6,indicator_opacity=.7,green_style="Badge",green_color="#89DEAC",green_duration=.7,outfit_jersey=true,outfit_shoes=true,outfit_accessories=false}
     for key,value in pairs(defaults) do s[key]=value end
@@ -2638,12 +2638,146 @@ local function create_pivot_modules(ctx)
         for _,rim in ipairs(state.rims) do state.flashes[rim]=os.clock()+self.settings.rim_flash_duration end
     end
 
+    for key,value in pairs({footlight_color="#82CFFF",footlight_duration=.45,footlight_size=1,ball_electric_color="#82CFFF",ball_electric_duration=.25,ball_electric_width=.07,dunk_lightning_color="#82CFFF",dunk_lightning_duration=.45,dunk_lightning_strength=.8}) do s[key]=value end
+    for key,value in pairs({footlight_duration={.15,.8},footlight_size={.5,2},ball_electric_duration={.1,.5},ball_electric_width={.03,.18},dunk_lightning_duration={.2,.8},dunk_lightning_strength={.2,1}}) do Engine.ranges[key]=value end
+    local function electric_floor(origin,distance,exclude)
+        local params=RaycastParams.new(); params.FilterType=Enum.RaycastFilterType.Exclude; params.IgnoreWater=true
+        local list=exclude or {}
+        for _,name in ipairs({"Characters","Assets","Basketballs","Hoops"}) do local object=workspace:FindFirstChild(name); if object then list[#list+1]=object end end
+        local model=rig(); if model then list[#list+1]=model end
+        params.FilterDescendantsInstances=list
+        local hit=workspace:Raycast(origin,Vector3.new(0,-distance,0),params)
+        return hit and hit.Normal.Y>.7 and hit or nil
+    end
+    local function electric_segment(parent,name)
+        local p=Instance.new("Part"); p.Name=name; p.Anchored=true; p.CanCollide=false; p.CanTouch=false; p.CanQuery=false; p.CastShadow=false; p.Material=Enum.Material.Neon; p.Transparency=1; p.Parent=parent; return p
+    end
+    local function electric_line(p,a,b,width,color,opacity)
+        local length=(b-a).Magnitude
+        p.Transparency=length>.001 and 1-opacity or 1
+        if length>.001 then p.Size=Vector3.new(width,width,length); p.CFrame=CFrame.new((a+b)/2,b); p.Color=color end
+    end
+    local function electric_burst(state,points,color,duration,strength,width)
+        if #state.bursts>=state.limit then table.remove(state.bursts,1).folder:Destroy() end
+        local folder=Instance.new("Folder"); folder.Name="ElectricBurst"; folder.Parent=state.folder
+        local segments={}
+        for i=1,#points-1 do segments[i]={glow=electric_segment(folder,"Glow"),core=electric_segment(folder,"Core")} end
+        state.bursts[#state.bursts+1]={folder=folder,segments=segments,points=points,born=os.clock(),duration=duration,color=color,strength=strength,width=width}
+    end
+    local function step_electric_bursts(state)
+        for i=#state.bursts,1,-1 do
+            local burst=state.bursts[i]; local age=os.clock()-burst.born
+            if age>burst.duration then burst.folder:Destroy(); table.remove(state.bursts,i)
+            else
+                local fade=(1-age/burst.duration)*burst.strength
+                for n,segment in ipairs(burst.segments) do
+                    electric_line(segment.glow,burst.points[n],burst.points[n+1],burst.width*2.5,burst.color,fade*.5)
+                    electric_line(segment.core,burst.points[n],burst.points[n+1],burst.width*.45,Color3.fromRGB(237,251,255),fade)
+                end
+            end
+        end
+    end
+    add("lightning_footsteps","Lightning footsteps","Visual+","Brief electric cracks on the floor while your character moves",{start=function(scope)
+        local folder=new_local(scope,"Folder",workspace); folder.Name="PivotLightningFootsteps"
+        return {folder=folder,bursts={},limit=8,stride=0,side=-1,last=-10}
+    end,step=function(_,state,settings)
+        local r=root(); local now=os.clock()
+        if not r then state.previous=nil; state.stride=0; step_electric_bursts(state); return end
+        if state.previous then
+            local delta=r.Position-state.previous
+            if delta.Magnitude>10 then state.stride=0
+            else state.stride=state.stride+Vector3.new(delta.X,0,delta.Z).Magnitude end
+            if state.stride>=1.65 and now-state.last>.13 then
+                state.stride=0; state.last=now; state.side=-state.side
+                local origin=(r.CFrame*CFrame.new(state.side*.48,0,0)).Position
+                local hit=electric_floor(origin,5.8,{state.folder})
+                if hit then
+                    local center=hit.Position+Vector3.new(0,.035,0); local points={}
+                    for i=0,5 do points[#points+1]=center+Vector3.new((i/5-.5)*1.3*settings.footlight_size,0,(math.random()-.5)*.65*settings.footlight_size) end
+                    electric_burst(state,points,cosmetic_color(settings.footlight_color),settings.footlight_duration,.9,.045*settings.footlight_size)
+                end
+            end
+        end
+        state.previous=r.Position; step_electric_bursts(state)
+    end,interval=.025})
+    add("electric_ball_trail","Electric ball trail","Visual+","Jagged fading bolts behind moving balls, including passes and shots",{start=function(scope)
+        local folder=new_local(scope,"Folder",workspace); folder.Name="PivotElectricBallTrails"; return {folder=folder,balls={}}
+    end,step=function(_,state,settings)
+        local seen={}; local count=0; local now=os.clock(); local color=cosmetic_color(settings.ball_electric_color)
+        for _,entry in ipairs(candidates("balls")) do
+            local ball=entry.object
+            if ball.Parent and not seen[ball] and count<8 then
+                count=count+1; seen[ball]=true; local item=state.balls[ball]
+                if not item then
+                    local folder=Instance.new("Folder"); folder.Name="BallBolts"; folder.Parent=state.folder
+                    item={folder=folder,points={},segments={}}; for n=1,7 do item.segments[n]={glow=electric_segment(folder,"TrailGlow"),core=electric_segment(folder,"TrailCore")} end
+                    state.balls[ball]=item
+                end
+                local last=item.last_sample
+                if last and (ball.Position-last).Magnitude>12 then item.points={} end
+                if not last or (ball.Position-last).Magnitude>.05 then
+                    table.insert(item.points,1,{position=ball.Position,time=now}); if #item.points>8 then table.remove(item.points) end
+                    item.last_sample=ball.Position
+                end
+                for n=#item.points,1,-1 do if now-item.points[n].time>settings.ball_electric_duration then table.remove(item.points,n) end end
+                for n,segment in ipairs(item.segments) do
+                    local a,b=item.points[n],item.points[n+1]
+                    if a and b then
+                        local jitter=Vector3.new(math.sin(now*35+n)*.07,math.cos(now*29+n)*.07,0)
+                        local opacity=math.max(0,1-(now-b.time)/settings.ball_electric_duration)
+                        electric_line(segment.glow,a.position+jitter,b.position,settings.ball_electric_width*2.5,color,opacity*.5)
+                        electric_line(segment.core,a.position+jitter,b.position,settings.ball_electric_width*.5,Color3.fromRGB(237,251,255),opacity)
+                    else segment.glow.Transparency=1; segment.core.Transparency=1 end
+                end
+            end
+        end
+        for ball,item in pairs(state.balls) do if not seen[ball] then item.folder:Destroy(); state.balls[ball]=nil end end
+    end,interval=.03})
+    local function make_dunk_bolt(state,rim,settings)
+        local hit=electric_floor(rim.Position,40,{state.folder,rim})
+        if not hit then return false end
+        local a=rim.Position; local b=hit.Position+Vector3.new(0,.04,0); local points={a}
+        for i=1,7 do points[#points+1]=a+(b-a)*(i/8)+Vector3.new((math.random()-.5)*.9,0,(math.random()-.5)*.9) end
+        points[#points+1]=b
+        electric_burst(state,points,cosmetic_color(settings.dunk_lightning_color),settings.dunk_lightning_duration,settings.dunk_lightning_strength,.1)
+        return true
+    end
+    add("dunk_lightning","Dunk lightning","Visual+","A rim-to-floor bolt on a nearby local dunk release; cosmetic animation detection",{start=function(scope)
+        local folder=new_local(scope,"Folder",workspace); folder.Name="PivotDunkLightning"
+        return {folder=folder,bursts={},limit=2,last=-10}
+    end,step=function(_,state,settings)
+        local a=client_attributes(); local r=root(); local now=os.clock()
+        if a and r then
+            if a.Action=="Dunking" and (not state.attempt or state.attempt.id~=a.ShotStartTime) then state.attempt={id=a.ShotStartTime,born=now,armed=a.ReleasedShot==false} end
+            local attempt=state.attempt
+            if attempt and attempt.armed and not attempt.done and a.ShotStartTime==attempt.id and a.ReleasedShot==true and now-attempt.born<3 and now-state.last>.6 then
+                attempt.done=true
+                local target,distance
+                for _,rim in ipairs(collect_effect_rims()) do
+                    local d=Vector3.new(rim.Position.X-r.Position.X,0,rim.Position.Z-r.Position.Z).Magnitude
+                    if d<8 and math.abs(rim.Position.Y-r.Position.Y)<7 and (not distance or d<distance) then target=rim; distance=d end
+                end
+                if target and make_dunk_bolt(state,target,settings) then state.last=now end
+            end
+        end
+        if state.attempt and now-state.attempt.born>3 then state.attempt=nil end
+        step_electric_bursts(state)
+    end,interval=.025})
+    function Engine:preview_dunk_lightning()
+        local state=assert(registry.active.dunk_lightning,"Enable Dunk lightning first").state
+        local r=assert(root(),"Enter a court first"); local target,distance
+        for _,rim in ipairs(collect_effect_rims()) do local d=(rim.Position-r.Position).Magnitude; if not distance or d<distance then target=rim; distance=d end end
+        assert(target,"No rim is visible"); assert(make_dunk_bolt(state,target,self.settings),"No floor detected beneath the rim")
+    end
+
     Engine.cosmetic_loadouts={version=1,loadouts={}}
     Engine.settings.cosmetic_loadout_name="My look"
     local look_modules={crosshair=true,ball_trail=true,player_trail=true,ball_appearance=true,court_appearance=true,self_outline=true,sky=true,custom_model=true,coverage_hud=true,player_indicator=true,shoe_effects=true,outfit_tint=true,lighting_preset=true,green_effect=true,wings=true,character_aura=true,ball_impacts=true,wing_trails=true,rim_effects=true,lightning_aura=true,meter_style=true,hide_meters=true}
     local look_defaults={}
+    look_modules.lightning_footsteps=true; look_modules.electric_ball_trail=true; look_modules.dunk_lightning=true
     local prefixes={"ball_","court_","model_","wings_","aura_","lightning_","wing_trail_","rim_","impact_","indicator_","shoe_","jersey_","outfit_","sky_","outline_","player_trail_","crosshair_","coverage_"}
     local look_extra={lighting_preset=true,lighting_intensity=true,effect_strength=true,green_style=true,green_color=true,green_duration=true,meter_style=true,shot_hud=true,shot_hud_compact=true}
+    prefixes[#prefixes+1]="footlight_"; prefixes[#prefixes+1]="dunk_lightning_"
     for key,value in pairs(Engine.settings) do
         local include=look_extra[key]
         for _,prefix in ipairs(prefixes) do if key:sub(1,#prefix)==prefix then include=true end end
@@ -3346,7 +3480,7 @@ do
     local rail_line=frame(shell,20,97,660,1,theme.line)
     local top_line=frame(shell,20,54,660,1,theme.line)
     local logo=label(shell,"Pivot",20,12,100,28,19,theme.text); logo.Font=Enum.Font.SourceSansBold; logo.TextXAlignment=Enum.TextXAlignment.Left
-    local build_label=label(shell,"BUILD 2026.11.03.8",242,17,150,18,10,theme.muted); build_label.Name="PivotBuild"; build_label.Font=Enum.Font.RobotoMono; build_label.TextWrapped=false
+    local build_label=label(shell,"BUILD 2026.11.04.1",242,17,150,18,10,theme.muted); build_label.Name="PivotBuild"; build_label.Font=Enum.Font.RobotoMono; build_label.TextWrapped=false
     local heading=label(shell,"Practical Basketball",94,14,240,26,11,theme.muted); heading.Font=Enum.Font.SourceSansSemibold
     close.BackgroundColor3=theme.rail; close.TextColor3=theme.muted; close.TextSize=14; corner(close,4)
     local search=make("TextBox",{Text="",PlaceholderText="Find a control...",PlaceholderColor3=theme.muted,Position=UDim2.fromOffset(484,10),Size=UDim2.fromOffset(166,23),
@@ -3676,6 +3810,7 @@ do
     local visual_section="Ball"; local visual_character_open=false; local visual_ball_details=false; local visual_trail_details=false
     local visual_wings_open=false; local visual_aura_open=false; local visual_impacts_open=false
     local visual_lightning_open=false; local visual_rim_open=false
+    local visual_electric_pack_open=false
     local tabs={"All","Saved modules","Shooting","Dribbling","Cosmetics","Character","Player","Defense","Visuals","World","Camera","Recorder","Options"}
     local category="All"; local rows={}; local fields={}; local y=0
     local container=page
@@ -3964,6 +4099,14 @@ do
                 module_toggle("outfit_tint"); field("jersey_color","Jersey tint"); field("shoe_color","Shoes / effect color")
                 for _,entry in ipairs({{"outfit_jersey","Tint jersey / shorts"},{"outfit_shoes","Tint shoes"},{"outfit_accessories","Tint accessories"}}) do local key=entry[1]; toggle_action(entry[2],function() return engine.settings[key] end,function(on) engine.settings[key]=on end) end
             elseif visual_section=="Effects" then
+                module_toggle("lightning_footsteps"); module_toggle("electric_ball_trail"); module_toggle("dunk_lightning")
+                action(visual_electric_pack_open and "Electric effect controls  −" or "Electric effect controls  +",function() visual_electric_pack_open=not visual_electric_pack_open; rebuild() end)
+                if visual_electric_pack_open then
+                    field("footlight_color","Footstep color"); field("footlight_size","Footstep spread"); field("footlight_duration","Footstep duration")
+                    field("ball_electric_color","Electric trail color"); field("ball_electric_width","Electric trail width"); field("ball_electric_duration","Electric trail duration")
+                    field("dunk_lightning_color","Dunk bolt color"); field("dunk_lightning_strength","Dunk bolt intensity"); field("dunk_lightning_duration","Dunk bolt duration")
+                    action("Preview dunk lightning",function() engine:preview_dunk_lightning() end)
+                end
                 module_toggle("lightning_aura")
                 action(visual_lightning_open and "Lightning controls  −" or "Lightning controls  +",function() visual_lightning_open=not visual_lightning_open; rebuild() end)
                 if visual_lightning_open then
