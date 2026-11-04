@@ -1131,18 +1131,26 @@ local function create_pivot_modules(ctx)
     trail_module("ball_trail","Ball trail",true)
     trail_module("player_trail","Player trail",false)
     add("ball_appearance","Ball appearance","Cosmetics","Local color/material override; Neon glow stays on the ball surface with a bloom halo",{start=function(scope)
-        local state={glows={}}
+        local state={glows={},stars={}}
         local bloom=Instance.new("BloomEffect"); bloom.Name="PivotBallBloom"; bloom.Enabled=false; bloom.Parent=lighting; state.bloom=bloom
-        scope:defer(function() bloom:Destroy(); for _,glow in pairs(state.glows) do glow:Destroy() end end)
+        scope:defer(function() bloom:Destroy(); for _,glow in pairs(state.glows) do glow:Destroy() end; for _,stars in pairs(state.stars) do stars:Destroy() end end)
         return state
     end,step=function(scope,state,s)
-        local color=cosmetic_color(s.ball_color); local chosen=material(s.ball_material); local parts={}; local seen={}; local glowing=0
+        local color=cosmetic_color(s.ball_color)
+        if s.ball_finish=="Holographic" or s.ball_finish=="Galaxy" then
+            local t=os.clock()*(s.ball_finish=="Galaxy" and .4 or .8)
+            color=Color3.fromRGB(155+65*math.sin(t),130+65*math.sin(t+2),200+50*math.sin(t+4))
+        end
+        local chosen=material(s.ball_material); local parts={}; local seen={}; local glowing=0
         for _,item in ipairs(candidates("balls")) do parts[#parts+1]=item.object end
         local own=held_ball(rig()); if own then parts[#parts+1]=own end
         for _,part in ipairs(parts) do
             if not seen[part] then
                 seen[part]=true
                 scope:set(part,"Color",color); scope:set(part,"Material",chosen); scope:set(part,"Reflectance",s.ball_reflectance)
+                local stars=state.stars[part]
+                if s.ball_finish=="Galaxy" and not stars then stars=Instance.new("Sparkles"); stars.Name="PivotGalaxyStars"; stars.Parent=part; state.stars[part]=stars end
+                if stars then stars.Enabled=s.ball_finish=="Galaxy"; stars.SparkleColor=Color3.fromRGB(205,207,255) end
                 if s.ball_remove_texture then
                     if part:IsA("MeshPart") then scope:set(part,"TextureID","") end
                     for _,object in ipairs(part:GetDescendants()) do
@@ -1169,6 +1177,7 @@ local function create_pivot_modules(ctx)
             end
         end
         for part,glow in pairs(state.glows) do if not seen[part] then glow:Destroy(); state.glows[part]=nil end end
+        for part,stars in pairs(state.stars) do if not seen[part] then stars:Destroy(); state.stars[part]=nil end end
         state.bloom.Enabled=glowing>0; state.bloom.Intensity=s.ball_bloom; state.bloom.Size=18; state.bloom.Threshold=.9
     end,interval=.1})
     local function court_line_kind(object)
@@ -2154,8 +2163,142 @@ local function create_pivot_modules(ctx)
     end,conflicts={"dribble_macros","auto_ankle"}})
     if type(readfile)=="function" then pcall(function() Engine:read_dribble_library() end) end
 
+    Engine.build="2026.11.03.1"
+    local s=Engine.settings
+    local defaults={ball_finish="Custom",court_preset="Custom",lighting_preset="Warm gym",lighting_intensity=.65,shoe_color="#B79AFF",jersey_color="#FFFFFF",shoe_trail=true,landing_particles=true,effect_strength=.5,indicator_style="Ring",indicator_color="#B79AFF",indicator_radius=2.6,indicator_opacity=.7,green_style="Badge",green_color="#89DEAC",green_duration=.7,outfit_jersey=true,outfit_shoes=true,outfit_accessories=false}
+    for key,value in pairs(defaults) do s[key]=value end
+    for key,value in pairs({lighting_intensity={0,1},effect_strength={.1,1},indicator_radius={1.5,4},indicator_opacity={.1,1},green_duration={.3,1.5}}) do Engine.ranges[key]=value end
+    Engine.ball_finishes={"Custom","Matte","Chrome","Holographic","Galaxy","Neon"}
+    Engine.court_presets={"Custom","Clean hardwood","Blacktop","Midnight","Team colors"}
+    function Engine:apply_ball_finish(name)
+        assert(name=="Custom" or name=="Matte" or name=="Chrome" or name=="Holographic" or name=="Galaxy" or name=="Neon","Unknown ball finish")
+        s.ball_finish=name
+        if name=="Custom" then return end
+        s.ball_material=(name=="Neon" or name=="Galaxy") and "Neon" or name=="Chrome" and "Metal" or "SmoothPlastic"
+        s.ball_reflectance=name=="Chrome" and .85 or name=="Holographic" and .35 or 0
+        s.ball_color=name=="Galaxy" and "#7061CE" or name=="Neon" and "#9AC9FF" or name=="Matte" and "#323744" or "#D5DCE8"
+        s.ball_glow=name=="Neon" or name=="Galaxy"; s.ball_remove_texture=true
+    end
+    function Engine:apply_court_preset(name)
+        assert(name=="Custom" or name=="Clean hardwood" or name=="Blacktop" or name=="Midnight" or name=="Team colors","Unknown court preset")
+        s.court_preset=name; if name=="Custom" then return end
+        s.court_material=name=="Clean hardwood" and "WoodPlanks" or name=="Blacktop" and "Concrete" or "SmoothPlastic"
+        if name~="Team colors" then
+            s.court_color=name=="Clean hardwood" and "#B98A59" or name=="Blacktop" and "#383B42" or "#202631"
+            s.court_line_color=name=="Midnight" and "#ADBFFF" or "#EEEDE7"
+            s.court_three_color=s.court_line_color; s.court_free_color=s.court_line_color
+        end
+        s.court_color_lines=true
+    end
+    local function visual_part(scope,parent,name)
+        local p=new_local(scope,"Part",parent); p.Name=name; p.Anchored=true; p.CanCollide=false; p.CanTouch=false; p.CanQuery=false; p.CastShadow=false; p.Material=Enum.Material.Neon; return p
+    end
+    add("player_indicator","Player indicator","Visual+","Local ring, segmented ring or direction arrow; no physics",{start=function(scope)
+        local folder=new_local(scope,"Folder",workspace); folder.Name="PivotPlayerIndicator"
+        local parts={}; for i=1,40 do parts[i]=visual_part(scope,folder,"Segment") end
+        return {parts=parts}
+    end,step=function(_,state,settings)
+        local r=root(); local color=cosmetic_color(settings.indicator_color)
+        for i,p in ipairs(state.parts) do
+            local arrow=settings.indicator_style=="Arrow"
+            local visible=r~=nil and (arrow and i<=2 or not arrow and (settings.indicator_style~="Segmented" or i%5~=0))
+            p.Transparency=visible and 1-settings.indicator_opacity or 1
+            if visible then
+                p.Color=color
+                if arrow then p.Size=Vector3.new(.12,.04,1.1); p.CFrame=r.CFrame*CFrame.new(i==1 and -.36 or .36,-2.95,-settings.indicator_radius)*CFrame.Angles(0,i==1 and -.7 or .7,0)
+                else local angle=(i-1)*math.pi*2/40; p.Size=Vector3.new(.09,.04,settings.indicator_radius*.17); p.CFrame=CFrame.new(r.Position.X+math.cos(angle)*settings.indicator_radius,r.Position.Y-2.95,r.Position.Z+math.sin(angle)*settings.indicator_radius)*CFrame.Angles(0,-angle,0) end
+            end
+        end
+    end,interval=.025})
+    add("shoe_effects","Shoe effects","Visual+","Foot trails and brief landing particles with adjustable strength",{start=function(scope) return {feet={},previousY=0,lastLanding=-10,scope=scope} end,step=function(scope,state,settings)
+        local model=rig(); local r=root(); if not model or not r then return end
+        local feet={}
+        for _,p in ipairs(model:GetDescendants()) do if p:IsA("BasePart") then local n=p.Name:lower(); if n:find("foot",1,true) or n:find("shoe",1,true) then feet[#feet+1]=p end end end
+        if #feet==0 then feet={r} end
+        local seen={}
+        for _,p in ipairs(feet) do
+            seen[p]=true; local item=state.feet[p]
+            if not item then
+                local a=new_local(scope,"Attachment",p); a.Position=Vector3.new(-.12,p==r and -2.7 or -.2,0)
+                local b=new_local(scope,"Attachment",p); b.Position=a.Position+Vector3.new(.24,0,0)
+                local trail=new_local(scope,"Trail",p); trail.Name="PivotShoeTrail"; trail.Attachment0=a; trail.Attachment1=b; trail.FaceCamera=true; trail.MinLength=.05
+                local particles=new_local(scope,"ParticleEmitter",a); particles.Name="PivotLanding"; particles.Rate=0; particles.Lifetime=NumberRange.new(.2,.4); particles.Speed=NumberRange.new(1,3); particles.SpreadAngle=Vector2.new(80,80); particles.Size=NumberSequence.new(.12); particles.Transparency=NumberSequence.new(.25); particles.LightEmission=.6
+                item={a=a,b=b,trail=trail,particles=particles}; state.feet[p]=item
+            end
+            local color=ColorSequence.new(cosmetic_color(settings.shoe_color))
+            item.trail.Color=color; item.trail.Enabled=settings.shoe_trail; item.trail.Lifetime=.12+settings.effect_strength*.25; item.trail.WidthScale=NumberSequence.new(settings.effect_strength*.5); item.trail.Transparency=NumberSequence.new(.35)
+            item.particles.Color=color
+        end
+        for p,item in pairs(state.feet) do if not seen[p] then item.trail:Destroy(); item.particles:Destroy(); item.a:Destroy(); item.b:Destroy(); state.feet[p]=nil end end
+        local vy=r.AssemblyLinearVelocity.Y
+        if settings.landing_particles and state.previousY< -4 and math.abs(vy)<2 and os.clock()-state.lastLanding>.5 then
+            state.lastLanding=os.clock(); for _,item in pairs(state.feet) do item.particles:Emit(math.floor(4+settings.effect_strength*10)) end
+        end
+        state.previousY=vy
+    end,interval=.04})
+    add("outfit_tint","Outfit colors","Visual+","Tint existing jerseys, shoes and accessories; preserves clothing textures",{start=function() return {} end,step=function(scope,_,settings)
+        local sources={rig(),workspace:FindFirstChild("PivotLocalCosmetics")}
+        for _,source in pairs(sources) do if source then for _,object in ipairs(source:GetDescendants()) do
+            if object:IsA("Shirt") or object:IsA("Pants") then
+                if settings.outfit_jersey then scope:set(object,"Color3",cosmetic_color(settings.jersey_color)) else scope:restore(object,"Color3") end
+            elseif object:IsA("BasePart") then
+                local name=object.Name:lower(); local accessory=object.Parent and object.Parent:IsA("Accessory")
+                local shoe=name:find("shoe",1,true) or name:find("foot",1,true)
+                if shoe and settings.outfit_shoes then scope:set(object,"Color",cosmetic_color(settings.shoe_color))
+                elseif accessory and settings.outfit_accessories then scope:set(object,"Color",cosmetic_color(settings.jersey_color))
+                else scope:restore(object,"Color") end
+            end
+        end end end
+    end,interval=.25})
+    add("lighting_preset","Lighting preset","Visual+","Warm gym, cool arena, sunset and night with adjustable color grading",{start=function(scope)
+        local effect=new_local(scope,"ColorCorrectionEffect",lighting); effect.Name="PivotColorGrade"; return {effect=effect}
+    end,step=function(scope,state,settings)
+        local preset=settings.lighting_preset; local strength=settings.lighting_intensity
+        local tones={['Warm gym']={255,233,211,14},['Cool arena']={211,230,255,13},Sunset={255,207,178,18.1},Night={177,198,245,0}}
+        local tone=assert(tones[preset],"Unknown lighting preset")
+        state.effect.TintColor=Color3.fromRGB(255+(tone[1]-255)*strength,255+(tone[2]-255)*strength,255+(tone[3]-255)*strength)
+        state.effect.Contrast=.08*strength; state.effect.Saturation=.08*strength; state.effect.Brightness=preset=="Night" and -.06*strength or .02*strength
+        scope:set(lighting,"ClockTime",tone[4])
+    end,interval=.2,conflicts={"sky","time","fullbright"}})
+    for _,id in ipairs({"sky","time","fullbright"}) do local definition=registry.definitions[id]; definition.conflicts=definition.conflicts or {}; definition.conflicts[#definition.conflicts+1]="lighting_preset" end
+    add("green_effect","Perfect shot effect","Visual+","Brief badge or screen-edge flash after confirmed perfect timing feedback",{start=function(scope)
+        local badge=new_local(scope,"TextLabel",ctx.gui); badge.Name="PivotPerfectEffect"; badge.AnchorPoint=Vector2.new(.5,0); badge.Position=UDim2.fromScale(.5,.18); badge.Size=UDim2.fromOffset(180,38); badge.Font=Enum.Font.SourceSansSemibold; badge.TextSize=24; badge.Text="PERFECT"; badge.BorderSizePixel=0; badge.BackgroundColor3=Color3.fromRGB(20,24,30); badge.Visible=false
+        local corner=new_local(scope,"UICorner",badge); corner.CornerRadius=UDim.new(0,8)
+        local frame=new_local(scope,"Frame",ctx.gui); frame.Name="PivotPerfectFlash"; frame.Size=UDim2.fromScale(1,1); frame.BackgroundTransparency=1; frame.BorderSizePixel=0; frame.Visible=false
+        local stroke=new_local(scope,"UIStroke",frame); stroke.Thickness=5
+        return {badge=badge,frame=frame,stroke=stroke,untilTime=0}
+    end,step=function(_,state,settings)
+        local remaining=state.untilTime-os.clock(); local visible=remaining>0; local color=cosmetic_color(settings.green_color)
+        state.badge.Visible=visible and settings.green_style=="Badge"; state.frame.Visible=visible and settings.green_style=="Edge flash"
+        state.badge.TextColor3=color; state.badge.TextTransparency=1-math.min(1,remaining/.2); state.badge.BackgroundTransparency=.15+(1-math.min(1,remaining/.2))*.85
+        state.stroke.Color=color; state.stroke.Transparency=1-math.max(0,math.min(1,remaining/settings.green_duration))*.7
+    end,interval=.025})
+    function Engine:visual_feedback(event)
+        local active=registry.active.green_effect
+        if active and event.kind=="feedback" and event.code==5 then active.state.untilTime=os.clock()+s.green_duration end
+    end
+    function Engine:preview_character(viewport,name)
+        local asset=model_presets[name]; assert(asset,"Choose a preset character")
+        local objects=self:model_objects(asset)
+        if not viewport.Parent then for _,o in ipairs(objects) do o:Destroy() end; return end
+        viewport:ClearAllChildren()
+        local world=Instance.new("WorldModel")
+        local model=Instance.new("Model"); model.Parent=world
+        for _,object in ipairs(objects) do object.Parent=model end
+        for _,object in ipairs(model:GetDescendants()) do
+            if object:IsA("LuaSourceContainer") or object:IsA("Script") or object:IsA("LocalScript") or object:IsA("ModuleScript") or object:IsA("Tool") or object:IsA("BodyMover") or object:IsA("Constraint") then object:Destroy()
+            elseif object:IsA("BasePart") then object.Anchored=true; object.CanCollide=false; object.CanTouch=false; object.CanQuery=false end
+        end
+        if not viewport.Parent then world:Destroy(); return end
+        world.Parent=viewport
+        local cf,size=model:GetBoundingBox(); local camera=Instance.new("Camera"); camera.FieldOfView=35; camera.Parent=viewport; viewport.CurrentCamera=camera
+        local distance=math.max(size.X,size.Y,size.Z)*1.9
+        camera.CFrame=CFrame.lookAt(cf.Position+Vector3.new(0,size.Y*.05,-distance),cf.Position)
+    end
+
     Engine.shot_stats={total=0,perfect=0,good=0,early=0,late=0,skipped=0,releases=0,unconfirmed=0,last="Waiting for a shot",history={}}
     function Engine:record_shot(event)
+        if self.visual_feedback then self:visual_feedback(event) end
         local stats=self.shot_stats; local kind=event.kind
         if kind=="feedback" then
             stats.total=stats.total+1
@@ -2732,6 +2875,8 @@ do
         elseif kind=="Profiles" then
             line(3,5,17,5); line(3,10,17,10); line(3,15,17,15)
             for _,point in ipairs({{7,5},{13,10},{6,15}}) do local node=frame(root,point[1]-1,point[2]-2,3,4,color); corner(node,1) end
+        elseif kind=="Visual+" then
+            ring(3,3,14); ring(7,7,6); line(15,2,15,7); line(12.5,4.5,17.5,4.5)
         elseif kind=="Search" then ring(3,3,10); line(12,12,17,17)
         else
             for _,point in ipairs({{3,3},{12,3},{3,12},{12,12}}) do local node=frame(root,point[1],point[2],5,5); node.BackgroundTransparency=1; border(node,color); corner(node,1) end
@@ -2777,6 +2922,7 @@ do
     local rail_line=frame(shell,20,97,660,1,theme.line)
     local top_line=frame(shell,20,54,660,1,theme.line)
     local logo=label(shell,"Pivot",20,12,100,28,19,theme.text); logo.Font=Enum.Font.SourceSansBold; logo.TextXAlignment=Enum.TextXAlignment.Left
+    local build_label=label(shell,"BUILD 2026.11.03.1",242,17,150,18,10,theme.muted); build_label.Name="PivotBuild"; build_label.Font=Enum.Font.RobotoMono; build_label.TextWrapped=false
     local heading=label(shell,"Practical Basketball",94,14,240,26,11,theme.muted); heading.Font=Enum.Font.SourceSansSemibold
     close.BackgroundColor3=theme.rail; close.TextColor3=theme.muted; close.TextSize=14; corner(close,4)
     local search=make("TextBox",{Text="",PlaceholderText="Find a control...",PlaceholderColor3=theme.muted,Position=UDim2.fromOffset(484,10),Size=UDim2.fromOffset(166,23),
@@ -2947,12 +3093,12 @@ do
     local scale=shell:FindFirstChildWhichIsA("UIScale")
     local function layout_nav()
         local w=shell.Size.X.Offset
-        for i,key in ipairs({"Diagnostics","Shot Lab","Modules","Combos","Profiles"}) do
+        for i,key in ipairs({"Diagnostics","Shot Lab","Modules","Visual+","Combos","Profiles"}) do
             local item=rail_items[key]
             if item then
-                local width=(w-40)/5
+                local width=(w-40)/6
                 item.button.Position=UDim2.fromOffset(20+(i-1)*width,62); item.button.Size=UDim2.fromOffset(width-4,30)
-                local compact=w<560
+                local compact=w<700
                 item.icon.Visible=not compact
                 item.label.Position=UDim2.fromOffset(compact and 0 or 33,0); item.label.Size=UDim2.new(1,compact and 0 or -35,1,0)
                 item.label.TextXAlignment=compact and Enum.TextXAlignment.Center or Enum.TextXAlignment.Left
@@ -2976,9 +3122,12 @@ do
         rail_line.Size=UDim2.new(1,-40,0,1); top_line.Size=UDim2.new(1,-40,0,1)
         layout_nav()
         local narrow=w<560
+        build_label.Visible=w>=740 or narrow
+        build_label.Position=narrow and UDim2.fromOffset(94,17) or UDim2.fromOffset(258,17)
+        build_label.Size=UDim2.fromOffset(narrow and 155 or 150,18)
         search.Visible=not narrow; search.Position=UDim2.new(1,-244,0,10)
         search_symbol.Visible=not narrow; search_symbol.Position=UDim2.new(1,-241,0,12)
-        heading.Visible=not narrow; heading.Size=UDim2.new(1,-320,0,26)
+        heading.Visible=not narrow; heading.Size=UDim2.fromOffset(158,26)
         close.Position=UDim2.new(1,-35,0,10); close.Size=UDim2.fromOffset(23,23)
         for _,page in pairs(pages) do page.Position=UDim2.fromOffset(20,112); page.Size=UDim2.new(1,-34,1,-174) end
         result_page.Position=UDim2.fromOffset(20,112); result_page.Size=UDim2.new(1,-34,1,-174)
@@ -3098,6 +3247,9 @@ do
         return button
     end
     local page=make("ScrollingFrame",{Name="PivotModules",Position=UDim2.fromOffset(20,112),Size=UDim2.new(1,-34,1,-174),BackgroundTransparency=1,BorderSizePixel=0,ScrollBarThickness=2,Visible=false,CanvasSize=UDim2.fromOffset(0,0)},window)
+    local modules_page=page
+    local visual_page=make("ScrollingFrame",{Name="PivotVisualPlus",Position=UDim2.fromOffset(20,112),Size=UDim2.new(1,-34,1,-174),BackgroundTransparency=1,BorderSizePixel=0,ScrollBarThickness=3,Visible=false,CanvasSize=UDim2.fromOffset(0,0)},window)
+    local visual_section="Ball"; local visual_character_open=false; local visual_ball_details=false; local visual_trail_details=false
     local tabs={"All","Saved modules","Shooting","Dribbling","Cosmetics","Character","Player","Defense","Visuals","World","Camera","Recorder","Options"}
     local category="All"; local rows={}; local fields={}; local y=0
     local container=page
@@ -3120,6 +3272,7 @@ do
     local function field(key,caption)
         local color_sync
         local row=own(make("Frame",{Position=UDim2.fromOffset(0,y),Size=UDim2.new(1,-6,0,36),BackgroundColor3=theme.panel,BorderSizePixel=0},container))
+        make("UICorner",{CornerRadius=UDim.new(0,6)},row)
         local label=ui.label(row,caption,10,8,220,20,11,theme.muted); label.Size=UDim2.new(.6,-14,0,20)
         local box=make("TextBox",{Name="Module_"..key,Text=tostring(engine.settings[key]),ClearTextOnFocus=false,Font=Enum.Font.RobotoMono,TextSize=14,TextColor3=theme.text,BackgroundColor3=theme.input,BorderSizePixel=0,Position=UDim2.new(.6,0,0,4),Size=UDim2.new(.4,-6,0,28)},row)
         fields[key]=box; y=y+42
@@ -3232,10 +3385,11 @@ do
         end
     end
     local function toggle_action(caption,read,write)
-        local row=own(make("Frame",{Position=UDim2.fromOffset(0,y),Size=UDim2.new(1,-6,0,32),BackgroundTransparency=1},container))
-        local title=ui.label(row,caption,4,0,300,30,11,theme.text); title.Size=UDim2.new(1,-60,0,30)
+        local row=own(make("Frame",{Position=UDim2.fromOffset(0,y),Size=UDim2.new(1,-6,0,36),BackgroundColor3=theme.panel,BorderSizePixel=0},container))
+        make("UICorner",{CornerRadius=UDim.new(0,6)},row)
+        local title=ui.label(row,caption,12,0,300,36,12,theme.text); title.Size=UDim2.new(1,-68,0,36); title.Font=Enum.Font.SourceSansSemibold
         local button=switch(row,function() local ok,err=pcall(write,not read()); if not ok then report(tostring(err)) end; update_buttons() end)
-        button.Position=UDim2.new(1,-48,0,3); auxiliary[#auxiliary+1]={button=button,read=read}; y=y+36
+        button.Position=UDim2.new(1,-48,0,5); auxiliary[#auxiliary+1]={button=button,read=read}; y=y+42
         paint_switch(button,read()); return button
     end
     local function choice(key,caption,values)
@@ -3299,10 +3453,99 @@ do
         engine:stop(); for key,value in pairs(validated) do engine.settings[key]=value end; ui.set_theme(engine.settings.theme_mode)
     end
     rebuild=function()
+        page=category=="Visual+" and visual_page or modules_page; container=page
         clear(); buttons={}
+        if section_button then section_button.Parent=page; section_button.Visible=category~="Visual+" end
         if section_button then section_button.Text=(category=="All" and "All modules" or category).."  ▾" end
         if choosing then
             for _,name in ipairs(tabs) do action(name,function() category=name; choosing=false; expanded=nil; page.CanvasPosition=Vector2.new(0,0); rebuild() end) end
+        elseif category=="Visual+" then
+            y=0
+            local header=text("Visual+",22,theme.text,30); header.Font=Enum.Font.SourceSansSemibold
+            text("Local cosmetics · Save profile keeps your selections",12,theme.muted,window.Size.X.Offset<560 and 38 or 24)
+            local categories={"Ball","Court","Outfit","Effects","Lighting","HUD"}
+            local nav=own(make("Frame",{Name="VisualSections",Position=UDim2.fromOffset(0,y),Size=UDim2.new(1,-6,0,38),BackgroundTransparency=1},container)); y=y+48
+            for i,name in ipairs(categories) do
+                local b=ui.button(nav,name,function() visual_section=name; page.CanvasPosition=Vector2.new(0,0); rebuild() end)
+                b.Name="VisualSection_"..name; b.Position=UDim2.new((i-1)/6,0,0,0); b.Size=UDim2.new(1/6,-5,0,34); b.BackgroundColor3=visual_section==name and theme.selected or theme.panel
+            end
+            local function module_toggle(id)
+                local definition=engine.registry.definitions[id]
+                toggle_action(definition.title,function() return engine.registry.active[id]~=nil end,function(on)
+                    if on then local ok,err=engine.registry:enable(id,engine.settings); assert(ok,err) else engine.registry:disable(id) end
+                end)
+            end
+            local function controls(id)
+                for _,entry in ipairs((engine.cosmetic_choices or {})[id] or {}) do choice(entry[1],entry[2],entry[3]) end
+                for _,entry in ipairs((engine.cosmetic_fields or {})[id] or {}) do field(entry[1],entry[2]) end
+                for _,entry in ipairs((engine.cosmetic_toggles or {})[id] or {}) do local key=entry[1]; toggle_action(entry[2],function() return engine.settings[key] end,function(on) engine.settings[key]=on end) end
+            end
+            local function preset(key,caption,values,apply)
+                action(caption.."  /  "..engine.settings[key],function()
+                    local index=1; for i,name in ipairs(values) do if engine.settings[key]==name then index=i end end
+                    apply(values[index%#values+1]); rebuild()
+                end)
+            end
+            if visual_section=="Ball" then
+                text("FINISH",12,theme.muted,18)
+                preset("ball_finish","Finish",engine.ball_finishes,function(name) engine:apply_ball_finish(name) end)
+                local preview=own(make("ViewportFrame",{Name="BallFinishPreview",Position=UDim2.fromOffset(0,y),Size=UDim2.new(1,-6,0,128),BackgroundColor3=theme.panel,BorderSizePixel=0,Ambient=Color3.fromRGB(185,190,205),LightColor=Color3.fromRGB(255,255,255)},container)); y=y+138
+                local ball=make("Part",{Name="PreviewBall",Shape=Enum.PartType.Ball,Size=Vector3.new(3,3,3),Position=Vector3.new(0,0,0),Anchored=true,CanCollide=false,Material=Enum.Material[engine.settings.ball_material],Color=Core.hex_color(engine.settings.ball_color),Reflectance=engine.settings.ball_reflectance},preview)
+                local camera=make("Camera",{CFrame=CFrame.new(0,0,7),FieldOfView=35},preview); preview.CurrentCamera=camera
+                module_toggle("ball_appearance")
+                action(visual_ball_details and "Ball controls  −" or "Ball controls  +",function() visual_ball_details=not visual_ball_details; rebuild() end)
+                if visual_ball_details then controls("ball_appearance") end
+                module_toggle("ball_trail")
+                action(visual_trail_details and "Trail controls  −" or "Trail controls  +",function() visual_trail_details=not visual_trail_details; rebuild() end)
+                if visual_trail_details then controls("ball_trail") end
+            elseif visual_section=="Court" then
+                preset("court_preset","Court preset",engine.court_presets,function(name) engine:apply_court_preset(name) end)
+                module_toggle("court_appearance")
+                action("Select floor beneath me",function() engine:select_court_under_player() end)
+                controls("court_appearance")
+                text("Team colors uses the floor and marking colors you choose above.",12,theme.muted,32)
+            elseif visual_section=="Outfit" then
+                action("Character  /  "..engine.settings.model_preset,function() visual_character_open=not visual_character_open; rebuild() end)
+                if visual_character_open then
+                    local list=own(make("ScrollingFrame",{Name="VisualCharacterList",Position=UDim2.fromOffset(0,y),Size=UDim2.new(1,-6,0,168),BackgroundColor3=theme.panel,BorderSizePixel=0,ScrollBarThickness=3,CanvasSize=UDim2.fromOffset(0,#engine.characters*32)},container)); y=y+178
+                    for i,entry in ipairs(engine.characters) do local name=entry.name; local b=ui.button(list,name,function() engine.settings.model_preset=name; visual_character_open=false; rebuild() end); b.Position=UDim2.fromOffset(0,(i-1)*32); b.Size=UDim2.new(1,-8,0,30) end
+                end
+                local preview=own(make("ViewportFrame",{Name="CharacterPreview",Position=UDim2.fromOffset(0,y),Size=UDim2.new(1,-6,0,220),BackgroundColor3=theme.panel,BorderSizePixel=0,Ambient=Color3.fromRGB(180,185,200),LightColor=Color3.fromRGB(255,255,255)},container)); y=y+230
+                action("Preview selected character",function()
+                    report("Loading preview…")
+                    task.spawn(function() local ok,err=pcall(function() engine:preview_character(preview,engine.settings.model_preset) end); report(ok and "Preview ready / use Equip to apply" or "Preview unavailable: "..tostring(err)) end)
+                end)
+                action("Equip selected character",function() engine:select_character(engine.settings.model_preset); rebuild() end)
+                module_toggle("custom_model")
+                for _,entry in ipairs({{"model_show_hair","Hair"},{"model_show_hats","Hats / headbands"},{"model_show_masks","Masks / glasses"},{"model_show_capes","Capes / coats"},{"model_show_weapons","Weapons"},{"model_show_extras","Other accessories"}}) do
+                    local key=entry[1]; toggle_action(entry[2],function() return engine.settings[key] end,function(on)
+                        engine.settings[key]=on
+                        if engine.registry.active.custom_model then engine.registry:disable("custom_model"); local ok,err=engine.registry:enable("custom_model",engine.settings); assert(ok,err) end
+                    end)
+                end
+                module_toggle("outfit_tint"); field("jersey_color","Jersey tint"); field("shoe_color","Shoes / effect color")
+                for _,entry in ipairs({{"outfit_jersey","Tint jersey / shorts"},{"outfit_shoes","Tint shoes"},{"outfit_accessories","Tint accessories"}}) do local key=entry[1]; toggle_action(entry[2],function() return engine.settings[key] end,function(on) engine.settings[key]=on end) end
+            elseif visual_section=="Effects" then
+                module_toggle("player_indicator"); choice("indicator_style","Indicator",{"Ring","Segmented","Arrow"}); field("indicator_color","Indicator color"); field("indicator_radius","Indicator size"); field("indicator_opacity","Indicator opacity")
+                module_toggle("shoe_effects"); field("shoe_color","Shoe effect color"); field("effect_strength","Effect strength")
+                toggle_action("Shoe trails",function() return engine.settings.shoe_trail end,function(on) engine.settings.shoe_trail=on end)
+                toggle_action("Landing particles",function() return engine.settings.landing_particles end,function(on) engine.settings.landing_particles=on end)
+                module_toggle("green_effect"); choice("green_style","Perfect effect",{"Badge","Edge flash"}); field("green_color","Perfect effect color"); field("green_duration","Duration / seconds")
+                action("Preview perfect effect",function() local active=engine.registry.active.green_effect; assert(active,"Enable Perfect shot effect first"); active.state.untilTime=os.clock()+engine.settings.green_duration end)
+            elseif visual_section=="Lighting" then
+                module_toggle("lighting_preset"); choice("lighting_preset","Lighting preset",{"Warm gym","Cool arena","Sunset","Night"}); field("lighting_intensity","Color grade intensity")
+                text("Disable Sky and other lighting overrides before using Lighting preset.",12,theme.muted,34)
+                module_toggle("sky"); controls("sky")
+            else
+                choice("theme_mode","Menu theme",{"Graphite","Slate","Light"})
+                toggle_action("Theme editor",function() return engine.settings.theme_custom end,function(on) engine.settings.theme_custom=on; ui.set_theme(engine.settings.theme_mode); ui.edit_theme(engine.settings); rebuild() end)
+                if engine.settings.theme_custom then field("ui_accent","Accent color"); field("ui_font_size","Text size"); field("ui_rounding","Corner radius"); field("ui_opacity","Menu opacity") end
+                module_toggle("coverage_hud"); controls("coverage_hud")
+                toggle_action("Shooting HUD",function() return engine.settings.shot_hud end,function(on) engine.settings.shot_hud=on end)
+                toggle_action("Compact shooting HUD",function() return engine.settings.shot_hud_compact end,function(on) engine.settings.shot_hud_compact=on end)
+                module_toggle("crosshair"); controls("crosshair")
+            end
+
         elseif category=="Recorder" then
             text("Z X C V H + Shift / 64 steps / 60 seconds",11,theme.muted)
             toggle_action("Record dribbles",function() return engine.capturing==true end,function(on)
@@ -3514,6 +3757,7 @@ do
     section_button=ui.button(page,"All modules  ▾",function() choosing=not choosing; page.CanvasPosition=Vector2.new(0,0); rebuild() end)
     section_button.Name="ModuleCategory"; section_button.Position=UDim2.fromOffset(0,0); section_button.Size=UDim2.fromOffset(142,28)
     local rail=ui.button(window,"Modules",function()
+        if category=="Visual+" then category="All"; expanded=nil end
         ui.search.Text=""; ui.show("Modules"); rebuild()
     end)
     rail.Name="ModulesNav"; rail.Position=UDim2.fromOffset(9,302); rail.Size=UDim2.fromOffset(50,54); rail.TextTransparency=1; rail.BackgroundColor3=theme.rail
@@ -3523,9 +3767,15 @@ do
     local indicator=make("Frame",{Position=UDim2.fromOffset(0,17),Size=UDim2.fromOffset(2,18),BackgroundColor3=theme.accent,BorderSizePixel=0,Visible=false},rail)
     ui.pages.Modules=page; ui.rail_items.Modules={button=rail,icon=glyph,label=caption,indicator=indicator}
     glyph.Position=UDim2.fromOffset(7,5); caption.Position=UDim2.fromOffset(33,0); caption.Size=UDim2.new(1,-35,1,0); caption.TextXAlignment=Enum.TextXAlignment.Left
+    local visual_rail=ui.button(window,"Visual+",function() category="Visual+"; choosing=false; ui.search.Text=""; ui.show("Visual+"); rebuild() end)
+    visual_rail.Name="VisualPlusNav"; visual_rail.TextTransparency=1; visual_rail:SetAttribute("RailItem",true)
+    local visual_icon=ui.icon(visual_rail,"Visual+",7,5,theme.muted)
+    local visual_label=ui.label(visual_rail,"Visual+",33,0,70,30,12,theme.muted)
+    local visual_indicator=make("Frame",{BackgroundColor3=theme.accent,BorderSizePixel=0,Visible=false},visual_rail)
+    ui.pages["Visual+"]=visual_page; ui.rail_items["Visual+"]={button=visual_rail,icon=visual_icon,label=visual_label,indicator=visual_indicator}
     ui.layout_nav()
     connect(rail.MouseLeave,function() rail.BackgroundColor3=page.Visible and theme.selected or theme.rail end)
-    ui.hide_extra=function() page.Visible=false end
+    ui.hide_extra=function() modules_page.Visible=false; visual_page.Visible=false end
     connect(gui.Destroying,function() engine:close() end)
     connect(ui.cancel.Activated,function() engine:stop(); update_buttons() end)
     local capture_button=ui.actions["TOGGLE MANUAL CAPTURE / hold and release E"]
