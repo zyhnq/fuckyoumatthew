@@ -1332,8 +1332,8 @@ local function create_pivot_modules(ctx)
             local color=cosmetic_color(kind=="three" and s.court_three_color or kind=="free" and s.court_free_color or s.court_line_color)
             for _,object in ipairs(objects) do paint_court_line(scope,object,color,enabled) end
         end
-        local three=s.court_color_lines and s.court_three_enabled and s.court_rebuild_markings and #groups.three==0
-        local free=s.court_color_lines and s.court_free_enabled and s.court_rebuild_markings and #groups.free==0
+        local three=not s.court_native_lines and s.court_color_lines and s.court_three_enabled and s.court_rebuild_markings and #groups.three==0
+        local free=not s.court_native_lines and s.court_color_lines and s.court_free_enabled and s.court_rebuild_markings and #groups.free==0
         local anchors=(three or free) and marking_anchors(state) or {}
         for _,anchor in ipairs(anchors) do
             local angle=math.rad(s.court_marking_rotation or 0); local f=anchor.forward
@@ -1388,7 +1388,7 @@ local function create_pivot_modules(ctx)
             end
         end
         for _,entry in ipairs(state.marking_parts or {}) do entry.object.Color=cosmetic_color(entry.kind=="three" and s.court_three_color or s.court_free_color) end
-        state.marking_summary="Native markings: "..#groups.three.." three-point / "..#groups.free.." free-throw; "..#(state.marking_parts or {}).." replacement segments"
+        state.marking_summary=s.court_native_lines and "Original court artwork preserved / no replacement arcs" or "Native markings: "..#groups.three.." three-point / "..#groups.free.." free-throw; "..#(state.marking_parts or {}).." replacement segments"
     end
 
     local function named_court_parts(s)
@@ -1471,11 +1471,12 @@ local function create_pivot_modules(ctx)
             Engine.court_selection=nil; state.surfaces,state.lines=choose_court(s); state.selector=s.court_part_name
         end
         local color=cosmetic_color(s.court_color); local line_color=cosmetic_color(s.court_line_color); local chosen=material(s.court_material)
-        for object in pairs(state.appearances) do if not s.court_remove_texture then scope:restore(object,"Parent") end end
+        local remove_texture=s.court_remove_texture and not s.court_native_lines
+        for object in pairs(state.appearances) do if not remove_texture then scope:restore(object,"Parent") end end
         for _,part in ipairs(state.surfaces) do
             if part.Parent then
                 scope:set(part,"Color",color); scope:set(part,"Material",chosen); scope:set(part,"Reflectance",s.court_reflectance)
-                if s.court_remove_texture then
+                if remove_texture then
                     scope:set(part,"MaterialVariant","")
                     if part:IsA("MeshPart") then pcall(function() scope:set(part,"TextureID","") end) end
                 else
@@ -1484,11 +1485,11 @@ local function create_pivot_modules(ctx)
                 end
                 for _,object in ipairs(part:GetDescendants()) do
                     if object:IsA("SurfaceAppearance") then
-                        if s.court_remove_texture then state.appearances[object]=true; scope:set(object,"Parent",nil) end
+                        if remove_texture then state.appearances[object]=true; scope:set(object,"Parent",nil) end
                     elseif object:IsA("Texture") or object:IsA("Decal") then
-                        if s.court_remove_texture then scope:set(object,"Transparency",1) else scope:restore(object,"Transparency") end
+                        if remove_texture then scope:set(object,"Transparency",1) else scope:restore(object,"Transparency") end
                     elseif object:IsA("SpecialMesh") then
-                        if s.court_remove_texture then scope:set(object,"TextureId","") else scope:restore(object,"TextureId") end
+                        if remove_texture then scope:set(object,"TextureId","") else scope:restore(object,"TextureId") end
                     end
                 end
             end
@@ -2237,11 +2238,15 @@ local function create_pivot_modules(ctx)
     end,conflicts={"dribble_macros","auto_ankle"}})
     if type(readfile)=="function" then pcall(function() Engine:read_dribble_library() end) end
 
-    Engine.build="2026.11.03.3"
+    Engine.build="2026.11.03.4"
     local s=Engine.settings
     local defaults={ball_finish="Custom",court_preset="Custom",lighting_preset="Warm gym",lighting_intensity=.65,shoe_color="#B79AFF",jersey_color="#FFFFFF",shoe_trail=true,landing_particles=true,effect_strength=.5,indicator_style="Ring",indicator_color="#B79AFF",indicator_radius=2.6,indicator_opacity=.7,green_style="Badge",green_color="#89DEAC",green_duration=.7,outfit_jersey=true,outfit_shoes=true,outfit_accessories=false}
     for key,value in pairs(defaults) do s[key]=value end
     s.court_marking_forward=0; s.court_marking_side=0; s.court_marking_rotation=0
+    s.court_native_lines=true
+    function Engine:show_cosmetic_control(key)
+        return not (self.settings.court_native_lines and (key=="court_remove_texture" or key=="court_rebuild_markings"))
+    end
     Engine.ranges.court_marking_forward={-8,8}; Engine.ranges.court_marking_side={-8,8}; Engine.ranges.court_marking_rotation={-10,10}
     for key,value in pairs({lighting_intensity={0,1},effect_strength={.1,1},indicator_radius={1.5,4},indicator_opacity={.1,1},green_duration={.3,1.5}}) do Engine.ranges[key]=value end
     Engine.ball_finishes={"Custom","Matte","Chrome","Holographic","Galaxy","Neon"}
@@ -2998,7 +3003,7 @@ do
     local rail_line=frame(shell,20,97,660,1,theme.line)
     local top_line=frame(shell,20,54,660,1,theme.line)
     local logo=label(shell,"Pivot",20,12,100,28,19,theme.text); logo.Font=Enum.Font.SourceSansBold; logo.TextXAlignment=Enum.TextXAlignment.Left
-    local build_label=label(shell,"BUILD 2026.11.03.3",242,17,150,18,10,theme.muted); build_label.Name="PivotBuild"; build_label.Font=Enum.Font.RobotoMono; build_label.TextWrapped=false
+    local build_label=label(shell,"BUILD 2026.11.03.4",242,17,150,18,10,theme.muted); build_label.Name="PivotBuild"; build_label.Font=Enum.Font.RobotoMono; build_label.TextWrapped=false
     local heading=label(shell,"Practical Basketball",94,14,240,26,11,theme.muted); heading.Font=Enum.Font.SourceSansSemibold
     close.BackgroundColor3=theme.rail; close.TextColor3=theme.muted; close.TextSize=14; corner(close,4)
     local search=make("TextBox",{Text="",PlaceholderText="Find a control...",PlaceholderColor3=theme.muted,Position=UDim2.fromOffset(484,10),Size=UDim2.fromOffset(166,23),
@@ -3554,7 +3559,7 @@ do
             local function controls(id)
                 for _,entry in ipairs((engine.cosmetic_choices or {})[id] or {}) do choice(entry[1],entry[2],entry[3]) end
                 for _,entry in ipairs((engine.cosmetic_fields or {})[id] or {}) do field(entry[1],entry[2]) end
-                for _,entry in ipairs((engine.cosmetic_toggles or {})[id] or {}) do local key=entry[1]; toggle_action(entry[2],function() return engine.settings[key] end,function(on) engine.settings[key]=on end) end
+                for _,entry in ipairs((engine.cosmetic_toggles or {})[id] or {}) do local key=entry[1]; if engine:show_cosmetic_control(key) then toggle_action(entry[2],function() return engine.settings[key] end,function(on) engine.settings[key]=on end) end end
             end
             local function preset(key,caption,values,apply)
                 action(caption.."  /  "..engine.settings[key],function()
@@ -3575,12 +3580,14 @@ do
                 action(visual_trail_details and "Trail controls  −" or "Trail controls  +",function() visual_trail_details=not visual_trail_details; rebuild() end)
                 if visual_trail_details then controls("ball_trail") end
             elseif visual_section=="Court" then
+                toggle_action("Preserve original court markings",function() return engine.settings.court_native_lines end,function(on) engine.settings.court_native_lines=on; rebuild() end)
+                if engine.settings.court_native_lines then text("Original line artwork stays aligned. Floor finish and tint remain adjustable.",12,theme.muted,38) end
                 preset("court_preset","Court preset",engine.court_presets,function(name) engine:apply_court_preset(name) end)
                 module_toggle("court_appearance")
                 action("Select floor beneath me",function() engine:select_court_under_player() end)
                 controls("court_appearance")
-                action(court_alignment and "Marking alignment  −" or "Marking alignment  +",function() court_alignment=not court_alignment; rebuild() end)
-                if court_alignment then
+                if not engine.settings.court_native_lines then action(court_alignment and "Marking alignment  −" or "Marking alignment  +",function() court_alignment=not court_alignment; rebuild() end) end
+                if court_alignment and not engine.settings.court_native_lines then
                     field("court_marking_forward","Forward offset / studs"); field("court_marking_side","Sideways offset / studs"); field("court_marking_rotation","Rotation / degrees")
                     field("court_three_radius","Three-point radius"); field("court_three_angle","Three-point arc angle"); field("court_free_radius","Free-throw radius"); field("court_line_width","Line width")
                     action("Reset marking offsets",function() engine.settings.court_marking_forward=0; engine.settings.court_marking_side=0; engine.settings.court_marking_rotation=0; rebuild() end)
@@ -3758,7 +3765,7 @@ do
                         for _,entry in ipairs(options[id] or {}) do field(entry[1],entry[2]) end
                         for _,entry in ipairs((engine.cosmetic_choices or {})[id] or {}) do choice(entry[1],entry[2],entry[3]) end
                         for _,entry in ipairs((engine.cosmetic_fields or {})[id] or {}) do if (entry[1]~="model_asset" or engine.settings.model_preset=="Custom") and (entry[1]~="model_height" or not engine.settings.model_fit_pb) then field(entry[1],entry[2]) end end
-                        for _,entry in ipairs((engine.cosmetic_toggles or {})[id] or {}) do local key=entry[1]; if key~="model_follow_pose" or not engine.settings.model_fit_pb then toggle_action(entry[2],function() return engine.settings[key] end,function(on) engine.settings[key]=on; if key=="model_fit_pb" then local active=engine.registry.active.custom_model; if active then engine.registry:disable("custom_model"); local ok,err=engine.registry:enable("custom_model",engine.settings); if not ok then report(tostring(err)) end end; rebuild() end end) end end
+                        for _,entry in ipairs((engine.cosmetic_toggles or {})[id] or {}) do local key=entry[1]; if (key~="model_follow_pose" or not engine.settings.model_fit_pb) and engine:show_cosmetic_control(key) then toggle_action(entry[2],function() return engine.settings[key] end,function(on) engine.settings[key]=on; if key=="model_fit_pb" then local active=engine.registry.active.custom_model; if active then engine.registry:disable("custom_model"); local ok,err=engine.registry:enable("custom_model",engine.settings); if not ok then report(tostring(err)) end end; rebuild() end end) end end
                         if id=="dribble_library" then
                             toggle_action("Sprint variants",function() return engine.settings.dribble_sprint end,function(on) engine.settings.dribble_sprint=on end)
                             text("Key: bind    +: add to chain    Run: play move",11,theme.muted,24)
@@ -3814,9 +3821,10 @@ do
                             toggle_action("Team check",function() return engine.settings.team_check end,function(on) engine.settings.team_check=on end)
                         end
                         if id=="court_appearance" then
+                            toggle_action("Preserve original court markings",function() return engine.settings.court_native_lines end,function(on) engine.settings.court_native_lines=on; rebuild() end)
                             action("Select floor beneath me",function() engine:select_court_under_player() end)
-                            action(court_alignment and "Marking alignment  −" or "Marking alignment  +",function() court_alignment=not court_alignment; rebuild() end)
-                            if court_alignment then
+                            if not engine.settings.court_native_lines then action(court_alignment and "Marking alignment  −" or "Marking alignment  +",function() court_alignment=not court_alignment; rebuild() end) end
+                            if court_alignment and not engine.settings.court_native_lines then
                                 field("court_marking_forward","Forward offset / studs"); field("court_marking_side","Sideways offset / studs"); field("court_marking_rotation","Rotation / degrees")
                                 field("court_three_radius","Three-point radius"); field("court_three_angle","Three-point arc angle"); field("court_free_radius","Free-throw circle radius"); field("court_free_distance","Free-throw fallback distance"); field("court_corner_depth","Corner line depth"); field("court_line_width","Line width")
                             end
