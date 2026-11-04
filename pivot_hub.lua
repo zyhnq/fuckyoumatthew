@@ -1475,7 +1475,12 @@ local function create_pivot_modules(ctx)
         for object in pairs(state.appearances) do if not remove_texture then scope:restore(object,"Parent") end end
         for _,part in ipairs(state.surfaces) do
             if part.Parent then
-                scope:set(part,"Color",color); scope:set(part,"Material",chosen); scope:set(part,"Reflectance",s.court_reflectance)
+                scope:set(part,"Color",color)
+                if s.court_native_lines then
+                    -- MaterialVariant artwork depends on its original base material.
+                    -- Restoring only the variant/texture can still erase painted lines.
+                    scope:restore(part,"Material"); scope:restore(part,"Reflectance")
+                else scope:set(part,"Material",chosen); scope:set(part,"Reflectance",s.court_reflectance) end
                 if remove_texture then
                     scope:set(part,"MaterialVariant","")
                     if part:IsA("MeshPart") then pcall(function() scope:set(part,"TextureID","") end) end
@@ -2238,14 +2243,14 @@ local function create_pivot_modules(ctx)
     end,conflicts={"dribble_macros","auto_ankle"}})
     if type(readfile)=="function" then pcall(function() Engine:read_dribble_library() end) end
 
-    Engine.build="2026.11.03.4"
+    Engine.build="2026.11.03.5"
     local s=Engine.settings
     local defaults={ball_finish="Custom",court_preset="Custom",lighting_preset="Warm gym",lighting_intensity=.65,shoe_color="#B79AFF",jersey_color="#FFFFFF",shoe_trail=true,landing_particles=true,effect_strength=.5,indicator_style="Ring",indicator_color="#B79AFF",indicator_radius=2.6,indicator_opacity=.7,green_style="Badge",green_color="#89DEAC",green_duration=.7,outfit_jersey=true,outfit_shoes=true,outfit_accessories=false}
     for key,value in pairs(defaults) do s[key]=value end
     s.court_marking_forward=0; s.court_marking_side=0; s.court_marking_rotation=0
     s.court_native_lines=true
     function Engine:show_cosmetic_control(key)
-        return not (self.settings.court_native_lines and (key=="court_remove_texture" or key=="court_rebuild_markings"))
+        return not (self.settings.court_native_lines and (key=="court_remove_texture" or key=="court_rebuild_markings" or key=="court_material" or key=="court_reflectance"))
     end
     Engine.ranges.court_marking_forward={-8,8}; Engine.ranges.court_marking_side={-8,8}; Engine.ranges.court_marking_rotation={-10,10}
     for key,value in pairs({lighting_intensity={0,1},effect_strength={.1,1},indicator_radius={1.5,4},indicator_opacity={.1,1},green_duration={.3,1.5}}) do Engine.ranges[key]=value end
@@ -3003,7 +3008,7 @@ do
     local rail_line=frame(shell,20,97,660,1,theme.line)
     local top_line=frame(shell,20,54,660,1,theme.line)
     local logo=label(shell,"Pivot",20,12,100,28,19,theme.text); logo.Font=Enum.Font.SourceSansBold; logo.TextXAlignment=Enum.TextXAlignment.Left
-    local build_label=label(shell,"BUILD 2026.11.03.4",242,17,150,18,10,theme.muted); build_label.Name="PivotBuild"; build_label.Font=Enum.Font.RobotoMono; build_label.TextWrapped=false
+    local build_label=label(shell,"BUILD 2026.11.03.5",242,17,150,18,10,theme.muted); build_label.Name="PivotBuild"; build_label.Font=Enum.Font.RobotoMono; build_label.TextWrapped=false
     local heading=label(shell,"Practical Basketball",94,14,240,26,11,theme.muted); heading.Font=Enum.Font.SourceSansSemibold
     close.BackgroundColor3=theme.rail; close.TextColor3=theme.muted; close.TextSize=14; corner(close,4)
     local search=make("TextBox",{Text="",PlaceholderText="Find a control...",PlaceholderColor3=theme.muted,Position=UDim2.fromOffset(484,10),Size=UDim2.fromOffset(166,23),
@@ -3557,8 +3562,8 @@ do
                 end)
             end
             local function controls(id)
-                for _,entry in ipairs((engine.cosmetic_choices or {})[id] or {}) do choice(entry[1],entry[2],entry[3]) end
-                for _,entry in ipairs((engine.cosmetic_fields or {})[id] or {}) do field(entry[1],entry[2]) end
+                for _,entry in ipairs((engine.cosmetic_choices or {})[id] or {}) do if engine:show_cosmetic_control(entry[1]) then choice(entry[1],entry[2],entry[3]) end end
+                for _,entry in ipairs((engine.cosmetic_fields or {})[id] or {}) do if engine:show_cosmetic_control(entry[1]) then field(entry[1],entry[2]) end end
                 for _,entry in ipairs((engine.cosmetic_toggles or {})[id] or {}) do local key=entry[1]; if engine:show_cosmetic_control(key) then toggle_action(entry[2],function() return engine.settings[key] end,function(on) engine.settings[key]=on end) end end
             end
             local function preset(key,caption,values,apply)
@@ -3581,7 +3586,7 @@ do
                 if visual_trail_details then controls("ball_trail") end
             elseif visual_section=="Court" then
                 toggle_action("Preserve original court markings",function() return engine.settings.court_native_lines end,function(on) engine.settings.court_native_lines=on; rebuild() end)
-                if engine.settings.court_native_lines then text("Original line artwork stays aligned. Floor finish and tint remain adjustable.",12,theme.muted,38) end
+                if engine.settings.court_native_lines then text("Original material and line artwork stay intact. Floor tint remains adjustable.",12,theme.muted,38) end
                 preset("court_preset","Court preset",engine.court_presets,function(name) engine:apply_court_preset(name) end)
                 module_toggle("court_appearance")
                 action("Select floor beneath me",function() engine:select_court_under_player() end)
@@ -3763,8 +3768,8 @@ do
                     if expanded==id then
                         text(definition.description,12,theme.muted,id=="dribble_library" and 40 or 60).TextWrapped=true
                         for _,entry in ipairs(options[id] or {}) do field(entry[1],entry[2]) end
-                        for _,entry in ipairs((engine.cosmetic_choices or {})[id] or {}) do choice(entry[1],entry[2],entry[3]) end
-                        for _,entry in ipairs((engine.cosmetic_fields or {})[id] or {}) do if (entry[1]~="model_asset" or engine.settings.model_preset=="Custom") and (entry[1]~="model_height" or not engine.settings.model_fit_pb) then field(entry[1],entry[2]) end end
+                        for _,entry in ipairs((engine.cosmetic_choices or {})[id] or {}) do if engine:show_cosmetic_control(entry[1]) then choice(entry[1],entry[2],entry[3]) end end
+                        for _,entry in ipairs((engine.cosmetic_fields or {})[id] or {}) do if engine:show_cosmetic_control(entry[1]) and (entry[1]~="model_asset" or engine.settings.model_preset=="Custom") and (entry[1]~="model_height" or not engine.settings.model_fit_pb) then field(entry[1],entry[2]) end end
                         for _,entry in ipairs((engine.cosmetic_toggles or {})[id] or {}) do local key=entry[1]; if (key~="model_follow_pose" or not engine.settings.model_fit_pb) and engine:show_cosmetic_control(key) then toggle_action(entry[2],function() return engine.settings[key] end,function(on) engine.settings[key]=on; if key=="model_fit_pb" then local active=engine.registry.active.custom_model; if active then engine.registry:disable("custom_model"); local ok,err=engine.registry:enable("custom_model",engine.settings); if not ok then report(tostring(err)) end end; rebuild() end end) end end
                         if id=="dribble_library" then
                             toggle_action("Sprint variants",function() return engine.settings.dribble_sprint end,function(on) engine.settings.dribble_sprint=on end)
