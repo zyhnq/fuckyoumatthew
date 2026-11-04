@@ -1236,6 +1236,12 @@ local function create_pivot_modules(ctx)
         state.bloom.Enabled=glowing>0; state.bloom.Intensity=s.ball_bloom; state.bloom.Size=18; state.bloom.Threshold=.9
     end,interval=.1})
     local function court_line_kind(object)
+        local piece=tostring(object:GetAttribute("GymPiece") or ""):lower():gsub("[^%w]","")
+        if piece:match("^threepoint") then return "three" end
+        if piece:match("^freethrow") or piece:match("^outerlane") or piece:match("^lanemarks") then return "free" end
+        if piece:match("^hashmarks") or piece:match("^baselinemarks") or piece:match("^halfcourtline") or piece:match("^restrictedarc") then return "other" end
+        -- PB calls its visible three-point mesh Takeback, outside the Lines folder.
+        if object.Name=="Takeback" and object:IsA("MeshPart") and tostring(object.MeshId):match("13593871788$") then return "three" end
         local text=""; local current=object
         for _=1,4 do
             if not current or current==workspace then break end
@@ -1401,8 +1407,11 @@ local function create_pivot_modules(ctx)
                     seen[part]=true; local name=part.Name:lower(); local parent=part.Parent; local in_court=false
                     while parent and parent~=workspace do if parent.Name:lower():find("court",1,true) then in_court=true; break end; parent=parent.Parent end
                     local selected=s.court_part_name~="" and part.Name:lower()==s.court_part_name:lower()
-                    if selected or name=="courtfloor" or name=="courtsurface" or name=="playingsurface" or (name=="floor" and in_court) then surfaces[#surfaces+1]=part
-                    elseif in_court and court_line_kind(part) then lines[#lines+1]=part end
+                    local line_kind=court_line_kind(part)
+                    local piece=tostring(part:GetAttribute("GymPiece") or ""):lower()
+                    local gym_floor=piece:match("^insidezone") or piece:match("^paintzone") or piece:match("^outerzone")
+                    if in_court and line_kind then lines[#lines+1]=part
+                    elseif selected or gym_floor or name=="courtfloor" or name=="courtsurface" or name=="playingsurface" or (name=="floor" and in_court) then surfaces[#surfaces+1]=part end
                 end
             end
         end
@@ -1420,7 +1429,7 @@ local function create_pivot_modules(ctx)
             hit=workspace:Raycast(origin,Vector3.new(0,-80,0),params)
             if not hit then break end
             local part=hit.Instance
-            if part and part:IsA("BasePart") and part.Transparency<.95 and hit.Normal.Y>.8 then break end
+            if part and part:IsA("BasePart") and part.Transparency<.95 and hit.Normal.Y>.8 and not court_line_kind(part) then break end
             excluded[#excluded+1]=part; hit=nil
         end
         local floor=hit and hit.Instance
@@ -2243,7 +2252,7 @@ local function create_pivot_modules(ctx)
     end,conflicts={"dribble_macros","auto_ankle"}})
     if type(readfile)=="function" then pcall(function() Engine:read_dribble_library() end) end
 
-    Engine.build="2026.11.03.5"
+    Engine.build="2026.11.03.6"
     local s=Engine.settings
     local defaults={ball_finish="Custom",court_preset="Custom",lighting_preset="Warm gym",lighting_intensity=.65,shoe_color="#B79AFF",jersey_color="#FFFFFF",shoe_trail=true,landing_particles=true,effect_strength=.5,indicator_style="Ring",indicator_color="#B79AFF",indicator_radius=2.6,indicator_opacity=.7,green_style="Badge",green_color="#89DEAC",green_duration=.7,outfit_jersey=true,outfit_shoes=true,outfit_accessories=false}
     for key,value in pairs(defaults) do s[key]=value end
@@ -3008,7 +3017,7 @@ do
     local rail_line=frame(shell,20,97,660,1,theme.line)
     local top_line=frame(shell,20,54,660,1,theme.line)
     local logo=label(shell,"Pivot",20,12,100,28,19,theme.text); logo.Font=Enum.Font.SourceSansBold; logo.TextXAlignment=Enum.TextXAlignment.Left
-    local build_label=label(shell,"BUILD 2026.11.03.5",242,17,150,18,10,theme.muted); build_label.Name="PivotBuild"; build_label.Font=Enum.Font.RobotoMono; build_label.TextWrapped=false
+    local build_label=label(shell,"BUILD 2026.11.03.6",242,17,150,18,10,theme.muted); build_label.Name="PivotBuild"; build_label.Font=Enum.Font.RobotoMono; build_label.TextWrapped=false
     local heading=label(shell,"Practical Basketball",94,14,240,26,11,theme.muted); heading.Font=Enum.Font.SourceSansSemibold
     close.BackgroundColor3=theme.rail; close.TextColor3=theme.muted; close.TextSize=14; corner(close,4)
     local search=make("TextBox",{Text="",PlaceholderText="Find a control...",PlaceholderColor3=theme.muted,Position=UDim2.fromOffset(484,10),Size=UDim2.fromOffset(166,23),
