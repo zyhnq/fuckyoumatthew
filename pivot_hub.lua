@@ -2252,7 +2252,7 @@ local function create_pivot_modules(ctx)
     end,conflicts={"dribble_macros","auto_ankle"}})
     if type(readfile)=="function" then pcall(function() Engine:read_dribble_library() end) end
 
-    Engine.build="2026.11.03.6"
+    Engine.build="2026.11.03.7"
     local s=Engine.settings
     local defaults={ball_finish="Custom",court_preset="Custom",lighting_preset="Warm gym",lighting_intensity=.65,shoe_color="#B79AFF",jersey_color="#FFFFFF",shoe_trail=true,landing_particles=true,effect_strength=.5,indicator_style="Ring",indicator_color="#B79AFF",indicator_radius=2.6,indicator_opacity=.7,green_style="Badge",green_color="#89DEAC",green_duration=.7,outfit_jersey=true,outfit_shoes=true,outfit_accessories=false}
     for key,value in pairs(defaults) do s[key]=value end
@@ -2389,6 +2389,127 @@ local function create_pivot_modules(ctx)
         local cf,size=model:GetBoundingBox(); local camera=Instance.new("Camera"); camera.FieldOfView=35; camera.Parent=viewport; viewport.CurrentCamera=camera
         local distance=math.max(size.X,size.Y,size.Z)*1.9
         camera.CFrame=CFrame.lookAt(cf.Position+Vector3.new(0,size.Y*.05,-distance),cf.Position)
+    end
+
+    for key,value in pairs({wings_style="Feather",wings_color="#DCE4FF",wings_tip_color="#A28BFF",wings_scale=1,wings_flap=true,wings_speed=1.4,wings_opacity=.9,aura_style="Sparks",aura_color="#B79AFF",aura_density=18,aura_size=1,aura_opacity=.6,impact_style="Both",impact_color="#B79AFF",impact_size=1,impact_strength=.6}) do s[key]=value end
+    for key,value in pairs({wings_scale={.5,2},wings_speed={.2,3},wings_opacity={.2,1},aura_density={4,45},aura_size={.5,2},aura_opacity={.1,1},impact_size={.4,2},impact_strength={.1,1}}) do Engine.ranges[key]=value end
+    local function effect_part(scope,parent,name,class)
+        local p=new_local(scope,class or "Part",parent); p.Name=name; p.Anchored=true; p.CanCollide=false; p.CanTouch=false; p.CanQuery=false; p.CastShadow=false; p.Material=Enum.Material.SmoothPlastic; p.Transparency=1; return p
+    end
+    add("wings","Wings","Visual+","Animated feather, bat or energy wings with independent colors and scale",{start=function(scope)
+        local folder=new_local(scope,"Folder",workspace); folder.Name="PivotWings"
+        local feathers={}; for _,side in ipairs({-1,1}) do for i=1,9 do feathers[#feathers+1]={part=effect_part(scope,folder,"WingFeather","WedgePart"),side=side,index=i} end end
+        return {folder=folder,feathers=feathers}
+    end,step=function(_,state,settings)
+        local model=rig(); local torso=model and (model:FindFirstChild("UpperTorso") or model:FindFirstChild("Torso") or root())
+        local time=os.clock(); local flap=settings.wings_flap and math.sin(time*settings.wings_speed*math.pi)*.22 or 0
+        local color=cosmetic_color(settings.wings_color); local tip=cosmetic_color(settings.wings_tip_color); local scale=settings.wings_scale
+        for _,entry in ipairs(state.feathers) do
+            local p,i,side=entry.part,entry.index,entry.side
+            local visible=torso~=nil and (settings.wings_style~="Bat" or i<=6)
+            p.Transparency=visible and 1-settings.wings_opacity or 1
+            if visible then
+                local bat=settings.wings_style=="Bat"; local energy=settings.wings_style=="Energy"
+                local length=bat and (i<=3 and 2.5-i*.18 or 1.25) or 2.65-i*.14
+                p.Size=Vector3.new((bat and .85 or energy and .2 or .4)*scale,length*scale,.12*scale)
+                p.Color=i%3==0 and tip or color; p.Material=energy and Enum.Material.Neon or Enum.Material.SmoothPlastic
+                local mount=torso.CFrame*CFrame.new(side*.25,.45,.65)*CFrame.Angles(0,side*(.18+flap),0)
+                p.CFrame=mount*CFrame.new(side*(.55+i*.25)*scale,(.5-i*.075)*scale,.08*i*scale)*CFrame.Angles(0,0,side*(-.48-i*.085))
+            end
+        end
+    end,interval=.02})
+    add("character_aura","Character aura","Visual+","Sparks, mist or orbiting lights with adjustable density, size and opacity",{start=function(scope)
+        local folder=new_local(scope,"Folder",workspace); folder.Name="PivotAura"
+        local orbs={}; for i=1,8 do local p=effect_part(scope,folder,"AuraOrb"); p.Shape=Enum.PartType.Ball; orbs[i]=p end
+        return {orbs=orbs}
+    end,step=function(scope,state,settings)
+        local r=root(); local color=cosmetic_color(settings.aura_color); local orbit=settings.aura_style=="Orbit"
+        if state.root~=r then
+            if state.attachment then state.attachment:Destroy(); state.attachment=nil; state.emitter=nil end
+            state.root=r
+            if r then
+                local a=new_local(scope,"Attachment",r); a.Name="PivotAuraAttachment"
+                local e=new_local(scope,"ParticleEmitter",a); e.Name="PivotAuraParticles"; e.Texture="rbxasset://textures/particles/sparkles_main.dds"; e.SpreadAngle=Vector2.new(180,180); e.LightEmission=.8; e.LockedToPart=true
+                state.attachment=a; state.emitter=e
+            end
+        end
+        if state.emitter then
+            local e=state.emitter; local mist=settings.aura_style=="Mist"
+            e.Enabled=not orbit; e.Color=ColorSequence.new(color); e.Rate=settings.aura_density
+            e.Lifetime=NumberRange.new(mist and .8 or .35,mist and 1.2 or .65)
+            e.Speed=NumberRange.new(mist and .25 or .8,mist and .65 or 1.8)
+            e.Size=NumberSequence.new(settings.aura_size*(mist and .45 or .12)); e.Transparency=NumberSequence.new(1-settings.aura_opacity)
+            e.Rotation=NumberRange.new(0,360); e.RotSpeed=NumberRange.new(-35,35)
+        end
+        for i,p in ipairs(state.orbs) do
+            p.Transparency=r and orbit and 1-settings.aura_opacity or 1
+            if r and orbit then
+                local angle=os.clock()*1.6+i*math.pi/4; local radius=1.3*settings.aura_size
+                p.Size=Vector3.new(.11,.11,.11)*settings.aura_size; p.Color=color; p.Material=Enum.Material.Neon
+                p.CFrame=CFrame.new(r.Position+Vector3.new(math.cos(angle)*radius,math.sin(angle*2)*.7,math.sin(angle)*radius))
+            end
+        end
+    end,interval=.03})
+    local function destroy_impact(burst) burst.folder:Destroy() end
+    local function impact_burst(state,position,settings)
+        if #state.bursts>=6 then destroy_impact(table.remove(state.bursts,1)) end
+        local folder=Instance.new("Folder"); folder.Name="PivotBounceBurst"; folder.Parent=state.folder
+        local parts={}
+        if settings.impact_style~="Sparks" then for i=1,20 do
+            local p=Instance.new("Part"); p.Name="ImpactRing"; p.Anchored=true; p.CanCollide=false; p.CanTouch=false; p.CanQuery=false; p.CastShadow=false; p.Material=Enum.Material.Neon; p.Size=Vector3.new(.08,.025,.1); p.Parent=folder; parts[i]=p
+        end end
+        if settings.impact_style~="Ring" then
+            local p=Instance.new("Part"); p.Name="BurstOrigin"; p.Anchored=true; p.CanCollide=false; p.CanTouch=false; p.CanQuery=false; p.Transparency=1; p.Size=Vector3.new(.02,.02,.02); p.CFrame=CFrame.new(position); p.Parent=folder
+            local a=Instance.new("Attachment"); a.Parent=p
+            local e=Instance.new("ParticleEmitter"); e.Texture="rbxasset://textures/particles/sparkles_main.dds"; e.Rate=0; e.Lifetime=NumberRange.new(.15,.35); e.Speed=NumberRange.new(1,3); e.SpreadAngle=Vector2.new(70,70); e.Size=NumberSequence.new(.1*settings.impact_size); e.Transparency=NumberSequence.new(.25); e.Color=ColorSequence.new(cosmetic_color(settings.impact_color)); e.LightEmission=.8; e.Parent=a
+            e:Emit(math.floor(4+settings.impact_strength*12))
+        end
+        state.bursts[#state.bursts+1]={folder=folder,parts=parts,position=position,born=os.clock(),size=settings.impact_size,strength=settings.impact_strength,color=cosmetic_color(settings.impact_color)}
+    end
+    add("ball_impacts","Ball impact effects","Visual+","Brief rings and sparks on detected floor bounces; does not alter the ball",{start=function(scope)
+        local folder=new_local(scope,"Folder",workspace); folder.Name="PivotBallImpacts"
+        return {folder=folder,balls={},bursts={}}
+    end,step=function(_,state,settings)
+        local seen={}
+        for _,item in ipairs(candidates("balls")) do
+            local ball=item.object
+            if ball.Parent and not seen[ball] then
+                seen[ball]=true
+                local velocity=ball.AssemblyLinearVelocity; local prior=state.balls[ball]
+                if velocity then
+                    local elapsed=prior and os.clock()-prior.time
+                    local sampled=elapsed and elapsed>0 and elapsed<.25 and (ball.Position.Y-prior.position.Y)/elapsed or 0
+                    local vertical=math.abs(velocity.Y)<.5 and math.abs(sampled)>1 and sampled or velocity.Y
+                    local continuous=prior and elapsed and elapsed<.25 and (ball.Position-prior.position).Magnitude<8
+                    if continuous and prior.y< -2 and vertical>1 and os.clock()-prior.last>.18 then
+                        local params=RaycastParams.new(); params.FilterType=Enum.RaycastFilterType.Exclude
+                        local excludes={ball,state.folder}; local chars=workspace:FindFirstChild("Characters"); if chars then excludes[#excludes+1]=chars end
+                        params.FilterDescendantsInstances=excludes; params.IgnoreWater=true
+                        local hit=workspace:Raycast(ball.Position,Vector3.new(0,-(ball.Size.Y/2+.8),0),params)
+                        if hit and hit.Normal.Y>.7 then impact_burst(state,hit.Position+Vector3.new(0,.025,0),settings); prior.last=os.clock() end
+                    end
+                    state.balls[ball]={y=vertical,last=prior and prior.last or -10,position=ball.Position,time=os.clock()}
+                end
+            end
+        end
+        for ball in pairs(state.balls) do if not seen[ball] then state.balls[ball]=nil end end
+        for i=#state.bursts,1,-1 do
+            local burst=state.bursts[i]; local age=os.clock()-burst.born
+            if age>.45 then destroy_impact(burst); table.remove(state.bursts,i)
+            else
+                local radius=(.15+age*3.6)*burst.size
+                for n,p in ipairs(burst.parts) do
+                    local angle=n*math.pi/10; p.Size=Vector3.new(.055,.025,radius*.33)
+                    p.CFrame=CFrame.new(burst.position+Vector3.new(math.cos(angle)*radius,0,math.sin(angle)*radius))*CFrame.Angles(0,-angle,0)
+                    p.Color=burst.color; p.Transparency=1-(1-age/.45)*burst.strength
+                end
+            end
+        end
+    end,interval=.025})
+    function Engine:preview_ball_impact()
+        local active=assert(registry.active.ball_impacts,"Enable Ball impact effects first")
+        local r=assert(root(),"Enter a court first")
+        impact_burst(active.state,r.Position+Vector3.new(0,-2.9,-2),self.settings)
     end
 
     Engine.shot_stats={total=0,perfect=0,good=0,early=0,late=0,skipped=0,releases=0,unconfirmed=0,last="Waiting for a shot",history={}}
@@ -3017,7 +3138,7 @@ do
     local rail_line=frame(shell,20,97,660,1,theme.line)
     local top_line=frame(shell,20,54,660,1,theme.line)
     local logo=label(shell,"Pivot",20,12,100,28,19,theme.text); logo.Font=Enum.Font.SourceSansBold; logo.TextXAlignment=Enum.TextXAlignment.Left
-    local build_label=label(shell,"BUILD 2026.11.03.6",242,17,150,18,10,theme.muted); build_label.Name="PivotBuild"; build_label.Font=Enum.Font.RobotoMono; build_label.TextWrapped=false
+    local build_label=label(shell,"BUILD 2026.11.03.7",242,17,150,18,10,theme.muted); build_label.Name="PivotBuild"; build_label.Font=Enum.Font.RobotoMono; build_label.TextWrapped=false
     local heading=label(shell,"Practical Basketball",94,14,240,26,11,theme.muted); heading.Font=Enum.Font.SourceSansSemibold
     close.BackgroundColor3=theme.rail; close.TextColor3=theme.muted; close.TextSize=14; corner(close,4)
     local search=make("TextBox",{Text="",PlaceholderText="Find a control...",PlaceholderColor3=theme.muted,Position=UDim2.fromOffset(484,10),Size=UDim2.fromOffset(166,23),
@@ -3345,6 +3466,7 @@ do
     local modules_page=page
     local visual_page=make("ScrollingFrame",{Name="PivotVisualPlus",Position=UDim2.fromOffset(20,112),Size=UDim2.new(1,-34,1,-174),BackgroundTransparency=1,BorderSizePixel=0,ScrollBarThickness=3,Visible=false,CanvasSize=UDim2.fromOffset(0,0)},window)
     local visual_section="Ball"; local visual_character_open=false; local visual_ball_details=false; local visual_trail_details=false
+    local visual_wings_open=false; local visual_aura_open=false; local visual_impacts_open=false
     local tabs={"All","Saved modules","Shooting","Dribbling","Cosmetics","Character","Player","Defense","Visuals","World","Camera","Recorder","Options"}
     local category="All"; local rows={}; local fields={}; local y=0
     local container=page
@@ -3629,6 +3751,18 @@ do
                 module_toggle("outfit_tint"); field("jersey_color","Jersey tint"); field("shoe_color","Shoes / effect color")
                 for _,entry in ipairs({{"outfit_jersey","Tint jersey / shorts"},{"outfit_shoes","Tint shoes"},{"outfit_accessories","Tint accessories"}}) do local key=entry[1]; toggle_action(entry[2],function() return engine.settings[key] end,function(on) engine.settings[key]=on end) end
             elseif visual_section=="Effects" then
+                module_toggle("wings")
+                action(visual_wings_open and "Wing controls  −" or "Wing controls  +",function() visual_wings_open=not visual_wings_open; rebuild() end)
+                if visual_wings_open then
+                    choice("wings_style","Wing style",{"Feather","Bat","Energy"}); field("wings_color","Wing color"); field("wings_tip_color","Tip color"); field("wings_scale","Wing size"); field("wings_opacity","Wing opacity")
+                    toggle_action("Animate wings",function() return engine.settings.wings_flap end,function(on) engine.settings.wings_flap=on end); field("wings_speed","Flap speed")
+                end
+                module_toggle("character_aura")
+                action(visual_aura_open and "Aura controls  −" or "Aura controls  +",function() visual_aura_open=not visual_aura_open; rebuild() end)
+                if visual_aura_open then choice("aura_style","Aura style",{"Sparks","Mist","Orbit"}); field("aura_color","Aura color"); field("aura_density","Particle density"); field("aura_size","Aura size"); field("aura_opacity","Aura opacity") end
+                module_toggle("ball_impacts")
+                action(visual_impacts_open and "Impact controls  −" or "Impact controls  +",function() visual_impacts_open=not visual_impacts_open; rebuild() end)
+                if visual_impacts_open then choice("impact_style","Impact style",{"Ring","Sparks","Both"}); field("impact_color","Impact color"); field("impact_size","Impact size"); field("impact_strength","Impact strength"); action("Preview ball impact",function() engine:preview_ball_impact() end) end
                 module_toggle("player_indicator"); choice("indicator_style","Indicator",{"Ring","Segmented","Arrow"}); field("indicator_color","Indicator color"); field("indicator_radius","Indicator size"); field("indicator_opacity","Indicator opacity")
                 module_toggle("shoe_effects"); field("shoe_color","Shoe effect color"); field("effect_strength","Effect strength")
                 toggle_action("Shoe trails",function() return engine.settings.shoe_trail end,function(on) engine.settings.shoe_trail=on end)
