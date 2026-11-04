@@ -2290,6 +2290,11 @@ local function create_pivot_modules(ctx)
         local data,err=self:validate_saved_modules(self.saved_modules); assert(data,err)
         local item=assert(data.presets[index],"Saved module preset not found")
         assert(#item.enabled>0,"This preset is empty. Enable the modules you want and save it again")
+        return self:load_module_snapshot(item)
+    end
+    function Engine:load_module_snapshot(snapshot)
+        local data,err=self:validate_saved_modules({version=1,presets={snapshot}}); assert(data,err)
+        local item=data.presets[1]
         assert(ctx.runner:cancel(),"Input release pending; press F8 and retry")
         assert(self:stop(),"Input release pending; press F8 and retry")
         for key,value in pairs(item.settings) do self.settings[key]=value end
@@ -2352,13 +2357,17 @@ local backend = native and "Native keys" or (virtual and "VirtualInputManager (u
 local file = "c4_practical_hub_v2.json"
 local disk_read = type(readfile)=="function"
 local disk_write = type(writefile)=="function"
+local module_profiles = {}
 local restored = "Session profiles"
 if disk_read then
     local ok, data = pcall(function()
-        local raw=readfile(file); assert(#raw<=65536, "Profile file is too large."); return http:JSONDecode(raw)
+        local raw=readfile(file); assert(#raw<=262144, "Profile file is too large."); return http:JSONDecode(raw)
     end)
     if ok and type(data)=="table" and data.version==2 and type(data.profiles)=="table" then
-        for index=1,3 do profiles[index]=Core.validate(data.profiles[tostring(index)]) end
+        for index=1,3 do
+            profiles[index]=Core.validate(data.profiles[tostring(index)])
+            if type(data.modules)=="table" then module_profiles[index]=data.modules[tostring(index)] end
+        end
         if profiles[1] then config=Core.copy(profiles[1]) end
         restored="Saved profiles restored; slot 1 is the startup profile"
     end
@@ -2547,7 +2556,7 @@ end
 button(combo_page,"RUN SEQUENCE / configured hotkey",combo)
 local profile_page=pages.Profiles
 label(profile_page,"PROFILES + HOTKEYS",28,accent)
-label(profile_page,"Three slots. Save explicitly; slot 1 loads at startup. F8 always cancels. Profiles persist when file access is available.",52,muted)
+label(profile_page,"Save profile stores controls, enabled modules and their settings. Load profile restores them. Older profiles need saving again to include modules.",52,muted)
 local slot=1
 local slot_button
 slot_button=button(profile_page,"SLOT 1 / click to cycle",function() slot=slot%3+1; slot_button.Text="SLOT "..slot.." / click to cycle" end)
@@ -2557,16 +2566,24 @@ field(profile_page,"menu","Menu hotkey / unique; F8 is reserved")
 button(profile_page,"SAVE SELECTED SLOT",protect(function()
     if not commit() then return end
     profiles[slot]=Core.copy(config)
+    if PivotModules then
+        module_profiles[slot]=PivotModules:capture_enabled_modules()
+        module_profiles[slot].name="Slot "..slot
+    end
     if not disk_write then report("Slot "..slot.." saved for this session; disk access unavailable."); return end
-    local data={version=2,profiles={}}
-    for index=1,3 do if profiles[index] then data.profiles[tostring(index)]=profiles[index] end end
-    writefile(file,http:JSONEncode(data)); report("Saved slot "..slot.." to "..file)
+    local data={version=2,profiles={},modules={}}
+    for index=1,3 do if profiles[index] then data.profiles[tostring(index)]=profiles[index]; data.modules[tostring(index)]=module_profiles[index] end end
+    writefile(file,http:JSONEncode(data)); report("Saved slot "..slot.." / "..(module_profiles[slot] and #module_profiles[slot].enabled or 0).." modules / controls and module settings")
 end))
-button(profile_page,"LOAD SELECTED SLOT",function()
+button(profile_page,"LOAD SELECTED SLOT",protect(function()
     if not profiles[slot] then report("This slot is empty."); return end
     if not cancel("Loading profile...") then return end
-    config=Core.copy(profiles[slot]); sync(); report("Loaded slot "..slot)
-end)
+    config=Core.copy(profiles[slot]); sync()
+    if PivotModules and module_profiles[slot] then
+        PivotModules:load_module_snapshot(module_profiles[slot])
+        if PivotUI then PivotUI.set_theme(PivotModules.settings.theme_mode); PivotUI.edit_theme(PivotModules.settings) end
+    else report("Loaded controls for slot "..slot.." / older profile has no modules; enable yours and Save profile again") end
+end))
 button(profile_page,"RESTORE DEFAULT CONTROLS",function()
     if cancel() then config=Core.copy(defaults); sync(); report("Default controls restored; saved slots kept.") end
 end)
