@@ -1306,7 +1306,19 @@ local function create_pivot_modules(ctx)
                     toward=other and Vector3.new(other.Position.X-center.X,0,other.Position.Z-center.Z) or Vector3.new(floor.Position.X-center.X,0,floor.Position.Z-center.Z)
                 end
                 if toward.Magnitude>.1 then
-                    anchors[#anchors+1]={center=center,forward=toward.Unit,free_distance=marker and toward.Magnitude or nil}
+                    local forward=toward.Unit
+                    -- Shooter markers can be off-center. Prefer the floor's court axis
+                    -- when it agrees with the hoop direction, avoiding a skewed arc.
+                    local best,best_dot
+                    for _,axis in ipairs({floor.CFrame.RightVector,floor.CFrame.LookVector}) do
+                        local flat=Vector3.new(axis.X,0,axis.Z)
+                        if flat.Magnitude>.1 then
+                            flat=flat.Unit; local dot=flat:Dot(forward)
+                            if not best_dot or math.abs(dot)>best_dot then best=flat*(dot<0 and -1 or 1); best_dot=math.abs(dot) end
+                        end
+                    end
+                    if best and best_dot>.98 then forward=best end
+                    anchors[#anchors+1]={center=center,forward=forward,free_distance=marker and math.abs(toward:Dot(forward)) or nil}
                     if #anchors>=8 then break end
                 end
             end
@@ -1323,7 +1335,14 @@ local function create_pivot_modules(ctx)
         local three=s.court_color_lines and s.court_three_enabled and s.court_rebuild_markings and #groups.three==0
         local free=s.court_color_lines and s.court_free_enabled and s.court_rebuild_markings and #groups.free==0
         local anchors=(three or free) and marking_anchors(state) or {}
-        local signature=table.concat({tostring(three),tostring(free),s.court_three_radius,s.court_three_angle,s.court_free_radius,s.court_free_distance,s.court_corner_depth,s.court_line_width},"/")
+        for _,anchor in ipairs(anchors) do
+            local angle=math.rad(s.court_marking_rotation or 0); local f=anchor.forward
+            anchor.forward=Vector3.new(f.X*math.cos(angle)-f.Z*math.sin(angle),0,f.X*math.sin(angle)+f.Z*math.cos(angle))
+            local right=Vector3.new(-anchor.forward.Z,0,anchor.forward.X)
+            anchor.center=anchor.center+anchor.forward*(s.court_marking_forward or 0)+right*(s.court_marking_side or 0)
+        end
+        state.marking_anchors=anchors
+        local signature=table.concat({tostring(three),tostring(free),s.court_three_radius,s.court_three_angle,s.court_free_radius,s.court_free_distance,s.court_corner_depth,s.court_line_width,s.court_marking_forward or 0,s.court_marking_side or 0,s.court_marking_rotation or 0},"/")
         for _,anchor in ipairs(anchors) do signature=signature..string.format("/%.2f/%.2f/%.2f/%.2f/%.2f/%.2f",anchor.center.X,anchor.center.Y,anchor.center.Z,anchor.forward.X,anchor.forward.Z,anchor.free_distance or 0) end
         if signature~=state.marking_signature then
             state.marking_signature=signature
@@ -2218,10 +2237,12 @@ local function create_pivot_modules(ctx)
     end,conflicts={"dribble_macros","auto_ankle"}})
     if type(readfile)=="function" then pcall(function() Engine:read_dribble_library() end) end
 
-    Engine.build="2026.11.03.2"
+    Engine.build="2026.11.03.3"
     local s=Engine.settings
     local defaults={ball_finish="Custom",court_preset="Custom",lighting_preset="Warm gym",lighting_intensity=.65,shoe_color="#B79AFF",jersey_color="#FFFFFF",shoe_trail=true,landing_particles=true,effect_strength=.5,indicator_style="Ring",indicator_color="#B79AFF",indicator_radius=2.6,indicator_opacity=.7,green_style="Badge",green_color="#89DEAC",green_duration=.7,outfit_jersey=true,outfit_shoes=true,outfit_accessories=false}
     for key,value in pairs(defaults) do s[key]=value end
+    s.court_marking_forward=0; s.court_marking_side=0; s.court_marking_rotation=0
+    Engine.ranges.court_marking_forward={-8,8}; Engine.ranges.court_marking_side={-8,8}; Engine.ranges.court_marking_rotation={-10,10}
     for key,value in pairs({lighting_intensity={0,1},effect_strength={.1,1},indicator_radius={1.5,4},indicator_opacity={.1,1},green_duration={.3,1.5}}) do Engine.ranges[key]=value end
     Engine.ball_finishes={"Custom","Matte","Chrome","Holographic","Galaxy","Neon"}
     Engine.court_presets={"Custom","Clean hardwood","Blacktop","Midnight","Team colors"}
@@ -2977,7 +2998,7 @@ do
     local rail_line=frame(shell,20,97,660,1,theme.line)
     local top_line=frame(shell,20,54,660,1,theme.line)
     local logo=label(shell,"Pivot",20,12,100,28,19,theme.text); logo.Font=Enum.Font.SourceSansBold; logo.TextXAlignment=Enum.TextXAlignment.Left
-    local build_label=label(shell,"BUILD 2026.11.03.2",242,17,150,18,10,theme.muted); build_label.Name="PivotBuild"; build_label.Font=Enum.Font.RobotoMono; build_label.TextWrapped=false
+    local build_label=label(shell,"BUILD 2026.11.03.3",242,17,150,18,10,theme.muted); build_label.Name="PivotBuild"; build_label.Font=Enum.Font.RobotoMono; build_label.TextWrapped=false
     local heading=label(shell,"Practical Basketball",94,14,240,26,11,theme.muted); heading.Font=Enum.Font.SourceSansSemibold
     close.BackgroundColor3=theme.rail; close.TextColor3=theme.muted; close.TextSize=14; corner(close,4)
     local search=make("TextBox",{Text="",PlaceholderText="Find a control...",PlaceholderColor3=theme.muted,Position=UDim2.fromOffset(484,10),Size=UDim2.fromOffset(166,23),
@@ -3343,7 +3364,7 @@ do
                 local width=slider.AbsoluteSize.X; if width<=0 then return end
                 local fraction=math.max(0,math.min(1,(position.X-slider.AbsolutePosition.X)/width))
                 local value=range[1]+fraction*(range[2]-range[1])
-                value=range[2]<=5 and math.floor(value*100+.5)/100 or math.floor(value+.5)
+                value=(range[2]<=5 or key:match("^court_marking_")) and math.floor(value*100+.5)/100 or math.floor(value+.5)
                 engine.settings[key]=value; box.Text=tostring(value); if key:match("^ui_") then ui.edit_theme(engine.settings) end; fill.Size=UDim2.new((value-range[1])/(range[2]-range[1]),0,1,0)
             end
             connect(slider.InputBegan,function(event)
@@ -3558,6 +3579,12 @@ do
                 module_toggle("court_appearance")
                 action("Select floor beneath me",function() engine:select_court_under_player() end)
                 controls("court_appearance")
+                action(court_alignment and "Marking alignment  −" or "Marking alignment  +",function() court_alignment=not court_alignment; rebuild() end)
+                if court_alignment then
+                    field("court_marking_forward","Forward offset / studs"); field("court_marking_side","Sideways offset / studs"); field("court_marking_rotation","Rotation / degrees")
+                    field("court_three_radius","Three-point radius"); field("court_three_angle","Three-point arc angle"); field("court_free_radius","Free-throw radius"); field("court_line_width","Line width")
+                    action("Reset marking offsets",function() engine.settings.court_marking_forward=0; engine.settings.court_marking_side=0; engine.settings.court_marking_rotation=0; rebuild() end)
+                end
                 text("Team colors uses the floor and marking colors you choose above.",12,theme.muted,32)
             elseif visual_section=="Outfit" then
                 action("Character  /  "..engine.settings.model_preset,function() visual_character_open=not visual_character_open; rebuild() end)
@@ -3790,6 +3817,7 @@ do
                             action("Select floor beneath me",function() engine:select_court_under_player() end)
                             action(court_alignment and "Marking alignment  −" or "Marking alignment  +",function() court_alignment=not court_alignment; rebuild() end)
                             if court_alignment then
+                                field("court_marking_forward","Forward offset / studs"); field("court_marking_side","Sideways offset / studs"); field("court_marking_rotation","Rotation / degrees")
                                 field("court_three_radius","Three-point radius"); field("court_three_angle","Three-point arc angle"); field("court_free_radius","Free-throw circle radius"); field("court_free_distance","Free-throw fallback distance"); field("court_corner_depth","Corner line depth"); field("court_line_width","Line width")
                             end
                             action("Check detected markings",function() local active=engine.registry.active.court_appearance; report(active and active.state.marking_summary or "Enable Court appearance first") end)
