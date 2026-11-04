@@ -2252,7 +2252,7 @@ local function create_pivot_modules(ctx)
     end,conflicts={"dribble_macros","auto_ankle"}})
     if type(readfile)=="function" then pcall(function() Engine:read_dribble_library() end) end
 
-    Engine.build="2026.11.03.7"
+    Engine.build="2026.11.03.8"
     local s=Engine.settings
     local defaults={ball_finish="Custom",court_preset="Custom",lighting_preset="Warm gym",lighting_intensity=.65,shoe_color="#B79AFF",jersey_color="#FFFFFF",shoe_trail=true,landing_particles=true,effect_strength=.5,indicator_style="Ring",indicator_color="#B79AFF",indicator_radius=2.6,indicator_opacity=.7,green_style="Badge",green_color="#89DEAC",green_duration=.7,outfit_jersey=true,outfit_shoes=true,outfit_accessories=false}
     for key,value in pairs(defaults) do s[key]=value end
@@ -2397,6 +2397,7 @@ local function create_pivot_modules(ctx)
         local p=new_local(scope,class or "Part",parent); p.Name=name; p.Anchored=true; p.CanCollide=false; p.CanTouch=false; p.CanQuery=false; p.CastShadow=false; p.Material=Enum.Material.SmoothPlastic; p.Transparency=1; return p
     end
     add("wings","Wings","Visual+","Animated feather, bat or energy wings with independent colors and scale",{start=function(scope)
+        scope:defer(function() registry:disable("wing_trails") end)
         local folder=new_local(scope,"Folder",workspace); folder.Name="PivotWings"
         local feathers={}; for _,side in ipairs({-1,1}) do for i=1,9 do feathers[#feathers+1]={part=effect_part(scope,folder,"WingFeather","WedgePart"),side=side,index=i} end end
         return {folder=folder,feathers=feathers}
@@ -2511,6 +2512,213 @@ local function create_pivot_modules(ctx)
         local r=assert(root(),"Enter a court first")
         impact_burst(active.state,r.Position+Vector3.new(0,-2.9,-2),self.settings)
     end
+
+    for key,value in pairs({lightning_color="#82CFFF",lightning_core_color="#F0FBFF",lightning_size=1,lightning_intensity=.75,lightning_rate=8,lightning_motion=true,wing_trail_color="#B79AFF",wing_trail_lifetime=.3,wing_trail_width=.25,wing_trail_opacity=.65,rim_color="#B79AFF",rim_animated=false,rim_glow=true,rim_flash=true,rim_flash_duration=.45}) do s[key]=value end
+    for key,value in pairs({lightning_size={.5,2},lightning_intensity={.1,1},lightning_rate={2,14},wing_trail_lifetime={.1,1},wing_trail_width={.05,.8},wing_trail_opacity={.1,1},rim_flash_duration={.15,1}}) do Engine.ranges[key]=value end
+    add("lightning_aura","Lightning aura","Visual+","Animated branching bolts around your body, with motion streaks while running",{start=function(scope)
+        local folder=new_local(scope,"Folder",workspace); folder.Name="PivotLightningAura"
+        local bolts={}
+        for i=1,6 do
+            local segments={}
+            for n=1,5 do
+                local glow=effect_part(scope,folder,"LightningGlow"); glow.Material=Enum.Material.Neon
+                local core=effect_part(scope,folder,"LightningCore"); core.Material=Enum.Material.Neon
+                segments[n]={glow=glow,core=core}
+            end
+            bolts[i]={segments=segments,next_shape=0,points={}}
+        end
+        return {bolts=bolts,folder=folder}
+    end,step=function(_,state,settings)
+        local r=root(); local now=os.clock(); local count=math.floor(2+settings.lightning_intensity*4)
+        local color=cosmetic_color(settings.lightning_color); local core_color=cosmetic_color(settings.lightning_core_color)
+        local speed=r and r.AssemblyLinearVelocity and r.AssemblyLinearVelocity.Magnitude or 0
+        local stretch=settings.lightning_motion and math.min(2.2,speed/12) or 0
+        for i,bolt in ipairs(state.bolts) do
+            if now>=bolt.next_shape then
+                bolt.next_shape=now+1/settings.lightning_rate; bolt.visible_until=now+.85/settings.lightning_rate
+                local angle=i*math.pi/3+math.random()*.6; local points={}
+                for n=0,5 do
+                    local phase=angle+n*.22; local radius=(.95+math.random()*.45)*settings.lightning_size
+                    local jitter=n==0 or n==5
+                    points[n+1]=Vector3.new(math.cos(phase)*radius+(jitter and 0 or (math.random()-.5)*.55), (1.5-n*.57+(math.random()-.5)*.3)*settings.lightning_size,math.sin(phase)*radius+stretch*n/5)
+                end
+                bolt.points=points
+            end
+            local visible=r~=nil and i<=count and now<(bolt.visible_until or 0)
+            for n,segment in ipairs(bolt.segments) do
+                segment.glow.Transparency=visible and .45 or 1; segment.core.Transparency=visible and .05 or 1
+                if visible then
+                    local a=(r.CFrame*CFrame.new(bolt.points[n])).Position; local b=(r.CFrame*CFrame.new(bolt.points[n+1])).Position
+                    local length=(b-a).Magnitude; local frame=CFrame.new((a+b)/2,b)
+                    local width=(.035+settings.lightning_intensity*.035)*settings.lightning_size
+                    segment.glow.Size=Vector3.new(width*2.4,width*2.4,length); segment.core.Size=Vector3.new(width*.5,width*.5,length)
+                    segment.glow.CFrame=frame; segment.core.CFrame=frame; segment.glow.Color=color; segment.core.Color=core_color
+                end
+            end
+        end
+    end,interval=.02})
+    add("wing_trails","Wing-tip trails","Visual+","Short trails following your wings; enable Wings first",{start=function(scope)
+        assert(registry.active.wings,"Enable Wings first")
+        local state={items={}}
+        scope:defer(function() for _,item in pairs(state.items) do item.trail:Destroy(); item.a:Destroy(); item.b:Destroy() end end)
+        return state
+    end,step=function(_,state,settings)
+        local wings=registry.active.wings; local targets={}
+        if wings then
+            local index=Engine.settings.wings_style=="Bat" and 3 or 8
+            targets={wings.state.feathers[index].part,wings.state.feathers[9+index].part}
+        end
+        local seen={}
+        for _,part in ipairs(targets) do if part.Parent then
+            seen[part]=true; local item=state.items[part]
+            if not item then
+                local a=Instance.new("Attachment"); a.Name="PivotWingTrailA"; a.Parent=part
+                local b=Instance.new("Attachment"); b.Name="PivotWingTrailB"; b.Parent=part
+                local trail=Instance.new("Trail"); trail.Name="PivotWingTipTrail"; trail.Attachment0=a; trail.Attachment1=b; trail.FaceCamera=true; trail.MinLength=.025; trail.LightEmission=.65; trail.Parent=part
+                item={a=a,b=b,trail=trail}; state.items[part]=item
+            end
+            item.a.Position=Vector3.new(0,-part.Size.Y*.4,-settings.wing_trail_width/2); item.b.Position=Vector3.new(0,-part.Size.Y*.4,settings.wing_trail_width/2)
+            item.trail.Color=ColorSequence.new(cosmetic_color(settings.wing_trail_color)); item.trail.Lifetime=settings.wing_trail_lifetime; item.trail.WidthScale=NumberSequence.new(1); item.trail.Transparency=NumberSequence.new(1-settings.wing_trail_opacity)
+        end end
+        for part,item in pairs(state.items) do if not seen[part] then item.trail:Destroy(); item.a:Destroy(); item.b:Destroy(); state.items[part]=nil end end
+    end,interval=.04})
+    local function collect_effect_rims()
+        local result,seen={},{}
+        for _,name in ipairs({"Hoops","Map"}) do
+            local folder=workspace:FindFirstChild(name)
+            if folder then for _,part in ipairs(folder:GetDescendants()) do
+                if part:IsA("BasePart") and part.Name=="Rim" and not seen[part] then seen[part]=true; result[#result+1]=part end
+            end end
+        end
+        return result
+    end
+    add("rim_effects","Rim effects","Visual+","Rim color, neon finish and a brief flash on detected downward ball crossings",{start=function(scope)
+        local state={rims={},highlights={},balls={},flashes={},next_scan=0}
+        scope:defer(function() for _,highlight in pairs(state.highlights) do highlight:Destroy() end end)
+        return state
+    end,step=function(scope,state,settings)
+        local now=os.clock()
+        if now>=state.next_scan then state.rims=collect_effect_rims(); state.next_scan=now+1.5 end
+        local color=cosmetic_color(settings.rim_color)
+        if settings.rim_animated then color=Color3.fromRGB(170+65*math.sin(now),170+65*math.sin(now+2),190+60*math.sin(now+4)) end
+        local seen_balls={}
+        for _,item in ipairs(candidates("balls")) do
+            local ball=item.object; seen_balls[ball]=true; local prior=state.balls[ball]
+            if settings.rim_flash and prior and now-prior.time<.3 and (ball.Position-prior.position).Magnitude<12 then
+                for _,rim in ipairs(state.rims) do if rim.Parent then
+                    local previous,current=prior.position,ball.Position
+                    if previous.Y>rim.Position.Y and current.Y<=rim.Position.Y and current.Y<previous.Y then
+                        local alpha=(rim.Position.Y-previous.Y)/(current.Y-previous.Y)
+                        local crossing=previous+(current-previous)*alpha
+                        local distance=Vector3.new(crossing.X-rim.Position.X,0,crossing.Z-rim.Position.Z).Magnitude
+                        local radius=math.max(.45,math.min(1.5,math.max(rim.Size.X,rim.Size.Z)*.5))
+                        if distance<radius then state.flashes[rim]=now+settings.rim_flash_duration end
+                    end
+                end end
+            end
+            state.balls[ball]={position=ball.Position,time=now}
+        end
+        for ball in pairs(state.balls) do if not seen_balls[ball] then state.balls[ball]=nil end end
+        local seen={}
+        for _,rim in ipairs(state.rims) do if rim.Parent then
+            seen[rim]=true
+            local flashing=(settings.rim_flash or now<(state.preview_until or 0)) and now<(state.flashes[rim] or 0)
+            scope:set(rim,"Color",flashing and Color3.fromRGB(244,250,255) or color)
+            if settings.rim_glow or flashing then scope:set(rim,"Material",Enum.Material.Neon) else scope:restore(rim,"Material") end
+            local h=state.highlights[rim]
+            if not h then h=Instance.new("Highlight"); h.Name="PivotRimGlow"; h.Adornee=rim; h.DepthMode=Enum.HighlightDepthMode.Occluded; h.FillTransparency=1; h.Parent=rim; state.highlights[rim]=h end
+            h.Enabled=settings.rim_glow or flashing; h.OutlineColor=flashing and Color3.fromRGB(244,250,255) or color; h.OutlineTransparency=flashing and .1 or .5
+        end end
+        for rim,h in pairs(state.highlights) do if not seen[rim] then h:Destroy(); state.highlights[rim]=nil; state.flashes[rim]=nil end end
+    end,interval=.04})
+    function Engine:preview_rim_flash()
+        local state=assert(registry.active.rim_effects,"Enable Rim effects first").state
+        state.rims=collect_effect_rims(); assert(#state.rims>0,"No court rim is visible")
+        state.preview_until=os.clock()+self.settings.rim_flash_duration
+        for _,rim in ipairs(state.rims) do state.flashes[rim]=os.clock()+self.settings.rim_flash_duration end
+    end
+
+    Engine.cosmetic_loadouts={version=1,loadouts={}}
+    Engine.settings.cosmetic_loadout_name="My look"
+    local look_modules={crosshair=true,ball_trail=true,player_trail=true,ball_appearance=true,court_appearance=true,self_outline=true,sky=true,custom_model=true,coverage_hud=true,player_indicator=true,shoe_effects=true,outfit_tint=true,lighting_preset=true,green_effect=true,wings=true,character_aura=true,ball_impacts=true,wing_trails=true,rim_effects=true,lightning_aura=true,meter_style=true,hide_meters=true}
+    local look_defaults={}
+    local prefixes={"ball_","court_","model_","wings_","aura_","lightning_","wing_trail_","rim_","impact_","indicator_","shoe_","jersey_","outfit_","sky_","outline_","player_trail_","crosshair_","coverage_"}
+    local look_extra={lighting_preset=true,lighting_intensity=true,effect_strength=true,green_style=true,green_color=true,green_duration=true,meter_style=true,shot_hud=true,shot_hud_compact=true}
+    for key,value in pairs(Engine.settings) do
+        local include=look_extra[key]
+        for _,prefix in ipairs(prefixes) do if key:sub(1,#prefix)==prefix then include=true end end
+        if include and key~="ball_handler_only" then look_defaults[key]=value end
+    end
+    function Engine:validate_cosmetic_loadouts(data)
+        assert(type(data)=="table" and data.version==1 and type(data.loadouts)=="table","Invalid cosmetic loadouts")
+        local count=0; for key in pairs(data.loadouts) do assert(type(key)=="number" and key>=1 and key%1==0,"Loadouts must be a list"); count=count+1 end
+        assert(count<=16,"Up to 16 cosmetic loadouts are supported")
+        local result={version=1,loadouts={}}; local names={}
+        for i=1,count do
+            local item=data.loadouts[i]
+            assert(type(item)=="table" and type(item.name)=="string" and #item.name>=1 and #item.name<=40 and item.name:find("%S") and not item.name:find("[%c]") and not names[item.name:lower()],"Invalid or duplicate look name")
+            assert(type(item.enabled)=="table","Invalid cosmetic module list")
+            local enabled={}; local total=0
+            for key,id in pairs(item.enabled) do
+                assert(type(key)=="number" and key>=1 and key%1==0 and type(id)=="string" and look_modules[id] and registry.definitions[id] and not enabled[id],"Invalid cosmetic module")
+                enabled[id]=true; total=total+1
+            end
+            assert(total<=32,"Too many cosmetic modules")
+            for n=1,total do assert(item.enabled[n],"Cosmetic modules must be a contiguous list") end
+            assert(not enabled.wing_trails or enabled.wings,"Wing-tip trails require Wings in this look")
+            for id in pairs(enabled) do for _,other in ipairs(registry.definitions[id].conflicts or {}) do assert(not enabled[other],"Conflicting cosmetic modules") end end
+            local settings,err=Core.validate_module_settings(item.settings or {},look_defaults,self.ranges); assert(settings,err)
+            local ids={}; for _,definition in ipairs(self.definitions) do if enabled[definition.id] then ids[#ids+1]=definition.id end end
+            names[item.name:lower()]=true; result.loadouts[i]={name=item.name,enabled=ids,settings=settings}
+        end
+        return result
+    end
+    function Engine:write_cosmetic_loadouts()
+        assert(type(writefile)=="function" and type(readfile)=="function","Cosmetic file storage unavailable")
+        local value=self:validate_cosmetic_loadouts(self.cosmetic_loadouts)
+        local raw=game:GetService("HttpService"):JSONEncode(value)
+        writefile("pivot_cosmetic_loadouts.json",raw)
+        assert(readfile("pivot_cosmetic_loadouts.json")==raw,"Cosmetic loadout file verification failed")
+    end
+    function Engine:read_cosmetic_loadouts()
+        assert(type(readfile)=="function","Cosmetic file reading unavailable")
+        local raw=readfile("pivot_cosmetic_loadouts.json"); assert(type(raw)=="string" and #raw<=262144,"Cosmetic loadout file exceeds 256 KB")
+        self.cosmetic_loadouts=self:validate_cosmetic_loadouts(game:GetService("HttpService"):JSONDecode(raw))
+        return #self.cosmetic_loadouts.loadouts
+    end
+    function Engine:save_cosmetic_loadout(name)
+        name=tostring(name or ""):match("^%s*(.-)%s*$"); if name=="" then name="My look" end
+        local item={name=name,enabled={},settings={}}
+        for _,definition in ipairs(self.definitions) do if look_modules[definition.id] and registry.active[definition.id] then item.enabled[#item.enabled+1]=definition.id end end
+        for key in pairs(look_defaults) do item.settings[key]=self.settings[key] end
+        local data={version=1,loadouts={}}; local replaced=false
+        for i,old in ipairs(self.cosmetic_loadouts.loadouts) do if old.name:lower()==name:lower() then data.loadouts[i]=item; replaced=true else data.loadouts[i]=old end end
+        if not replaced then data.loadouts[#data.loadouts+1]=item end
+        self.cosmetic_loadouts=self:validate_cosmetic_loadouts(data)
+        local ok,err=pcall(function() self:write_cosmetic_loadouts() end)
+        self.cosmetic_loadout_status="Saved "..name.." / "..#item.enabled.." cosmetics"..(ok and " / file verified" or " / session only: "..tostring(err))
+        ctx.report(self.cosmetic_loadout_status); return #item.enabled
+    end
+    function Engine:load_cosmetic_loadout(index)
+        local data=self:validate_cosmetic_loadouts(self.cosmetic_loadouts); local item=assert(data.loadouts[index],"Cosmetic loadout not found")
+        -- Only cosmetic modules and appearance settings are touched.
+        for id in pairs(look_modules) do registry:disable(id) end
+        for key,value in pairs(item.settings) do self.settings[key]=value end
+        local count,failures=0,{}
+        for _,id in ipairs(item.enabled) do
+            local ok,err=registry:enable(id,self.settings)
+            if ok then count=count+1 else failures[#failures+1]=registry.definitions[id].title..": "..tostring(err) end
+        end
+        self.settings.cosmetic_loadout_name=item.name
+        self.cosmetic_loadout_status="Loaded "..item.name.." / "..count.." of "..#item.enabled.." cosmetics"..(#failures>0 and " / Failed: "..table.concat(failures,"; ") or "")
+        ctx.report(self.cosmetic_loadout_status); return count,failures
+    end
+    function Engine:remove_cosmetic_loadout(index)
+        assert(self.cosmetic_loadouts.loadouts[index],"Cosmetic loadout not found"); table.remove(self.cosmetic_loadouts.loadouts,index)
+        local ok,err=pcall(function() self:write_cosmetic_loadouts() end)
+        self.cosmetic_loadout_status="Removed cosmetic loadout"..(ok and "" or " / session only: "..tostring(err)); ctx.report(self.cosmetic_loadout_status)
+    end
+    if type(readfile)=="function" then pcall(function() Engine:read_cosmetic_loadouts() end) end
 
     Engine.shot_stats={total=0,perfect=0,good=0,early=0,late=0,skipped=0,releases=0,unconfirmed=0,last="Waiting for a shot",history={}}
     function Engine:record_shot(event)
@@ -3138,7 +3346,7 @@ do
     local rail_line=frame(shell,20,97,660,1,theme.line)
     local top_line=frame(shell,20,54,660,1,theme.line)
     local logo=label(shell,"Pivot",20,12,100,28,19,theme.text); logo.Font=Enum.Font.SourceSansBold; logo.TextXAlignment=Enum.TextXAlignment.Left
-    local build_label=label(shell,"BUILD 2026.11.03.7",242,17,150,18,10,theme.muted); build_label.Name="PivotBuild"; build_label.Font=Enum.Font.RobotoMono; build_label.TextWrapped=false
+    local build_label=label(shell,"BUILD 2026.11.03.8",242,17,150,18,10,theme.muted); build_label.Name="PivotBuild"; build_label.Font=Enum.Font.RobotoMono; build_label.TextWrapped=false
     local heading=label(shell,"Practical Basketball",94,14,240,26,11,theme.muted); heading.Font=Enum.Font.SourceSansSemibold
     close.BackgroundColor3=theme.rail; close.TextColor3=theme.muted; close.TextSize=14; corner(close,4)
     local search=make("TextBox",{Text="",PlaceholderText="Find a control...",PlaceholderColor3=theme.muted,Position=UDim2.fromOffset(484,10),Size=UDim2.fromOffset(166,23),
@@ -3467,6 +3675,7 @@ do
     local visual_page=make("ScrollingFrame",{Name="PivotVisualPlus",Position=UDim2.fromOffset(20,112),Size=UDim2.new(1,-34,1,-174),BackgroundTransparency=1,BorderSizePixel=0,ScrollBarThickness=3,Visible=false,CanvasSize=UDim2.fromOffset(0,0)},window)
     local visual_section="Ball"; local visual_character_open=false; local visual_ball_details=false; local visual_trail_details=false
     local visual_wings_open=false; local visual_aura_open=false; local visual_impacts_open=false
+    local visual_lightning_open=false; local visual_rim_open=false
     local tabs={"All","Saved modules","Shooting","Dribbling","Cosmetics","Character","Player","Defense","Visuals","World","Camera","Recorder","Options"}
     local category="All"; local rows={}; local fields={}; local y=0
     local container=page
@@ -3680,16 +3889,20 @@ do
             y=0
             local header=text("Visual+",22,theme.text,30); header.Font=Enum.Font.SourceSansSemibold
             text("Local cosmetics · Save profile keeps your selections",12,theme.muted,window.Size.X.Offset<560 and 38 or 24)
-            local categories={"Ball","Court","Outfit","Effects","Lighting","HUD"}
-            local nav=own(make("Frame",{Name="VisualSections",Position=UDim2.fromOffset(0,y),Size=UDim2.new(1,-6,0,38),BackgroundTransparency=1},container)); y=y+48
+            local categories={"Ball","Court","Outfit","Effects","Lighting","HUD","Loadouts"}
+            local columns=window.Size.X.Offset<560 and 4 or 7; local nav_height=columns==4 and 76 or 38
+            local nav=own(make("Frame",{Name="VisualSections",Position=UDim2.fromOffset(0,y),Size=UDim2.new(1,-6,0,nav_height),BackgroundTransparency=1},container)); y=y+nav_height+10
             for i,name in ipairs(categories) do
                 local b=ui.button(nav,name,function() visual_section=name; page.CanvasPosition=Vector2.new(0,0); rebuild() end)
-                b.Name="VisualSection_"..name; b.Position=UDim2.new((i-1)/6,0,0,0); b.Size=UDim2.new(1/6,-5,0,34); b.BackgroundColor3=visual_section==name and theme.selected or theme.panel
+                b.Name="VisualSection_"..name; b.Position=UDim2.new(((i-1)%columns)/columns,0,0,math.floor((i-1)/columns)*38); b.Size=UDim2.new(1/columns,-5,0,34); b.BackgroundColor3=visual_section==name and theme.selected or theme.panel
             end
             local function module_toggle(id)
                 local definition=engine.registry.definitions[id]
                 toggle_action(definition.title,function() return engine.registry.active[id]~=nil end,function(on)
-                    if on then local ok,err=engine.registry:enable(id,engine.settings); assert(ok,err) else engine.registry:disable(id) end
+                    if on then
+                        if id=="wing_trails" and not engine.registry.active.wings then local ok,err=engine.registry:enable("wings",engine.settings); assert(ok,err) end
+                        local ok,err=engine.registry:enable(id,engine.settings); assert(ok,err)
+                    else engine.registry:disable(id) end
                 end)
             end
             local function controls(id)
@@ -3751,11 +3964,26 @@ do
                 module_toggle("outfit_tint"); field("jersey_color","Jersey tint"); field("shoe_color","Shoes / effect color")
                 for _,entry in ipairs({{"outfit_jersey","Tint jersey / shorts"},{"outfit_shoes","Tint shoes"},{"outfit_accessories","Tint accessories"}}) do local key=entry[1]; toggle_action(entry[2],function() return engine.settings[key] end,function(on) engine.settings[key]=on end) end
             elseif visual_section=="Effects" then
+                module_toggle("lightning_aura")
+                action(visual_lightning_open and "Lightning controls  −" or "Lightning controls  +",function() visual_lightning_open=not visual_lightning_open; rebuild() end)
+                if visual_lightning_open then
+                    field("lightning_color","Bolt color"); field("lightning_core_color","Bolt core color"); field("lightning_size","Bolt spread"); field("lightning_intensity","Bolt intensity"); field("lightning_rate","Bolt refresh rate")
+                    toggle_action("Motion streaks",function() return engine.settings.lightning_motion end,function(on) engine.settings.lightning_motion=on end)
+                end
+                module_toggle("rim_effects")
+                action(visual_rim_open and "Rim controls  −" or "Rim controls  +",function() visual_rim_open=not visual_rim_open; rebuild() end)
+                if visual_rim_open then
+                    field("rim_color","Rim color")
+                    for _,entry in ipairs({{"rim_glow","Rim glow"},{"rim_animated","Animated rim color"},{"rim_flash","Basket flash"}}) do local key=entry[1]; toggle_action(entry[2],function() return engine.settings[key] end,function(on) engine.settings[key]=on end) end
+                    field("rim_flash_duration","Flash duration"); action("Preview rim flash",function() engine:preview_rim_flash() end)
+                    text("Basket flashes follow local downward rim crossings.",12,theme.muted,30)
+                end
                 module_toggle("wings")
                 action(visual_wings_open and "Wing controls  −" or "Wing controls  +",function() visual_wings_open=not visual_wings_open; rebuild() end)
                 if visual_wings_open then
                     choice("wings_style","Wing style",{"Feather","Bat","Energy"}); field("wings_color","Wing color"); field("wings_tip_color","Tip color"); field("wings_scale","Wing size"); field("wings_opacity","Wing opacity")
                     toggle_action("Animate wings",function() return engine.settings.wings_flap end,function(on) engine.settings.wings_flap=on end); field("wings_speed","Flap speed")
+                    module_toggle("wing_trails"); field("wing_trail_color","Wing trail color"); field("wing_trail_lifetime","Wing trail duration"); field("wing_trail_width","Wing trail width"); field("wing_trail_opacity","Wing trail opacity")
                 end
                 module_toggle("character_aura")
                 action(visual_aura_open and "Aura controls  −" or "Aura controls  +",function() visual_aura_open=not visual_aura_open; rebuild() end)
@@ -3773,6 +4001,19 @@ do
                 module_toggle("lighting_preset"); choice("lighting_preset","Lighting preset",{"Warm gym","Cool arena","Sunset","Night"}); field("lighting_intensity","Color grade intensity")
                 text("Disable Sky and other lighting overrides before using Lighting preset.",12,theme.muted,34)
                 module_toggle("sky"); controls("sky")
+            elseif visual_section=="Loadouts" then
+                text("Save your outfit, wings, aura, ball, court and lighting as one look.",12,theme.muted,38)
+                if engine.cosmetic_loadout_status then text(engine.cosmetic_loadout_status,12,theme.muted,60) end
+                field("cosmetic_loadout_name","Look name")
+                action("Save current look",function() engine:save_cosmetic_loadout(fields.cosmetic_loadout_name.Text); rebuild() end)
+                action("Refresh looks from disk",function() local count=engine:read_cosmetic_loadouts(); report("Read "..count.." cosmetic loadouts"); rebuild() end)
+                for i,item in ipairs(engine.cosmetic_loadouts.loadouts) do
+                    local index=i
+                    local b=action(item.name.." · "..#item.enabled.." cosmetics · Load",function() engine:load_cosmetic_loadout(index); rebuild() end); b.Size=UDim2.new(1,-50,0,30)
+                    local remove=own(ui.button(container,"×",function() local ok,err=pcall(function() engine:remove_cosmetic_loadout(index); rebuild() end); if not ok then report(tostring(err)) end end)); remove.Position=UDim2.new(1,-42,0,y-36); remove.Size=UDim2.fromOffset(34,30)
+                    local names={}; for _,id in ipairs(item.enabled) do names[#names+1]=engine.registry.definitions[id].title end
+                    text(#names>0 and table.concat(names,", ") or "Original appearance / cosmetic effects off",12,theme.muted,38)
+                end
             else
                 choice("theme_mode","Menu theme",{"Graphite","Slate","Light"})
                 toggle_action("Theme editor",function() return engine.settings.theme_custom end,function(on) engine.settings.theme_custom=on; ui.set_theme(engine.settings.theme_mode); ui.edit_theme(engine.settings); rebuild() end)
