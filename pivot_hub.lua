@@ -212,12 +212,16 @@ function Core.animation_release(scope,deps)
         if not code or code%1~=0 or code<1 or code>8 or #self.pending==0 then return end
         local pending=table.remove(self.pending,1)
         telemetry({kind="feedback",code=code,shot=pending.shot,name=pending.name,ratio=pending.ratio,locked=pending.profile.perfect})
-        if deps.calibrate and not deps.calibrate() then return end
+        if deps.calibrate and not deps.calibrate() then
+            if code==5 then pending.profile.ratio=pending.ratio; pending.profile.perfect=true; if deps.changed then deps.changed() end end
+            return
+        end
         local p=pending.profile; local early=code<=3; local late=code>=6
         if early then p.early=math.max(p.early or .25,pending.ratio)
         elseif late then p.late=math.min(p.late or .85,pending.ratio)
         else
             if code==5 then
+                p.ratio=pending.ratio
                 p.perfect=true; p.good_center=nil; p.good_attempt=0
                 deps.report("Perfect release / keeping timing")
             elseif (deps.refine_good and deps.refine_good() or not deps.refine_good and p.dunk) and not p.perfect then
@@ -231,6 +235,7 @@ function Core.animation_release(scope,deps)
                 if attempt>=6 then p.good_attempt=0 end
                 deps.report("Good release / testing a nearby release phase")
             else deps.report("Good release / keeping timing") end
+            if deps.changed then deps.changed() end
             return
         end
         p.perfect=false; p.good_center=nil; p.good_attempt=0
@@ -244,6 +249,7 @@ function Core.animation_release(scope,deps)
         end
         p.ratio=math.max(.25,math.min(p.ceiling or .85,p.ratio))
         deps.report(late and "Late feedback / next release earlier" or "Early feedback / next release later")
+        if deps.changed then deps.changed() end
     end
     local function release_time(track)
         if state.metadata[track]==nil then
@@ -794,7 +800,7 @@ local function create_pivot_modules(ctx)
                 return ok and math.max(0,math.min(.25,ping*Engine.settings.ping_factor)) or 0
             end,
             calibrate=function() return Engine.settings.auto_calibrate end,
-            refine_good=function() return Engine.settings.refine_good end,
+            refine_good=function() return Engine.settings.practice_refinement end,
             snapshot=function()
                 local c=current(); local a=c and c.data and c.data.Attributes or {}; local movement=c and c.Movement and c.Movement.lastMoveDirection; local offset=a.meterOffset
                 return {movement=movement and movement.Magnitude,shot_speed=a.ShotSpeed,meter_x=offset and offset.X,meter_y=offset and offset.Y,animation=a.BaseAnimation}
@@ -824,6 +830,54 @@ local function create_pivot_modules(ctx)
         }
     end
     Engine.release_profiles={}
+    Engine.settings.practice_refinement=false
+    Engine.release_storage_status="No saved shot timing yet"
+    local timing_file="pivot_release_timings.json"
+    local timing_game=tostring(game.GameId or game.PlaceId or 0)
+    local timing_user=tostring(ctx.player.UserId or 0)
+    function Engine:validate_release_timings(data)
+        assert(type(data)=="table" and data.version==1 and data.game==timing_game and data.user==timing_user,"Shot timing file belongs to a different game or player")
+        assert(type(data.profiles)=="table","Invalid shot timing profiles")
+        local result={}; local count=0
+        for key,item in pairs(data.profiles) do
+            count=count+1; assert(count<=512,"Too many shot timing profiles")
+            assert(type(key)=="string" and #key<=300 and type(item)=="table","Invalid shot timing entry")
+            local ratio=Core.bounded(item.ratio,.25,.85); assert(ratio,"Invalid saved release ratio")
+            local copy={ratio=ratio}
+            for _,field in ipairs({"early","late","ceiling","good_center"}) do if item[field]~=nil then copy[field]=assert(Core.bounded(item[field],.25,.85),"Invalid timing bound") end end
+            for _,field in ipairs({"perfect","dunk"}) do if item[field]~=nil then assert(type(item[field])=="boolean","Invalid timing flag"); copy[field]=item[field] end end
+            if item.good_attempt~=nil then assert(type(item.good_attempt)=="number" and item.good_attempt%1==0 and item.good_attempt>=0 and item.good_attempt<=6,"Invalid refinement count"); copy.good_attempt=item.good_attempt end
+            result[key]=copy
+        end
+        return result,count
+    end
+    function Engine:save_release_timings()
+        local data={version=1,game=timing_game,user=timing_user,profiles=self.release_profiles}
+        self:validate_release_timings(data)
+        assert(type(writefile)=="function","File writing unavailable")
+        local raw=game:GetService("HttpService"):JSONEncode(data)
+        writefile(timing_file,raw)
+        assert(type(readfile)=="function" and readfile(timing_file)==raw,"Shot timing file readback failed")
+        self.release_storage_status="Shot timing saved automatically"
+    end
+    function Engine:read_release_timings()
+        assert(type(readfile)=="function","File reading unavailable")
+        local raw=readfile(timing_file); assert(type(raw)=="string" and #raw<=262144,"Shot timing file is too large")
+        local profiles,count=self:validate_release_timings(game:GetService("HttpService"):JSONDecode(raw))
+        -- Preserve the table used by an active Auto Green instance.
+        for key in pairs(self.release_profiles) do self.release_profiles[key]=nil end
+        for key,item in pairs(profiles) do self.release_profiles[key]=item end
+        self.release_storage_status="Restored "..count.." saved shot timings"; return count
+    end
+    function Engine:timing_changed()
+        local ok,err=pcall(function() self:save_release_timings() end)
+        if not ok then self.release_storage_status="Shot timing kept this session only: "..tostring(err); ctx.report(self.release_storage_status) end
+    end
+    if type(readfile)=="function" then
+        local ok,err=pcall(function() Engine:read_release_timings() end)
+        if not ok and type(isfile)=="function" then local exists,found=pcall(isfile,timing_file); if exists and found then Engine.release_storage_status="Saved timing could not load: "..tostring(err) end end
+    end
+
     add("meter_release","Auto Green","Shooting","Earlier animation release with automatic Early/Late correction. Keyboard/controller. Live green timing remains experimental.",{start=function(scope)
         character()
         local adapter=shooting_adapter()
@@ -831,10 +885,11 @@ local function create_pivot_modules(ctx)
         adapter.report=ctx.report
         adapter.failed=function(err) registry:disable("meter_release"); ctx.report("Auto release stopped / "..err) end
         adapter.profiles=Engine.release_profiles
+        adapter.changed=function() Engine:timing_changed() end
         local state=Core.animation_release(scope,adapter)
         if Engine.attach_shot_hud then Engine:attach_shot_hud(scope) end
         local feedback=adapter.feedback(scope,function(code) state:feedback(code) end)
-        state:step(); assert(not state.error,state.error); ctx.report(feedback and "Auto release on / automatic feedback correction" or "Auto release on / feedback correction unavailable")
+        state:step(); assert(not state.error,state.error); ctx.report("Auto Green on / "..Engine.release_storage_status..(feedback and "" or " / feedback unavailable"))
         return state
     end,step=function(_,state,_,dt) state:step(dt) end})
     local function feedback_hook(scope)
@@ -2163,7 +2218,7 @@ local function create_pivot_modules(ctx)
     end,conflicts={"dribble_macros","auto_ankle"}})
     if type(readfile)=="function" then pcall(function() Engine:read_dribble_library() end) end
 
-    Engine.build="2026.11.03.1"
+    Engine.build="2026.11.03.2"
     local s=Engine.settings
     local defaults={ball_finish="Custom",court_preset="Custom",lighting_preset="Warm gym",lighting_intensity=.65,shoe_color="#B79AFF",jersey_color="#FFFFFF",shoe_trail=true,landing_particles=true,effect_strength=.5,indicator_style="Ring",indicator_color="#B79AFF",indicator_radius=2.6,indicator_opacity=.7,green_style="Badge",green_color="#89DEAC",green_duration=.7,outfit_jersey=true,outfit_shoes=true,outfit_accessories=false}
     for key,value in pairs(defaults) do s[key]=value end
@@ -2303,7 +2358,7 @@ local function create_pivot_modules(ctx)
         if kind=="feedback" then
             stats.total=stats.total+1
             if event.code==5 then stats.perfect=stats.perfect+1; stats.last="Perfect · timing retained"
-            elseif event.code==4 then stats.good=stats.good+1; stats.last=event.locked and "Good · keeping established timing" or self.settings.refine_good and "Good · refining nearby timing" or "Good"
+            elseif event.code==4 then stats.good=stats.good+1; stats.last=event.locked and "Good · keeping established timing" or self.settings.practice_refinement and "Good · refining nearby timing" or "Good · timing retained"
             elseif event.code<=3 then stats.early=stats.early+1; stats.last="Early · next release later"
             else stats.late=stats.late+1; stats.last="Late · next release earlier" end
             if not self.settings.auto_calibrate and event.code~=5 then stats.last=(event.code<=3 and "Early" or event.code>=6 and "Late" or "Good").." · auto correct off" end
@@ -2922,7 +2977,7 @@ do
     local rail_line=frame(shell,20,97,660,1,theme.line)
     local top_line=frame(shell,20,54,660,1,theme.line)
     local logo=label(shell,"Pivot",20,12,100,28,19,theme.text); logo.Font=Enum.Font.SourceSansBold; logo.TextXAlignment=Enum.TextXAlignment.Left
-    local build_label=label(shell,"BUILD 2026.11.03.1",242,17,150,18,10,theme.muted); build_label.Name="PivotBuild"; build_label.Font=Enum.Font.RobotoMono; build_label.TextWrapped=false
+    local build_label=label(shell,"BUILD 2026.11.03.2",242,17,150,18,10,theme.muted); build_label.Name="PivotBuild"; build_label.Font=Enum.Font.RobotoMono; build_label.TextWrapped=false
     local heading=label(shell,"Practical Basketball",94,14,240,26,11,theme.muted); heading.Font=Enum.Font.SourceSansSemibold
     close.BackgroundColor3=theme.rail; close.TextColor3=theme.muted; close.TextSize=14; corner(close,4)
     local search=make("TextBox",{Text="",PlaceholderText="Find a control...",PlaceholderColor3=theme.muted,Position=UDim2.fromOffset(484,10),Size=UDim2.fromOffset(166,23),
@@ -3716,8 +3771,9 @@ do
                             end
 
                         elseif id=="meter_release" then
+                            text(engine.release_storage_status,12,theme.muted,38)
                             toggle_action("Auto correct",function() return engine.settings.auto_calibrate end,function(on) engine.settings.auto_calibrate=on end)
-                            toggle_action("Refine Good results",function() return engine.settings.refine_good end,function(on) engine.settings.refine_good=on end)
+                            toggle_action("Practice refinement",function() return engine.settings.practice_refinement end,function(on) engine.settings.practice_refinement=on end)
                             toggle_action("Perfect rate HUD",function() return engine.settings.shot_hud end,function(on) engine.settings.shot_hud=on end)
                             action("Copy release diagnostics",function() export(engine.shot_stats) end)
                             toggle_action("Ping compensation",function() return engine.settings.ping_compensation end,function(on) engine.settings.ping_compensation=on end)
