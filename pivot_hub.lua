@@ -2252,7 +2252,7 @@ local function create_pivot_modules(ctx)
     end,conflicts={"dribble_macros","auto_ankle"}})
     if type(readfile)=="function" then pcall(function() Engine:read_dribble_library() end) end
 
-    Engine.build="2026.11.04.2"
+    Engine.build="2026.11.04.3"
     local s=Engine.settings
     local defaults={ball_finish="Custom",court_preset="Custom",lighting_preset="Warm gym",lighting_intensity=.65,shoe_color="#B79AFF",jersey_color="#FFFFFF",shoe_trail=true,landing_particles=true,effect_strength=.5,indicator_style="Ring",indicator_color="#B79AFF",indicator_radius=2.6,indicator_opacity=.7,green_style="Badge",green_color="#89DEAC",green_duration=.7,outfit_jersey=true,outfit_shoes=true,outfit_accessories=false}
     for key,value in pairs(defaults) do s[key]=value end
@@ -3465,14 +3465,111 @@ do
     local function frame(parent,x,y,w,h,color)
         return make("Frame",{Position=UDim2.fromOffset(x,y),Size=UDim2.fromOffset(w,h),BackgroundColor3=color or theme.panel,BorderSizePixel=0},parent)
     end
-    local function animate(object,properties)
+    local animation_jobs=setmetatable({},{__mode="k"})
+    local function cancel_animation(object)
+        local job=animation_jobs[object]; animation_jobs[object]=nil; if job then pcall(function() job:Cancel() end) end
+    end
+    local function animate(object,properties,duration)
+        cancel_animation(object)
         local service=game:GetService("TweenService")
         if service then
-            local ok=pcall(function() service:Create(object,TweenInfo.new(.18,Enum.EasingStyle.Quad,Enum.EasingDirection.Out),properties):Play() end)
-            if ok then return end
+            local ok,job=pcall(function() local job=service:Create(object,TweenInfo.new(duration or .16,Enum.EasingStyle.Quad,Enum.EasingDirection.Out),properties); animation_jobs[object]=job; job:Play(); return job end)
+            if ok then return job end
         end
         for key,value in pairs(properties) do object[key]=value end
     end
+    local hover_states={}
+    local function hover_button(button,options)
+        if hover_states[button] then return end
+        options=options or {}
+        local target=options.surface or button; local radius=options.rounding or 6; local inset=options.inset or 0
+        local outline=make("Frame",{Name="PivotHoverLift",Position=UDim2.fromOffset(inset,inset),Size=UDim2.new(1,-inset*2,1,-inset*2),BackgroundTransparency=1,BorderSizePixel=0,ZIndex=3},target)
+        corner(outline,radius); local edge=border(outline,theme.accent); edge.Transparency=1
+        local glow=make("Frame",{Name="PivotHoverGlow",Position=UDim2.fromOffset(inset-2,inset),Size=UDim2.new(1,4-inset*2,1,4-inset*2),BackgroundTransparency=1,BorderSizePixel=0,ZIndex=2},target)
+        corner(glow,radius+2); local halo=border(glow,theme.accent); halo.Thickness=4; halo.Transparency=1
+        outline:SetAttribute("PivotFixedColor",true); glow:SetAttribute("PivotFixedColor",true)
+        local state={surface=target,hover=false,pressed=false,color=target.BackgroundColor3,transparency=target.BackgroundTransparency or 0,z=target.ZIndex or 1,texts={},version=0}
+        local links={}
+        local function bind(signal,callback) local c=signal:Connect(callback); links[#links+1]=c; return c end
+        hover_states[button]=state
+        local applying=false
+        local function tween(object,properties,instant,duration)
+            if instant then
+                cancel_animation(object); for key,value in pairs(properties) do object[key]=value end
+            else return animate(object,properties,duration) end
+        end
+        local function paint(instant)
+            if not target.Parent then return end
+            local raised=state.hover and not state.pressed
+            state.version=state.version+1; local version=state.version; state.color_animating=true
+            local growth=raised and (options.growth or 3) or state.pressed and -1 or 0
+            local lift=raised and 2 or 0
+            applying=true
+            target.ZIndex=state.hover and state.z+3 or state.z
+            local fill=state.hover and not target:GetAttribute("PivotFixedColor") and theme.selected or state.color
+            local transparency=state.transparency>=.99 and state.transparency or state.hover and math.min(state.transparency,.15) or state.transparency
+            local job=tween(target,{BackgroundColor3=fill,BackgroundTransparency=transparency},instant,state.pressed and .06 or .14)
+            tween(outline,{Position=UDim2.fromOffset(inset-growth,inset-growth-lift),Size=UDim2.new(1,growth*2-inset*2,1,growth*2-inset*2)},instant,.14)
+            tween(edge,{Color=theme.accent,Thickness=state.pressed and 1.8 or 1.3,Transparency=state.hover and .15 or 1},instant,.12)
+            tween(glow,{Position=UDim2.fromOffset(inset-growth-2,inset-growth+2),Size=UDim2.new(1,growth*2+4-inset*2,1,growth*2+4-inset*2)},instant,.16)
+            tween(halo,{Color=theme.accent,Transparency=raised and .88 or 1},instant,.16)
+            for object,size in pairs(state.texts) do if object.Parent then tween(object,{TextSize=size+(raised and .7 or 0)},instant,.14) end end
+            applying=false
+            if job and job.Completed then
+                local connection
+                connection=job.Completed:Connect(function() if state.version==version then state.color_animating=false end; if connection then connection:Disconnect() end end)
+            else state.color_animating=false end
+        end
+        local function restore_texts()
+            for object,size in pairs(state.restoring_texts or {}) do if object.Parent then cancel_animation(object); object.TextSize=size end end
+            state.restoring_texts=nil
+        end
+        local function enter()
+            if state.hover then return end
+            restore_texts()
+            state.hover=true; state.texts={}
+            if target:IsA("TextButton") and (target.TextTransparency or 0)<1 then state.texts[target]=target.TextSize or 14 end
+            for _,child in ipairs(target:GetChildren()) do if child:IsA("TextLabel") then state.texts[child]=child.TextSize end end
+            paint()
+        end
+        local function leave(instant)
+            state.hover=false; state.pressed=false; paint(instant); state.restoring_texts=not instant and state.texts or nil; state.texts={}
+        end
+        state.reset=function() restore_texts(); if state.hover or state.pressed or state.color_animating then leave(true) end end
+        bind(button.MouseEnter,enter); bind(button.MouseLeave,function() leave(false) end)
+        bind(button.SelectionGained,enter); bind(button.SelectionLost,function() leave(false) end)
+        bind(button.InputBegan,function(event)
+            if event.UserInputType==Enum.UserInputType.MouseButton1 or event.UserInputType==Enum.UserInputType.Touch or event.KeyCode==Enum.KeyCode.ButtonA then enter(); state.pressed=true; paint() end
+        end)
+        bind(button.InputEnded,function(event)
+            if event.UserInputType==Enum.UserInputType.MouseButton1 or event.UserInputType==Enum.UserInputType.Touch or event.KeyCode==Enum.KeyCode.ButtonA then state.pressed=false; paint() end
+        end)
+        bind(target:GetPropertyChangedSignal("BackgroundColor3"),function() if not applying and not state.color_animating then state.color=target.BackgroundColor3 end end)
+        bind(target:GetPropertyChangedSignal("BackgroundTransparency"),function() if not applying and not state.color_animating then state.transparency=target.BackgroundTransparency end end)
+        bind(button.Destroying,function()
+            hover_states[button]=nil
+            for _,object in ipairs({target,outline,glow,edge,halo}) do cancel_animation(object) end
+            for object in pairs(state.texts) do cancel_animation(object) end
+            for object in pairs(state.restoring_texts or {}) do cancel_animation(object) end
+            for _,connection in ipairs(links) do connection:Disconnect() end; links={}
+        end)
+    end
+    local function reset_hovers()
+        for _,state in pairs(hover_states) do state.reset() end
+    end
+    local function release_hover(target)
+        for button,state in pairs(hover_states) do if button==target or state.surface==target then state.reset() end end
+    end
+    local function style_input(box)
+        if box:GetAttribute("PivotInputStyled") then return end; box:SetAttribute("PivotInputStyled",true)
+        corner(box,5); local edge=border(box); edge.Transparency=.6
+        local focused=false
+        local function paint() animate(edge,{Color=focused and theme.accent or theme.line,Transparency=focused and .1 or .6,Thickness=focused and 1.3 or 1},.14) end
+        local links={}
+        links[1]=box.Focused:Connect(function() focused=true; paint() end); links[2]=box.FocusLost:Connect(function() focused=false; paint() end)
+        links[3]=box.Destroying:Connect(function() cancel_animation(edge); for _,connection in ipairs(links) do connection:Disconnect() end end)
+    end
+
     local function icon(parent,kind,x,y,color)
         local root=frame(parent,x,y,20,20); root.Name="LineIcon"; root.BackgroundTransparency=1
         local function line(a,b,c,d)
@@ -3515,11 +3612,11 @@ do
         corner(b,5)
         border(b).Transparency=.6
         on(b.Activated,callback)
-        on(b.MouseEnter,function() if not b:GetAttribute("RailItem") then animate(b,{BackgroundColor3=theme.selected}) end end)
-        on(b.MouseLeave,function() if not b:GetAttribute("RailItem") then animate(b,{BackgroundColor3=theme.panel}) end end)
+        hover_button(b)
         return b
     end
     local shell=gui:FindFirstChildWhichIsA("Frame")
+    on(shell:GetPropertyChangedSignal("Visible"),function() if not shell.Visible then reset_hovers() end end)
     local header,subtitle,status,close,cancel,nav
     local pages,tabs,fields,rows,actions={},{},{},{},{}
     local names={["TIMED RELEASE"]="Shot Lab",["COMBO EDITOR"]="Combos",["PROFILES + HOTKEYS"]="Profiles",RUNTIME="Diagnostics"}
@@ -3541,7 +3638,7 @@ do
     local rail_line=frame(shell,20,97,660,1,theme.line)
     local top_line=frame(shell,20,54,660,1,theme.line)
     local logo=label(shell,"Pivot",20,12,100,28,19,theme.text); logo.Font=Enum.Font.SourceSansBold; logo.TextXAlignment=Enum.TextXAlignment.Left
-    local build_label=label(shell,"BUILD 2026.11.04.2",242,17,150,18,10,theme.muted); build_label.Name="PivotBuild"; build_label.Font=Enum.Font.RobotoMono; build_label.TextWrapped=false
+    local build_label=label(shell,"BUILD 2026.11.04.3",242,17,150,18,10,theme.muted); build_label.Name="PivotBuild"; build_label.Font=Enum.Font.RobotoMono; build_label.TextWrapped=false
     local heading=label(shell,"Practical Basketball",94,14,240,26,11,theme.muted); heading.Font=Enum.Font.SourceSansSemibold
     close.BackgroundColor3=theme.rail; close.TextColor3=theme.muted; close.TextSize=14; corner(close,4)
     local search=make("TextBox",{Text="",PlaceholderText="Find a control...",PlaceholderColor3=theme.muted,Position=UDim2.fromOffset(484,10),Size=UDim2.fromOffset(166,23),
@@ -3563,8 +3660,7 @@ do
         actions[b.Text]=b; b.TextTransparency=1; b.AutoButtonColor=false; b.BackgroundColor3=theme.panel; b.Size=UDim2.new(1,-6,0,30); corner(b,5)
         local display=label(b,aliases[b.Text] or b.Text,8,0,100,30,11); display.Size=UDim2.new(1,-16,1,0); display.TextXAlignment=Enum.TextXAlignment.Center
         on(b:GetPropertyChangedSignal("Text"),function() display.Text=aliases[b.Text] or b.Text:gsub(" / click to cycle"," / select") end)
-        on(b.MouseEnter,function() animate(b,{BackgroundColor3=theme.selected}) end)
-        on(b.MouseLeave,function() animate(b,{BackgroundColor3=theme.panel}) end)
+        hover_button(b)
     end
     for name,page in pairs(pages) do
         page.ScrollBarThickness=2; page.ScrollBarImageColor3=theme.accent
@@ -3584,7 +3680,7 @@ do
                         box.Position=multi and UDim2.fromOffset(12,51) or UDim2.new(1,-104,0,12); box.Size=multi and UDim2.new(1,-24,0,44) or UDim2.fromOffset(92,28); box.MultiLine=multi
                         local outline=border(box)
                         if multi then child.Size=UDim2.new(1,-24,0,20); helper.Size=UDim2.new(1,-24,0,16) end
-                        on(box.Focused,function() outline.Color=theme.accent end); on(box.FocusLost,function() outline.Color=theme.line end)
+                        style_input(box)
                         fields[d[3]]=box; rows[#rows+1]={name=d[1],description=d[2],page=name,row=row}
                     elseif names[child.Text] or name=="Diagnostics" then child.Visible=false
                     else
@@ -3665,6 +3761,7 @@ do
         result_buttons[#result_buttons+1]={button=result,entry={name=title,description=description,page="Modules"}}
     end
     show=function(name)
+        reset_hovers()
         selected=name; result_page.Visible=false; if PivotUI and PivotUI.hide_extra then PivotUI.hide_extra() end
         for key,page in pairs(pages) do page.Visible=key==name end
         heading.Text="Practical Basketball"
@@ -3709,6 +3806,7 @@ do
     status.TextSize=14; status.TextColor3=theme.muted
     cancel.TextTransparency=1; cancel.BackgroundColor3=theme.selected; corner(cancel,4)
     local cancel_text=label(cancel,"Stop all  ·  F8",0,0,96,28,11); cancel_text.TextXAlignment=Enum.TextXAlignment.Center
+    hover_button(close,{rounding=4}); hover_button(cancel,{rounding=4}); style_input(search)
     local scale=shell:FindFirstChildWhichIsA("UIScale")
     local function layout_nav()
         local w=shell.Size.X.Offset
@@ -3794,6 +3892,7 @@ do
         elapsed=0; frames=0
     end)
     local function set_theme(mode)
+        reset_hovers()
         local palettes={
             Graphite={base=rgb(14,17,23),rail=rgb(14,17,23),panel=rgb(20,25,33),input=rgb(16,21,29),line=rgb(34,43,57),text=rgb(229,237,248),muted=rgb(135,150,172),accent=rgb(137,183,245),selected=rgb(27,39,55),green=rgb(159,190,170)},
             Slate={base=rgb(23,28,35),rail=rgb(23,28,35),panel=rgb(31,38,47),input=rgb(26,32,40),line=rgb(48,57,70),text=rgb(229,234,242),muted=rgb(151,163,182),accent=rgb(172,193,220),selected=rgb(43,54,69),green=rgb(159,190,170)},
@@ -3811,6 +3910,7 @@ do
         for key,value in pairs(next_theme) do theme[key]=value end
     end
     local function edit_theme(settings)
+        reset_hovers()
         local custom=settings.theme_custom
         if custom then
             local next_accent=assert((function() local h=settings.ui_accent:match("^#?(%x%x%x%x%x%x)$"); if h then return rgb(tonumber(h:sub(1,2),16),tonumber(h:sub(3,4),16),tonumber(h:sub(5,6),16)) end end)(),"Invalid accent color")
@@ -3836,7 +3936,7 @@ do
         end
         shell.BackgroundTransparency=custom and 1-settings.ui_opacity or 0
     end
-    PivotUI={theme=theme,label=label,button=small_button,pages=pages,rail_items=rail_items,show=show,heading=heading,search=search,cancel=cancel,actions=actions,icon=icon,icon_color=icon_color,animate=animate,add_search=add_search,layout_nav=layout_nav,set_theme=set_theme,edit_theme=edit_theme}
+    PivotUI={theme=theme,label=label,button=small_button,pages=pages,rail_items=rail_items,show=show,heading=heading,search=search,cancel=cancel,actions=actions,icon=icon,icon_color=icon_color,animate=animate,hover=hover_button,release_hover=release_hover,input_style=style_input,add_search=add_search,layout_nav=layout_nav,set_theme=set_theme,edit_theme=edit_theme}
     on(gui.Destroying,function() for _,c in ipairs(connections) do c:Disconnect() end end)
 end
 
@@ -3847,6 +3947,7 @@ do
     local theme=ui.theme
     local function paint_switch(button,on)
         if button:GetAttribute("On")==on then return end
+        if ui.release_hover then ui.release_hover(button); ui.release_hover(button.Parent) end
         button:SetAttribute("On",on)
         local track=button:FindFirstChild("Track"); local knob=track and track:FindFirstChild("Knob")
         if not knob then return end
@@ -3863,6 +3964,7 @@ do
         local knob=make("Frame",{Name="Knob",Size=UDim2.fromOffset(14,14),BorderSizePixel=0},track)
         make("UICorner",{CornerRadius=UDim.new(0,7)},knob)
         connect(button.Activated,callback); paint_switch(button,false)
+        ui.hover(button,{rounding=9,inset=4,growth=1})
         return button
     end
     local page=make("ScrollingFrame",{Name="PivotModules",Position=UDim2.fromOffset(20,112),Size=UDim2.new(1,-34,1,-174),BackgroundTransparency=1,BorderSizePixel=0,ScrollBarThickness=2,Visible=false,CanvasSize=UDim2.fromOffset(0,0)},window)
@@ -3899,11 +4001,13 @@ do
         local label=ui.label(row,caption,10,8,220,20,11,theme.muted); label.Size=UDim2.new(.6,-14,0,20)
         local box=make("TextBox",{Name="Module_"..key,Text=tostring(engine.settings[key]),ClearTextOnFocus=false,Font=Enum.Font.RobotoMono,TextSize=14,TextColor3=theme.text,BackgroundColor3=theme.input,BorderSizePixel=0,Position=UDim2.new(.6,0,0,4),Size=UDim2.new(.4,-6,0,28)},row)
         fields[key]=box; y=y+42
+        ui.input_style(box)
         local range=engine.ranges[key]
         if range then
             row.Size=UDim2.new(1,-6,0,50); y=y+14
             local slider=make("TextButton",{Name="Slider_"..key,Text="",AutoButtonColor=false,Position=UDim2.fromOffset(10,37),Size=UDim2.new(1,-20,0,6),BackgroundColor3=theme.line,BorderSizePixel=0},row)
             make("UICorner",{CornerRadius=UDim.new(0,3)},slider)
+            ui.hover(slider,{rounding=3,growth=1})
             local fill=make("Frame",{BackgroundColor3=theme.accent,BorderSizePixel=0,Size=UDim2.new((engine.settings[key]-range[1])/(range[2]-range[1]),0,1,0)},slider)
             make("UICorner",{CornerRadius=UDim.new(0,3)},fill)
             local dragging
@@ -3933,6 +4037,7 @@ do
         if color then
             local swatch=make("TextButton",{Name="ColorSwatch_"..key,Text="",AutoButtonColor=false,Size=UDim2.fromOffset(24,24),Position=UDim2.new(1,-140,0,6),BackgroundColor3=color,BorderSizePixel=0},row)
             swatch:SetAttribute("PivotFixedColor",true); make("UICorner",{CornerRadius=UDim.new(0,4)},swatch)
+            ui.hover(swatch,{rounding=4,growth=2})
             label.Size=UDim2.new(1,-156,0,20); box.Position=UDim2.new(1,-108,0,4); box.Size=UDim2.fromOffset(102,28)
             connect(swatch.Activated,function() color_expanded=color_expanded==key and nil or key; rebuild() end)
             if color_expanded==key then
@@ -3950,6 +4055,7 @@ do
                 for i,value in ipairs(palette) do
                     local chip=make("TextButton",{Name="ColorPreset_"..key.."_"..i,Text="",AutoButtonColor=false,BackgroundColor3=Core.hex_color(value),BorderSizePixel=0,Position=UDim2.new((i-1)/8,6,0,42),Size=UDim2.new(1/8,-8,0,22)},row)
                     chip:SetAttribute("PivotFixedColor",true); make("UICorner",{CornerRadius=UDim.new(0,4)},chip)
+                    ui.hover(chip,{rounding=4,growth=2})
                     connect(chip.Activated,function() local h=value:sub(2); for channel=1,3 do values[channel]=tonumber(h:sub(channel*2-1,channel*2),16) end; apply() end)
                 end
                 for channel,caption in ipairs({"R","G","B"}) do
@@ -4180,6 +4286,9 @@ do
                     make("Frame",{Name="StateMark",Position=UDim2.fromOffset(0,14),Size=UDim2.fromOffset(3,30),BackgroundColor3=theme.accent,BorderSizePixel=0,Visible=false},card)
                     local title=ui.label(card,engine.registry.definitions[id].title,14,7,300,24,14,theme.text); title.Font=Enum.Font.SourceSansSemibold; title.Size=UDim2.new(1,-112,0,24)
                     local subtitle=ui.label(card,description,14,31,300,18,11,theme.muted); subtitle.Size=UDim2.new(1,-112,0,18); subtitle.TextWrapped=false; subtitle.TextTruncate=Enum.TextTruncate.AtEnd
+                    local hit=make("TextButton",{Name="EffectHeaderHit",Text="",TextTransparency=1,BackgroundTransparency=1,BorderSizePixel=0,Size=UDim2.new(1,-105,0,58)},card)
+                    connect(hit.Activated,function() if engine.registry.active[id] then engine.registry:disable(id) else local ok,err=engine.registry:enable(id,engine.settings); if not ok then report(tostring(err)) end end; update_buttons() end)
+                    ui.hover(hit,{surface=card,rounding=8,growth=2})
                     local detail=ui.button(card,caption..(open and "  −" or "  +"),function() visual_effect_cards[id]=not open; rebuild() end)
                     detail.Name="EffectDetails"; detail.Position=UDim2.new(1,-88,0,13); detail.Size=UDim2.fromOffset(30,30); detail.TextTransparency=1; detail.BackgroundColor3=theme.input
                     local symbol=ui.label(detail,open and "−" or "+",0,0,30,30,16,theme.muted); symbol.TextXAlignment=Enum.TextXAlignment.Center
