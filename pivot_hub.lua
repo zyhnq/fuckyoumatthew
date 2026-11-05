@@ -2252,7 +2252,7 @@ local function create_pivot_modules(ctx)
     end,conflicts={"dribble_macros","auto_ankle"}})
     if type(readfile)=="function" then pcall(function() Engine:read_dribble_library() end) end
 
-    Engine.build="2026.11.04.1"
+    Engine.build="2026.11.04.2"
     local s=Engine.settings
     local defaults={ball_finish="Custom",court_preset="Custom",lighting_preset="Warm gym",lighting_intensity=.65,shoe_color="#B79AFF",jersey_color="#FFFFFF",shoe_trail=true,landing_particles=true,effect_strength=.5,indicator_style="Ring",indicator_color="#B79AFF",indicator_radius=2.6,indicator_opacity=.7,green_style="Badge",green_color="#89DEAC",green_duration=.7,outfit_jersey=true,outfit_shoes=true,outfit_accessories=false}
     for key,value in pairs(defaults) do s[key]=value end
@@ -2393,17 +2393,32 @@ local function create_pivot_modules(ctx)
 
     for key,value in pairs({wings_style="Feather",wings_color="#DCE4FF",wings_tip_color="#A28BFF",wings_scale=1,wings_flap=true,wings_speed=1.4,wings_opacity=.9,aura_style="Sparks",aura_color="#B79AFF",aura_density=18,aura_size=1,aura_opacity=.6,impact_style="Both",impact_color="#B79AFF",impact_size=1,impact_strength=.6}) do s[key]=value end
     for key,value in pairs({wings_scale={.5,2},wings_speed={.2,3},wings_opacity={.2,1},aura_density={4,45},aura_size={.5,2},aura_opacity={.1,1},impact_size={.4,2},impact_strength={.1,1}}) do Engine.ranges[key]=value end
+    s.wings_fold_idle=true; s.wings_fold=.35; Engine.ranges.wings_fold={0,.8}
     local function effect_part(scope,parent,name,class)
         local p=new_local(scope,class or "Part",parent); p.Name=name; p.Anchored=true; p.CanCollide=false; p.CanTouch=false; p.CanQuery=false; p.CastShadow=false; p.Material=Enum.Material.SmoothPlastic; p.Transparency=1; return p
     end
     add("wings","Wings","Visual+","Animated feather, bat or energy wings with independent colors and scale",{start=function(scope)
         scope:defer(function() registry:disable("wing_trails") end)
         local folder=new_local(scope,"Folder",workspace); folder.Name="PivotWings"
-        local feathers={}; for _,side in ipairs({-1,1}) do for i=1,9 do feathers[#feathers+1]={part=effect_part(scope,folder,"WingFeather","WedgePart"),side=side,index=i} end end
-        return {folder=folder,feathers=feathers}
-    end,step=function(_,state,settings)
+        local feathers,coverts,bones={},{},{}
+        for _,side in ipairs({-1,1}) do
+            for i=1,9 do
+                local p=effect_part(scope,folder,"FlightFeather"); local mesh=new_local(scope,"SpecialMesh",p); mesh.MeshType=Enum.MeshType.Sphere
+                feathers[#feathers+1]={part=p,mesh=mesh,side=side,index=i}
+                local c=effect_part(scope,folder,"LayeredFeather"); local cm=new_local(scope,"SpecialMesh",c); cm.MeshType=Enum.MeshType.Sphere
+                coverts[#coverts+1]={part=c,mesh=cm,side=side,index=i}
+            end
+            for i=1,2 do local p=effect_part(scope,folder,"WingSpar"); local mesh=new_local(scope,"SpecialMesh",p); mesh.MeshType=Enum.MeshType.Sphere; bones[#bones+1]={part=p,side=side,index=i} end
+        end
+        return {folder=folder,feathers=feathers,coverts=coverts,bones=bones,openness=1}
+    end,step=function(_,state,settings,dt)
         local model=rig(); local torso=model and (model:FindFirstChild("UpperTorso") or model:FindFirstChild("Torso") or root())
-        local time=os.clock(); local flap=settings.wings_flap and math.sin(time*settings.wings_speed*math.pi)*.22 or 0
+        local time=os.clock(); local r=root(); local speed=r and r.AssemblyLinearVelocity and r.AssemblyLinearVelocity.Magnitude or 0
+        if r and state.last_position and dt and dt>0 then local distance=(r.Position-state.last_position).Magnitude; if distance<8 then speed=math.max(speed,distance/dt) end end
+        state.last_position=r and r.Position
+        local target=settings.wings_fold_idle and 1-settings.wings_fold*(1-math.min(1,speed/16)) or 1
+        state.openness=state.openness+(target-state.openness)*(1-math.exp(-7*(dt or .02)))
+        local flap=settings.wings_flap and math.sin(time*settings.wings_speed*math.pi)*(.1+.12*state.openness) or 0
         local color=cosmetic_color(settings.wings_color); local tip=cosmetic_color(settings.wings_tip_color); local scale=settings.wings_scale
         for _,entry in ipairs(state.feathers) do
             local p,i,side=entry.part,entry.index,entry.side
@@ -2411,11 +2426,31 @@ local function create_pivot_modules(ctx)
             p.Transparency=visible and 1-settings.wings_opacity or 1
             if visible then
                 local bat=settings.wings_style=="Bat"; local energy=settings.wings_style=="Energy"
-                local length=bat and (i<=3 and 2.5-i*.18 or 1.25) or 2.65-i*.14
-                p.Size=Vector3.new((bat and .85 or energy and .2 or .4)*scale,length*scale,.12*scale)
-                p.Color=i%3==0 and tip or color; p.Material=energy and Enum.Material.Neon or Enum.Material.SmoothPlastic
-                local mount=torso.CFrame*CFrame.new(side*.25,.45,.65)*CFrame.Angles(0,side*(.18+flap),0)
-                p.CFrame=mount*CFrame.new(side*(.55+i*.25)*scale,(.5-i*.075)*scale,.08*i*scale)*CFrame.Angles(0,0,side*(-.48-i*.085))
+                local length=bat and (i<=3 and 2.5-i*.18 or 1.25) or 1.35+i*.13
+                p.Size=Vector3.new((bat and .9 or energy and .2 or .38)*scale,length*scale,.13*scale)
+                entry.mesh.MeshType=bat and Enum.MeshType.Wedge or Enum.MeshType.Sphere
+                p.Color=i>=7 and tip or color; p.Material=energy and Enum.Material.Neon or Enum.Material.SmoothPlastic
+                local mount=torso.CFrame*CFrame.new(side*.25,.45,.75)*CFrame.Angles(0,side*(.18+flap+(1-state.openness)*.8),0)
+                p.CFrame=mount*CFrame.new(side*(.55+i*.25)*scale*state.openness,(.62-i*.075+math.sin(i/9*math.pi)*.2)*scale,.07*i*scale)*CFrame.Angles(0,0,side*(-.95+i*.055))
+            end
+        end
+        for _,entry in ipairs(state.coverts) do
+            local p,i,side=entry.part,entry.index,entry.side
+            local visible=torso~=nil and settings.wings_style~="Bat"
+            p.Transparency=visible and 1-settings.wings_opacity or 1
+            if visible then
+                local mount=torso.CFrame*CFrame.new(side*.25,.45,.72)*CFrame.Angles(0,side*(.18+flap+(1-state.openness)*.8),0)
+                p.Size=Vector3.new(.34*scale,(.6+i*.045)*scale,.16*scale); p.Color=i>=8 and tip or color; p.Material=settings.wings_style=="Energy" and Enum.Material.Neon or Enum.Material.SmoothPlastic
+                p.CFrame=mount*CFrame.new(side*(.35+i*.22)*scale*state.openness,(.95-i*.045)*scale,.045*i*scale)*CFrame.Angles(0,0,side*(-.9+i*.045))
+            end
+        end
+        for _,entry in ipairs(state.bones) do
+            local p,side=entry.part,entry.side; p.Transparency=torso and 1-settings.wings_opacity or 1
+            if torso then
+                local mount=torso.CFrame*CFrame.new(side*.25,.45,.7)*CFrame.Angles(0,side*(.18+flap+(1-state.openness)*.8),0)
+                local a=(mount*CFrame.new(side*(entry.index-1)*1.2*scale*state.openness,.9*scale,.08)).Position
+                local b=(mount*CFrame.new(side*entry.index*1.2*scale*state.openness,(entry.index==1 and 1.15 or .9)*scale,.25)).Position
+                p.Size=Vector3.new(.16*scale,.16*scale,(b-a).Magnitude); p.CFrame=CFrame.new((a+b)/2,b); p.Color=tip
             end
         end
     end,interval=.02})
@@ -2515,6 +2550,7 @@ local function create_pivot_modules(ctx)
 
     for key,value in pairs({lightning_color="#82CFFF",lightning_core_color="#F0FBFF",lightning_size=1,lightning_intensity=.75,lightning_rate=8,lightning_motion=true,wing_trail_color="#B79AFF",wing_trail_lifetime=.3,wing_trail_width=.25,wing_trail_opacity=.65,rim_color="#B79AFF",rim_animated=false,rim_glow=true,rim_flash=true,rim_flash_duration=.45}) do s[key]=value end
     for key,value in pairs({lightning_size={.5,2},lightning_intensity={.1,1},lightning_rate={2,14},wing_trail_lifetime={.1,1},wing_trail_width={.05,.8},wing_trail_opacity={.1,1},rim_flash_duration={.15,1}}) do Engine.ranges[key]=value end
+    s.lightning_branches=true; s.lightning_smoothness=.65; Engine.ranges.lightning_smoothness={0,1}
     add("lightning_aura","Lightning aura","Visual+","Animated branching bolts around your body, with motion streaks while running",{start=function(scope)
         local folder=new_local(scope,"Folder",workspace); folder.Name="PivotLightningAura"
         local bolts={}
@@ -2525,17 +2561,24 @@ local function create_pivot_modules(ctx)
                 local core=effect_part(scope,folder,"LightningCore"); core.Material=Enum.Material.Neon
                 segments[n]={glow=glow,core=core}
             end
-            bolts[i]={segments=segments,next_shape=0,points={}}
+            local branches={}
+            for n=1,2 do local glow=effect_part(scope,folder,"LightningBranchGlow"); glow.Material=Enum.Material.Neon; local core=effect_part(scope,folder,"LightningBranchCore"); core.Material=Enum.Material.Neon; branches[n]={glow=glow,core=core} end
+            bolts[i]={segments=segments,branches=branches,next_shape=0,points={}}
         end
-        return {bolts=bolts,folder=folder}
-    end,step=function(_,state,settings)
+        return {bolts=bolts,folder=folder,speed=0}
+    end,step=function(_,state,settings,dt)
         local r=root(); local now=os.clock(); local count=math.floor(2+settings.lightning_intensity*4)
         local color=cosmetic_color(settings.lightning_color); local core_color=cosmetic_color(settings.lightning_core_color)
         local speed=r and r.AssemblyLinearVelocity and r.AssemblyLinearVelocity.Magnitude or 0
-        local stretch=settings.lightning_motion and math.min(2.2,speed/12) or 0
+        if r and state.last_position and dt and dt>0 then local distance=(r.Position-state.last_position).Magnitude; if distance<8 then speed=math.max(speed,distance/dt) end end
+        state.last_position=r and r.Position
+        state.speed=state.speed+(speed-state.speed)*(1-math.exp(-9*(dt or .02)))
+        if settings.lightning_motion and state.speed>12 then count=math.min(6,count+1) end
+        local stretch=settings.lightning_motion and math.min(2.2,state.speed/12) or 0
         for i,bolt in ipairs(state.bolts) do
             if now>=bolt.next_shape then
-                bolt.next_shape=now+1/settings.lightning_rate; bolt.visible_until=now+.85/settings.lightning_rate
+                bolt.born=now; bolt.lifetime=(.85+(i%3)*.13)/settings.lightning_rate; bolt.next_shape=now+bolt.lifetime
+                bolt.previous_points=bolt.points
                 local angle=i*math.pi/3+math.random()*.6; local points={}
                 for n=0,5 do
                     local phase=angle+n*.22; local radius=(.95+math.random()*.45)*settings.lightning_size
@@ -2543,15 +2586,32 @@ local function create_pivot_modules(ctx)
                     points[n+1]=Vector3.new(math.cos(phase)*radius+(jitter and 0 or (math.random()-.5)*.55), (1.5-n*.57+(math.random()-.5)*.3)*settings.lightning_size,math.sin(phase)*radius+stretch*n/5)
                 end
                 bolt.points=points
+                bolt.branch_tip=points[3]+Vector3.new((i%2==0 and 1 or -1)*(.4+math.random()*.45),-.35,.2)
             end
-            local visible=r~=nil and i<=count and now<(bolt.visible_until or 0)
+            local visible=r~=nil and i<=count
+            local phase=math.max(0,math.min(1,(now-(bolt.born or now))/(bolt.lifetime or .1)))
+            local envelope=math.max(0,math.sin(phase*math.pi))
+            local blend=settings.lightning_smoothness>0 and math.min(1,phase/(.05+settings.lightning_smoothness*.3)) or 1
+            local display={}
+            for n,point in ipairs(bolt.points) do local previous=bolt.previous_points[n]; display[n]=previous and previous+(point-previous)*blend or point end
             for n,segment in ipairs(bolt.segments) do
-                segment.glow.Transparency=visible and .45 or 1; segment.core.Transparency=visible and .05 or 1
+                segment.glow.Transparency=visible and 1-envelope*.55 or 1; segment.core.Transparency=visible and 1-envelope*.95 or 1
                 if visible then
-                    local a=(r.CFrame*CFrame.new(bolt.points[n])).Position; local b=(r.CFrame*CFrame.new(bolt.points[n+1])).Position
+                    local a=(r.CFrame*CFrame.new(display[n])).Position; local b=(r.CFrame*CFrame.new(display[n+1])).Position
                     local length=(b-a).Magnitude; local frame=CFrame.new((a+b)/2,b)
                     local width=(.035+settings.lightning_intensity*.035)*settings.lightning_size
                     segment.glow.Size=Vector3.new(width*2.4,width*2.4,length); segment.core.Size=Vector3.new(width*.5,width*.5,length)
+                    segment.glow.CFrame=frame; segment.core.CFrame=frame; segment.glow.Color=color; segment.core.Color=core_color
+                end
+            end
+            local branch_points={display[3],(display[3]+bolt.branch_tip)/2+Vector3.new(.1,-.12,.14),bolt.branch_tip}
+            for n,segment in ipairs(bolt.branches) do
+                local shown=visible and settings.lightning_branches
+                segment.glow.Transparency=shown and 1-envelope*.4 or 1; segment.core.Transparency=shown and 1-envelope*.75 or 1
+                if shown then
+                    local a=(r.CFrame*CFrame.new(branch_points[n])).Position; local b=(r.CFrame*CFrame.new(branch_points[n+1])).Position
+                    local width=.025*settings.lightning_size; local frame=CFrame.new((a+b)/2,b); local length=(b-a).Magnitude
+                    segment.glow.Size=Vector3.new(width*2.4,width*2.4,length); segment.core.Size=Vector3.new(width*.6,width*.6,length)
                     segment.glow.CFrame=frame; segment.core.CFrame=frame; segment.glow.Color=color; segment.core.Color=core_color
                 end
             end
@@ -3393,8 +3453,8 @@ do
         object.Parent=parent; return object
     end
     local function rgb(r,g,b) return Color3.fromRGB(r,g,b) end
-    local theme={base=rgb(18,20,24),rail=rgb(18,20,24),panel=rgb(25,29,35),input=rgb(21,24,29),line=rgb(43,50,61),
-        text=rgb(236,241,247),muted=rgb(149,161,178),accent=rgb(192,201,220),selected=rgb(36,45,57),green=rgb(159,190,170)}
+    local theme={base=rgb(14,17,23),rail=rgb(14,17,23),panel=rgb(20,25,33),input=rgb(16,21,29),line=rgb(34,43,57),
+        text=rgb(229,237,248),muted=rgb(135,150,172),accent=rgb(137,183,245),selected=rgb(27,39,55),green=rgb(159,190,170)}
     local function corner(object,n)
         local c=object:FindFirstChildWhichIsA("UICorner") or make("UICorner",{},object); c.CornerRadius=UDim.new(0,n)
     end
@@ -3453,6 +3513,7 @@ do
         local b=make("TextButton",{Text=value,Size=UDim2.fromOffset(110,28),BackgroundColor3=theme.panel,BorderSizePixel=0,
             TextColor3=theme.text,TextSize=14,Font=Enum.Font.SourceSans,AutoButtonColor=false},parent)
         corner(b,5)
+        border(b).Transparency=.6
         on(b.Activated,callback)
         on(b.MouseEnter,function() if not b:GetAttribute("RailItem") then animate(b,{BackgroundColor3=theme.selected}) end end)
         on(b.MouseLeave,function() if not b:GetAttribute("RailItem") then animate(b,{BackgroundColor3=theme.panel}) end end)
@@ -3480,7 +3541,7 @@ do
     local rail_line=frame(shell,20,97,660,1,theme.line)
     local top_line=frame(shell,20,54,660,1,theme.line)
     local logo=label(shell,"Pivot",20,12,100,28,19,theme.text); logo.Font=Enum.Font.SourceSansBold; logo.TextXAlignment=Enum.TextXAlignment.Left
-    local build_label=label(shell,"BUILD 2026.11.04.1",242,17,150,18,10,theme.muted); build_label.Name="PivotBuild"; build_label.Font=Enum.Font.RobotoMono; build_label.TextWrapped=false
+    local build_label=label(shell,"BUILD 2026.11.04.2",242,17,150,18,10,theme.muted); build_label.Name="PivotBuild"; build_label.Font=Enum.Font.RobotoMono; build_label.TextWrapped=false
     local heading=label(shell,"Practical Basketball",94,14,240,26,11,theme.muted); heading.Font=Enum.Font.SourceSansSemibold
     close.BackgroundColor3=theme.rail; close.TextColor3=theme.muted; close.TextSize=14; corner(close,4)
     local search=make("TextBox",{Text="",PlaceholderText="Find a control...",PlaceholderColor3=theme.muted,Position=UDim2.fromOffset(484,10),Size=UDim2.fromOffset(166,23),
@@ -3734,7 +3795,7 @@ do
     end)
     local function set_theme(mode)
         local palettes={
-            Graphite={base=rgb(18,20,24),rail=rgb(18,20,24),panel=rgb(25,29,35),input=rgb(21,24,29),line=rgb(43,50,61),text=rgb(236,241,247),muted=rgb(149,161,178),accent=rgb(192,201,220),selected=rgb(36,45,57),green=rgb(159,190,170)},
+            Graphite={base=rgb(14,17,23),rail=rgb(14,17,23),panel=rgb(20,25,33),input=rgb(16,21,29),line=rgb(34,43,57),text=rgb(229,237,248),muted=rgb(135,150,172),accent=rgb(137,183,245),selected=rgb(27,39,55),green=rgb(159,190,170)},
             Slate={base=rgb(23,28,35),rail=rgb(23,28,35),panel=rgb(31,38,47),input=rgb(26,32,40),line=rgb(48,57,70),text=rgb(229,234,242),muted=rgb(151,163,182),accent=rgb(172,193,220),selected=rgb(43,54,69),green=rgb(159,190,170)},
             Light={base=rgb(241,242,244),rail=rgb(241,242,244),panel=rgb(250,250,251),input=rgb(232,234,238),line=rgb(213,216,223),text=rgb(33,37,44),muted=rgb(102,110,124),accent=rgb(67,83,111),selected=rgb(221,227,237),green=rgb(64,124,88)}
         }
@@ -3811,6 +3872,7 @@ do
     local visual_wings_open=false; local visual_aura_open=false; local visual_impacts_open=false
     local visual_lightning_open=false; local visual_rim_open=false
     local visual_electric_pack_open=false
+    local visual_effect_filter="All"; local visual_effect_cards={}; local visual_status_label
     local tabs={"All","Saved modules","Shooting","Dribbling","Cosmetics","Character","Player","Defense","Visuals","World","Camera","Recorder","Options"}
     local category="All"; local rows={}; local fields={}; local y=0
     local container=page
@@ -3819,7 +3881,7 @@ do
     local dribble_editor_open=false; local character_open=false; local library_open=false; local module_selection_label
     local auxiliary={}; local capture_switch; local character_status; local library_status
     local function clear()
-        for _,object in ipairs(rows) do object:Destroy() end; rows={}; fields={}; auxiliary={}; character_status=nil; library_status=nil; module_selection_label=nil; y=46
+        for _,object in ipairs(rows) do object:Destroy() end; rows={}; fields={}; auxiliary={}; character_status=nil; library_status=nil; module_selection_label=nil; visual_status_label=nil; y=46
     end
     local function own(object) rows[#rows+1]=object; return object end
     local function text(value,size,color,height)
@@ -3930,6 +3992,10 @@ do
     end
     local buttons={}
     local function update_buttons()
+        if visual_status_label and visual_status_label.Parent then
+            local count=0; for id in pairs(engine.registry.active) do local definition=engine.registry.definitions[id]; if definition.category=="Cosmetics" or definition.category=="Character" or definition.category=="Visual+" then count=count+1 end end
+            visual_status_label.Text=count.." active"
+        end
         for id,button in pairs(buttons) do
             if button.Parent then paint_switch(button,engine.registry.active[id]~=nil) end
         end
@@ -4023,7 +4089,7 @@ do
         elseif category=="Visual+" then
             y=0
             local header=text("Visual+",22,theme.text,30); header.Font=Enum.Font.SourceSansSemibold
-            text("Local cosmetics · Save profile keeps your selections",12,theme.muted,window.Size.X.Offset<560 and 38 or 24)
+            visual_status_label=own(ui.label(container,"0 active",0,5,100,22,12,theme.accent)); visual_status_label.Position=UDim2.new(1,-110,0,5); visual_status_label.TextXAlignment=Enum.TextXAlignment.Right
             local categories={"Ball","Court","Outfit","Effects","Lighting","HUD","Loadouts"}
             local columns=window.Size.X.Offset<560 and 4 or 7; local nav_height=columns==4 and 76 or 38
             local nav=own(make("Frame",{Name="VisualSections",Position=UDim2.fromOffset(0,y),Size=UDim2.new(1,-6,0,nav_height),BackgroundTransparency=1},container)); y=y+nav_height+10
@@ -4099,47 +4165,80 @@ do
                 module_toggle("outfit_tint"); field("jersey_color","Jersey tint"); field("shoe_color","Shoes / effect color")
                 for _,entry in ipairs({{"outfit_jersey","Tint jersey / shorts"},{"outfit_shoes","Tint shoes"},{"outfit_accessories","Tint accessories"}}) do local key=entry[1]; toggle_action(entry[2],function() return engine.settings[key] end,function(on) engine.settings[key]=on end) end
             elseif visual_section=="Effects" then
-                module_toggle("lightning_footsteps"); module_toggle("electric_ball_trail"); module_toggle("dunk_lightning")
-                action(visual_electric_pack_open and "Electric effect controls  −" or "Electric effect controls  +",function() visual_electric_pack_open=not visual_electric_pack_open; rebuild() end)
-                if visual_electric_pack_open then
-                    field("footlight_color","Footstep color"); field("footlight_size","Footstep spread"); field("footlight_duration","Footstep duration")
-                    field("ball_electric_color","Electric trail color"); field("ball_electric_width","Electric trail width"); field("ball_electric_duration","Electric trail duration")
-                    field("dunk_lightning_color","Dunk bolt color"); field("dunk_lightning_strength","Dunk bolt intensity"); field("dunk_lightning_duration","Dunk bolt duration")
-                    action("Preview dunk lightning",function() engine:preview_dunk_lightning() end)
+                local filters={"All","Character","Ball","Court"}
+                local filter_row=own(make("Frame",{Position=UDim2.fromOffset(0,y),Size=UDim2.new(1,-6,0,32),BackgroundTransparency=1},container)); y=y+42
+                for i,name in ipairs(filters) do
+                    local b=ui.button(filter_row,name,function() visual_effect_filter=name; page.CanvasPosition=Vector2.new(0,0); rebuild() end)
+                    b.Name="EffectFilter_"..name; b.Position=UDim2.new((i-1)/4,0,0,0); b.Size=UDim2.new(.25,-5,0,30); b.BackgroundColor3=visual_effect_filter==name and theme.selected or theme.input
                 end
-                module_toggle("lightning_aura")
-                action(visual_lightning_open and "Lightning controls  −" or "Lightning controls  +",function() visual_lightning_open=not visual_lightning_open; rebuild() end)
-                if visual_lightning_open then
-                    field("lightning_color","Bolt color"); field("lightning_core_color","Bolt core color"); field("lightning_size","Bolt spread"); field("lightning_intensity","Bolt intensity"); field("lightning_rate","Bolt refresh rate")
+                local function effect_card(id,group,caption,description,draw)
+                    if visual_effect_filter~="All" and visual_effect_filter~=group then return end
+                    local open=visual_effect_cards[id]==true; local outer,top=container,y
+                    local card=own(make("Frame",{Name="ModuleRow_"..id,Position=UDim2.fromOffset(0,y),Size=UDim2.new(1,-6,0,58),BackgroundColor3=theme.panel,BorderSizePixel=0},container))
+                    make("UICorner",{CornerRadius=UDim.new(0,8)},card)
+                    make("UIStroke",{Color=theme.line,Thickness=1,ApplyStrokeMode=Enum.ApplyStrokeMode.Border},card)
+                    make("Frame",{Name="StateMark",Position=UDim2.fromOffset(0,14),Size=UDim2.fromOffset(3,30),BackgroundColor3=theme.accent,BorderSizePixel=0,Visible=false},card)
+                    local title=ui.label(card,engine.registry.definitions[id].title,14,7,300,24,14,theme.text); title.Font=Enum.Font.SourceSansSemibold; title.Size=UDim2.new(1,-112,0,24)
+                    local subtitle=ui.label(card,description,14,31,300,18,11,theme.muted); subtitle.Size=UDim2.new(1,-112,0,18); subtitle.TextWrapped=false; subtitle.TextTruncate=Enum.TextTruncate.AtEnd
+                    local detail=ui.button(card,caption..(open and "  −" or "  +"),function() visual_effect_cards[id]=not open; rebuild() end)
+                    detail.Name="EffectDetails"; detail.Position=UDim2.new(1,-88,0,13); detail.Size=UDim2.fromOffset(30,30); detail.TextTransparency=1; detail.BackgroundColor3=theme.input
+                    local symbol=ui.label(detail,open and "−" or "+",0,0,30,30,16,theme.muted); symbol.TextXAlignment=Enum.TextXAlignment.Center
+                    buttons[id]=switch(card,function()
+                        if engine.registry.active[id] then engine.registry:disable(id)
+                        else local ok,err=engine.registry:enable(id,engine.settings); if not ok then report(tostring(err)) end end
+                        update_buttons()
+                    end); buttons[id].Position=UDim2.new(1,-49,0,16)
+                    if open then
+                        make("Frame",{Position=UDim2.fromOffset(12,57),Size=UDim2.new(1,-24,0,1),BackgroundColor3=theme.line,BorderSizePixel=0},card)
+                        local body=make("Frame",{Position=UDim2.fromOffset(12,70),Size=UDim2.new(1,-24,0,0),BackgroundTransparency=1},card)
+                        container=body; y=0; draw(); body.Size=UDim2.new(1,-24,0,y); card.Size=UDim2.new(1,-6,0,y+80)
+                    end
+                    container=outer; y=top+card.Size.Y.Offset+10
+                end
+                effect_card("lightning_aura","Character","Lightning controls","Branching bolts with smooth pulses",function()
+                    field("lightning_color","Bolt color"); field("lightning_core_color","Bolt core color"); field("lightning_size","Bolt spread"); field("lightning_intensity","Bolt intensity"); field("lightning_rate","Bolt refresh rate"); field("lightning_smoothness","Shape smoothing")
+                    toggle_action("Branching bolts",function() return engine.settings.lightning_branches end,function(on) engine.settings.lightning_branches=on end)
                     toggle_action("Motion streaks",function() return engine.settings.lightning_motion end,function(on) engine.settings.lightning_motion=on end)
-                end
-                module_toggle("rim_effects")
-                action(visual_rim_open and "Rim controls  −" or "Rim controls  +",function() visual_rim_open=not visual_rim_open; rebuild() end)
-                if visual_rim_open then
+                end)
+                effect_card("wings","Character","Wing controls","Layered feathers and smooth folding",function()
+                    choice("wings_style","Wing style",{"Feather","Bat","Energy"}); field("wings_color","Wing color"); field("wings_tip_color","Tip color"); field("wings_scale","Wing size"); field("wings_opacity","Wing opacity")
+                    toggle_action("Animate wings",function() return engine.settings.wings_flap end,function(on) engine.settings.wings_flap=on end); field("wings_speed","Flap speed")
+                    toggle_action("Fold while idle",function() return engine.settings.wings_fold_idle end,function(on) engine.settings.wings_fold_idle=on end); field("wings_fold","Idle fold amount")
+                    module_toggle("wing_trails"); field("wing_trail_color","Wing trail color"); field("wing_trail_lifetime","Wing trail duration"); field("wing_trail_width","Wing trail width"); field("wing_trail_opacity","Wing trail opacity")
+                end)
+                effect_card("lightning_footsteps","Character","Footstep controls","Electric cracks on each grounded stride",function()
+                    field("footlight_color","Footstep color"); field("footlight_size","Footstep spread"); field("footlight_duration","Footstep duration")
+                end)
+                effect_card("electric_ball_trail","Ball","Electric trail controls","Fading bolts behind moving balls",function()
+                    field("ball_electric_color","Electric trail color"); field("ball_electric_width","Electric trail width"); field("ball_electric_duration","Electric trail duration")
+                end)
+                effect_card("dunk_lightning","Court","Dunk lightning controls","Rim-to-floor bolt on a dunk release",function()
+                    field("dunk_lightning_color","Dunk bolt color"); field("dunk_lightning_strength","Dunk bolt intensity"); field("dunk_lightning_duration","Dunk bolt duration"); action("Preview dunk lightning",function() engine:preview_dunk_lightning() end)
+                end)
+                effect_card("rim_effects","Court","Rim controls","Rim glow, animated color and basket flash",function()
                     field("rim_color","Rim color")
                     for _,entry in ipairs({{"rim_glow","Rim glow"},{"rim_animated","Animated rim color"},{"rim_flash","Basket flash"}}) do local key=entry[1]; toggle_action(entry[2],function() return engine.settings[key] end,function(on) engine.settings[key]=on end) end
                     field("rim_flash_duration","Flash duration"); action("Preview rim flash",function() engine:preview_rim_flash() end)
-                    text("Basket flashes follow local downward rim crossings.",12,theme.muted,30)
-                end
-                module_toggle("wings")
-                action(visual_wings_open and "Wing controls  −" or "Wing controls  +",function() visual_wings_open=not visual_wings_open; rebuild() end)
-                if visual_wings_open then
-                    choice("wings_style","Wing style",{"Feather","Bat","Energy"}); field("wings_color","Wing color"); field("wings_tip_color","Tip color"); field("wings_scale","Wing size"); field("wings_opacity","Wing opacity")
-                    toggle_action("Animate wings",function() return engine.settings.wings_flap end,function(on) engine.settings.wings_flap=on end); field("wings_speed","Flap speed")
-                    module_toggle("wing_trails"); field("wing_trail_color","Wing trail color"); field("wing_trail_lifetime","Wing trail duration"); field("wing_trail_width","Wing trail width"); field("wing_trail_opacity","Wing trail opacity")
-                end
-                module_toggle("character_aura")
-                action(visual_aura_open and "Aura controls  −" or "Aura controls  +",function() visual_aura_open=not visual_aura_open; rebuild() end)
-                if visual_aura_open then choice("aura_style","Aura style",{"Sparks","Mist","Orbit"}); field("aura_color","Aura color"); field("aura_density","Particle density"); field("aura_size","Aura size"); field("aura_opacity","Aura opacity") end
-                module_toggle("ball_impacts")
-                action(visual_impacts_open and "Impact controls  −" or "Impact controls  +",function() visual_impacts_open=not visual_impacts_open; rebuild() end)
-                if visual_impacts_open then choice("impact_style","Impact style",{"Ring","Sparks","Both"}); field("impact_color","Impact color"); field("impact_size","Impact size"); field("impact_strength","Impact strength"); action("Preview ball impact",function() engine:preview_ball_impact() end) end
-                module_toggle("player_indicator"); choice("indicator_style","Indicator",{"Ring","Segmented","Arrow"}); field("indicator_color","Indicator color"); field("indicator_radius","Indicator size"); field("indicator_opacity","Indicator opacity")
-                module_toggle("shoe_effects"); field("shoe_color","Shoe effect color"); field("effect_strength","Effect strength")
-                toggle_action("Shoe trails",function() return engine.settings.shoe_trail end,function(on) engine.settings.shoe_trail=on end)
-                toggle_action("Landing particles",function() return engine.settings.landing_particles end,function(on) engine.settings.landing_particles=on end)
-                module_toggle("green_effect"); choice("green_style","Perfect effect",{"Badge","Edge flash"}); field("green_color","Perfect effect color"); field("green_duration","Duration / seconds")
-                action("Preview perfect effect",function() local active=engine.registry.active.green_effect; assert(active,"Enable Perfect shot effect first"); active.state.untilTime=os.clock()+engine.settings.green_duration end)
+                end)
+                effect_card("character_aura","Character","Aura controls","Sparks, mist or orbiting lights",function()
+                    choice("aura_style","Aura style",{"Sparks","Mist","Orbit"}); field("aura_color","Aura color"); field("aura_density","Particle density"); field("aura_size","Aura size"); field("aura_opacity","Aura opacity")
+                end)
+                effect_card("ball_impacts","Ball","Impact controls","Short rings and sparks on floor bounces",function()
+                    choice("impact_style","Impact style",{"Ring","Sparks","Both"}); field("impact_color","Impact color"); field("impact_size","Impact size"); field("impact_strength","Impact strength"); action("Preview ball impact",function() engine:preview_ball_impact() end)
+                end)
+                effect_card("player_indicator","Character","Indicator controls","Ring, segments or a direction arrow",function()
+                    choice("indicator_style","Indicator",{"Ring","Segmented","Arrow"}); field("indicator_color","Indicator color"); field("indicator_radius","Indicator size"); field("indicator_opacity","Indicator opacity")
+                end)
+                effect_card("shoe_effects","Character","Shoe controls","Foot trails and landing particles",function()
+                    field("shoe_color","Shoe effect color"); field("effect_strength","Effect strength")
+                    toggle_action("Shoe trails",function() return engine.settings.shoe_trail end,function(on) engine.settings.shoe_trail=on end)
+                    toggle_action("Landing particles",function() return engine.settings.landing_particles end,function(on) engine.settings.landing_particles=on end)
+                end)
+                effect_card("green_effect","Court","Perfect effect controls","A short badge or edge flash",function()
+                    choice("green_style","Perfect effect",{"Badge","Edge flash"}); field("green_color","Perfect effect color"); field("green_duration","Duration / seconds")
+                    action("Preview perfect effect",function() local active=engine.registry.active.green_effect; assert(active,"Enable Perfect shot effect first"); active.state.untilTime=os.clock()+engine.settings.green_duration end)
+                end)
+
             elseif visual_section=="Lighting" then
                 module_toggle("lighting_preset"); choice("lighting_preset","Lighting preset",{"Warm gym","Cool arena","Sunset","Night"}); field("lighting_intensity","Color grade intensity")
                 text("Disable Sky and other lighting overrides before using Lighting preset.",12,theme.muted,34)
