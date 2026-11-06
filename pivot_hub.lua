@@ -192,6 +192,13 @@ function Core.bounded(value,minimum,maximum)
     if not value or value~=value or value==math.huge or value==-math.huge or value<minimum or value>maximum then return nil end
     return value
 end
+function Core.shot_type(name,details)
+    name=tostring(name or ""):lower(); details=details or {}
+    if details.action=="Dunking" or name:find("dunk",1,true) then return "Dunks" end
+    if name:find("layup",1,true) or name:find("floater",1,true) then return "Layups" end
+    if (tonumber(details.movement) or 0)>.15 or (tonumber(details.horizontal_speed) or 0)>2 or name:find("fade",1,true) or name:find("pullup",1,true) or name:find("stepback",1,true) or name:find("running",1,true) then return "Moving" end
+    return "Standing"
+end
 function Core.animation_release(scope,deps)
     local state={watched={},sent={},metadata=setmetatable({},{__mode="k"}),profiles=deps.profiles or {},pending={},closed=false,good_trials={},good_streak={},good_exhausted={}}
     local function telemetry(event) if deps.telemetry then pcall(deps.telemetry,event) end end
@@ -203,13 +210,19 @@ function Core.animation_release(scope,deps)
     end
     local function profile(track,name)
         local animation=track.Animation
-        local key=name.."/"..tostring(animation and animation.AnimationId or "")
+        local base=name.."/"..tostring(animation and animation.AnimationId or "")
+        local bucket=state.observed and state.observed.split and state.observed.shot_type
+        local key=bucket and bucket.."::"..base or base
         if not state.profiles[key] then
             local attributes=deps.attributes()
             local initial=.60
             if attributes and attributes.Action=="Dunking" then initial=.36 end
             if name=="InsideHandLayup1R" then initial=.70 end
-            state.profiles[key]={ratio=initial,dunk=attributes and attributes.Action=="Dunking"}
+            local inherited=bucket and state.profiles[base]
+            if inherited then
+                local copy={ratio=inherited.ratio,perfect=inherited.perfect,dunk=inherited.dunk,ceiling=inherited.ceiling}
+                state.profiles[key]=copy
+            else state.profiles[key]={ratio=initial,dunk=attributes and attributes.Action=="Dunking"} end
         end
         return state.profiles[key]
     end
@@ -217,7 +230,7 @@ function Core.animation_release(scope,deps)
         code=tonumber(code)
         if not code or code%1~=0 or code<1 or code>8 or #self.pending==0 then return end
         local pending=table.remove(self.pending,1)
-        telemetry({kind="feedback",code=code,shot=pending.shot,name=pending.name,ratio=pending.ratio,locked=pending.profile.perfect})
+        telemetry({kind="feedback",code=code,shot=pending.shot,name=pending.name,shot_type=pending.shot_type,ratio=pending.ratio,locked=pending.profile.perfect})
         if deps.calibrate and not deps.calibrate() then
             self.good_trials[pending.profile]=nil; self.good_streak[pending.profile]=nil
             if code==5 then pending.profile.ratio=pending.ratio; pending.profile.perfect=true; if deps.changed then deps.changed() end end
@@ -228,7 +241,7 @@ function Core.animation_release(scope,deps)
         if (early or late) and pending.trial then
             self.good_trials[p]=nil; self.good_streak[p]=nil; self.good_exhausted[p]=true
             deps.report("Nearby timing rejected / restored established release")
-            telemetry({kind="refinement",reason="Nearby timing rejected · baseline restored",shot=pending.shot,name=pending.name,ratio=p.ratio})
+            telemetry({kind="refinement",reason="Nearby timing rejected · baseline restored",shot=pending.shot,name=pending.name,shot_type=pending.shot_type,ratio=p.ratio})
             return
         end
         if code==4 and deps.good_correction and deps.good_correction() then
@@ -238,7 +251,7 @@ function Core.animation_release(scope,deps)
                 if trial.attempt>=6 then
                     self.good_trials[p]=nil; self.good_exhausted[p]=true
                     deps.report("Good release / bounded search finished, baseline retained")
-                    telemetry({kind="refinement",reason="Good · search finished; baseline retained",shot=pending.shot,name=pending.name,ratio=p.ratio})
+                    telemetry({kind="refinement",reason="Good · search finished; baseline retained",shot=pending.shot,name=pending.name,shot_type=pending.shot_type,ratio=p.ratio})
                 else
                     trial.attempt=trial.attempt+1
                     local offset=math.ceil(trial.attempt/2)*.003*(trial.attempt%2==1 and 1 or -1)
@@ -246,7 +259,7 @@ function Core.animation_release(scope,deps)
                     local maximum=math.min(p.ceiling or .85,(p.late or .86)-.001)
                     if minimum<=maximum then trial.ratio=math.max(minimum,math.min(maximum,trial.center+offset)); self.good_trials[p]=trial end
                     deps.report("Good release / testing a small nearby phase")
-                    telemetry({kind="refinement",reason="Good · testing nearby timing ("..trial.attempt.."/6)",shot=pending.shot,name=pending.name,ratio=trial.ratio or p.ratio})
+                    telemetry({kind="refinement",reason="Good · testing nearby timing ("..trial.attempt.."/6)",shot=pending.shot,name=pending.name,shot_type=pending.shot_type,ratio=trial.ratio or p.ratio})
                 end
             else deps.report("Good release / established timing retained") end
             return
@@ -319,10 +332,10 @@ function Core.animation_release(scope,deps)
             local p=profile(track,name)
             if #state.pending>=8 then table.remove(state.pending,1) end
             local ratio,trial=target_ratio(p)
-            state.pending[#state.pending+1]={profile=p,ratio=ratio,trial=trial,shot=shot,name=name,time=os.clock()}
+            state.pending[#state.pending+1]={profile=p,ratio=ratio,trial=trial,shot=shot,name=name,shot_type=state.observed and state.observed.shot_type,time=os.clock()}
         end
         if state.observed and state.observed.id==shot then state.observed.sent=true end
-        local event={kind="release",shot=shot,name=name,ratio=entry.release_time and target_ratio(profile(track,name)) or nil,position=track.TimePosition,speed=track.Speed}
+        local event={kind="release",shot=shot,name=name,shot_type=state.observed and state.observed.shot_type,ratio=entry.release_time and target_ratio(profile(track,name)) or nil,position=track.TimePosition,speed=track.Speed}
         if deps.snapshot then local ok,details=pcall(deps.snapshot); if ok then event.details=details end end
         telemetry(event)
         deps.report("Animation release / "..name.." / "..marker)
@@ -342,10 +355,13 @@ function Core.animation_release(scope,deps)
         local active=attributes and (attributes.Action=="Shooting" or attributes.Action=="Dunking") and attributes.ReleasedShot==false
         local id=active and Core.bounded(attributes.ShotStartTime,0,math.huge)
         if self.observed and self.observed.id~=id then
-            if not self.observed.sent then telemetry({kind="skip",shot=self.observed.id,name=self.observed.name,reason=self.observed.reason or "Shot ended before the release target"}) end
+            if not self.observed.sent then telemetry({kind="skip",shot=self.observed.id,name=self.observed.name,shot_type=self.observed.shot_type,reason=self.observed.reason or "Shot ended before the release target"}) end
             self.observed=nil
         end
-        if id and not self.observed then self.observed={id=id,name=attributes.BaseAnimation,sent=self.sent[id]==true} end
+        if id and not self.observed then
+            local kind=deps.shot_type and deps.shot_type(attributes.BaseAnimation) or nil
+            self.observed={id=id,name=attributes.BaseAnimation,shot_type=kind,split=deps.split_profiles and deps.split_profiles(),sent=self.sent[id]==true}
+        end
         if self.observed and not self.observed.sent then
             self.observed.name=attributes.BaseAnimation
             self.observed.reason=deps.paused() and "Shot paused while editing controls" or not deps.held() and "Shoot input released before the target" or "No matching shot animation or Release keyframe"
@@ -355,7 +371,7 @@ function Core.animation_release(scope,deps)
             if pending.time and os.clock()-pending.time>8 then
                 table.remove(self.pending,i)
                 if pending.trial then self.good_trials[pending.profile]=nil; self.good_streak[pending.profile]=nil; self.good_exhausted[pending.profile]=true end
-                telemetry({kind="unconfirmed",shot=pending.shot,name=pending.name})
+                telemetry({kind="unconfirmed",shot=pending.shot,name=pending.name,shot_type=pending.shot_type})
             end
         end
         local tracks=deps.tracks(); local present={}
@@ -888,9 +904,14 @@ local function create_pivot_modules(ctx)
             calibrate=function() return Engine.settings.auto_calibrate end,
             refine_good=function() return Engine.settings.practice_refinement end,
             good_correction=function() return Engine.settings.good_correction end,
+            split_profiles=function() return Engine.settings.shot_type_profiles end,
+            shot_type=function(name)
+                local c=current(); local a=c and c.data and c.data.Attributes or {}; local movement=c and c.Movement and c.Movement.lastMoveDirection
+                return Core.shot_type(name,{action=a.Action,movement=movement and movement.Magnitude})
+            end,
             snapshot=function()
                 local c=current(); local a=c and c.data and c.data.Attributes or {}; local movement=c and c.Movement and c.Movement.lastMoveDirection; local offset=a.meterOffset
-                return {movement=movement and movement.Magnitude,shot_speed=a.ShotSpeed,meter_x=offset and offset.X,meter_y=offset and offset.Y,animation=a.BaseAnimation}
+                return {movement=movement and movement.Magnitude,action=a.Action,shot_speed=a.ShotSpeed,meter_x=offset and offset.X,meter_y=offset and offset.Y,animation=a.BaseAnimation}
             end,
             telemetry=function(event) if Engine.record_shot then Engine:record_shot(event) end end,
             held=function()
@@ -919,6 +940,8 @@ local function create_pivot_modules(ctx)
     Engine.release_profiles={}
     Engine.settings.practice_refinement=false
     Engine.settings.good_correction=true
+    Engine.settings.shot_type_profiles=false
+    Engine.settings.shot_hud_type="All"
     Engine.release_storage_status="No saved shot timing yet"
     local timing_file="pivot_release_timings.json"
     local timing_game=tostring(game.GameId or game.PlaceId or 0)
@@ -2485,7 +2508,7 @@ local function create_pivot_modules(ctx)
     end,conflicts={"dribble_macros","auto_ankle"}})
     if type(readfile)=="function" then pcall(function() Engine:read_dribble_library() end) end
 
-    Engine.build="2026.11.06.7"
+    Engine.build="2026.11.06.8"
     local s=Engine.settings
     local defaults={ball_finish="Custom",court_preset="Custom",lighting_preset="Warm gym",lighting_intensity=.65,shoe_color="#B79AFF",jersey_color="#FFFFFF",shoe_trail=true,landing_particles=true,effect_strength=.5,indicator_style="Ring",indicator_color="#B79AFF",indicator_radius=2.6,indicator_opacity=.7,green_style="Badge",green_color="#89DEAC",green_duration=.7,outfit_jersey=true,outfit_shoes=true,outfit_accessories=false}
     for key,value in pairs(defaults) do s[key]=value end
@@ -3317,6 +3340,8 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
     end,step=function(_,state,settings) state.draw(settings) end,interval=.02})
 
     for key,value in pairs({quality_radius=12,quality_range=26,quality_bottom=24,teammate_range=90,teammate_coverage=30,teammate_height=3.5,teammate_color="#8CF0BA",rebound_color="#B8A7F6",rebound_distance=130,rebound_horizon=3,rebound_size=2}) do Engine.settings[key]=value end
+    Engine.settings.rebound_mode="Catch height"; Engine.settings.rebound_reach=7; Engine.settings.rebound_run_speed=18
+    Engine.ranges.rebound_reach={3,12}; Engine.ranges.rebound_run_speed={8,32}
     for key,value in pairs({quality_radius={6,20},quality_range={10,40},quality_bottom={8,180},teammate_range={20,160},teammate_coverage={5,60},teammate_height={2,6},rebound_distance={30,220},rebound_horizon={.5,4},rebound_size={1,4}}) do Engine.ranges[key]=value end
     local function flat_distance(a,b) local d=a-b; return Vector3.new(d.X,0,d.Z).Magnitude end
     function Core.pass_lane_distance(point,a,b)
@@ -3339,6 +3364,15 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
         elseif velocity.Y<-.001 then t=(floor_y-position.Y)/velocity.Y else return nil end
         if t~=t or t<=.02 or t>(horizon or 3) then return nil end
         return Vector3.new(position.X+velocity.X*t,floor_y,position.Z+velocity.Z*t),t
+    end
+    function Core.ballistic_intercept(position,velocity,height,gravity,horizon)
+        gravity=tonumber(gravity) or 196.2
+        if not position or not velocity or gravity<=.001 then return nil end
+        local discriminant=velocity.Y*velocity.Y+2*gravity*(position.Y-height)
+        if discriminant<0 then return nil end
+        local t=(velocity.Y+math.sqrt(discriminant))/gravity
+        if t~=t or t<=.02 or t>(horizon or 3) or velocity.Y-gravity*t>=-.01 then return nil end
+        return Vector3.new(position.X+velocity.X*t,height,position.Z+velocity.Z*t),t
     end
     local function tool_object(scope,class,props,parent)
         local object=Instance.new(class); for key,value in pairs(props or {}) do object[key]=value end; object.Parent=parent
@@ -3452,13 +3486,15 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
         end
         for who,item in pairs(state.boards) do if not seen[who] then item.board:Destroy(); state.boards[who]=nil end end
     end,interval=.12})
-    add("rebound_estimate","Rebound estimate","Visuals","Floor marker for the nearest unheld airborne ball using current velocity and gravity; recalculates after trajectory changes",{start=function(scope)
+    add("rebound_estimate","Rebound estimate","Visuals","Catch-height intercept or floor landing estimate with arrival time and estimated reachability; recalculates current ball flight",{start=function(scope)
         local folder=tool_object(scope,"Folder",{Name="PivotReboundEstimate"},workspace); local parts={}
         for i=1,24 do parts[i]=tool_object(scope,"Part",{Name="EstimateRing",Anchored=true,CanCollide=false,CanTouch=false,CanQuery=false,CastShadow=false,Material=Enum.Material.Neon,Transparency=1},folder) end
+        local catch_parts={}
+        for i=1,16 do catch_parts[i]=tool_object(scope,"Part",{Name="CatchRing",Anchored=true,CanCollide=false,CanTouch=false,CanQuery=false,CastShadow=false,Material=Enum.Material.Neon,Transparency=1},folder) end
         local anchor=tool_object(scope,"Part",{Name="LabelAnchor",Size=Vector3.new(.1,.1,.1),Anchored=true,CanCollide=false,CanTouch=false,CanQuery=false,Transparency=1},folder)
-        local board=tool_object(scope,"BillboardGui",{Adornee=anchor,Size=UDim2.fromOffset(180,30),StudsOffsetWorldSpace=Vector3.new(0,1,0),AlwaysOnTop=false,Enabled=false},ctx.gui)
-        local label=tool_label(scope,board,"REBOUND · EST.",14)
-        return {folder=folder,parts=parts,anchor=anchor,board=board,label=label}
+        local board=tool_object(scope,"BillboardGui",{Adornee=anchor,Size=UDim2.fromOffset(180,44),StudsOffsetWorldSpace=Vector3.new(0,1,0),AlwaysOnTop=false,Enabled=false},ctx.gui)
+        local label=tool_label(scope,board,"REBOUND · EST.",14); label.TextWrapped=true
+        return {folder=folder,parts=parts,catch_parts=catch_parts,anchor=anchor,board=board,label=label}
     end,step=function(_,state,settings,dt)
         local mine=root(); local ball,best
         local held={}; for _,who in ipairs(players:GetPlayers()) do local object=held_ball(rig(who)); if object then held[object]=true end end
@@ -3466,7 +3502,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
             local object=item.object; local velocity=object.AssemblyLinearVelocity or Vector3.zero; local distance=(object.Position-mine.Position).Magnitude
             if not held[object] and distance<=settings.rebound_distance and (object:GetAttribute("MidShot")==true or velocity.Magnitude>2) and (not best or distance<best) then ball=object; best=distance end
         end end
-        local landing,time
+        local landing,time,catch_point
         if ball then
             local velocity=ball.AssemblyLinearVelocity or Vector3.zero
             if velocity.Magnitude<.1 and state.ball==ball and state.previous and dt>0 then local delta=ball.Position-state.previous; if delta.Magnitude<30 then velocity=delta/dt end end
@@ -3477,16 +3513,24 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
             end
             local floor=court_ray(ball.Position,Vector3.new(0,-200,0),state.folder)
             if floor and floor.Normal.Y>.7 and ball.Position.Y-floor.Position.Y>2 then
-                landing,time=Core.ballistic_landing(ball.Position,velocity,floor.Position.Y,state.gravity or workspace.Gravity,settings.rebound_horizon)
+                local gravity=state.gravity or workspace.Gravity
+                if settings.rebound_mode=="Catch height" then
+                    catch_point,time=Core.ballistic_intercept(ball.Position,velocity,floor.Position.Y+settings.rebound_reach,gravity,settings.rebound_horizon)
+                    landing=catch_point and Vector3.new(catch_point.X,floor.Position.Y,catch_point.Z)
+                else landing,time=Core.ballistic_landing(ball.Position,velocity,floor.Position.Y,gravity,settings.rebound_horizon) end
                 if landing then
                     local actual=court_ray(landing+Vector3.new(0,20,0),Vector3.new(0,-40,0),state.folder)
-                    if not actual or actual.Normal.Y<.7 then landing=nil
-                    else landing,time=Core.ballistic_landing(ball.Position,velocity,actual.Position.Y,state.gravity or workspace.Gravity,settings.rebound_horizon) end
+                    if not actual or actual.Normal.Y<.7 then landing=nil; catch_point=nil
+                    elseif settings.rebound_mode=="Catch height" then
+                        catch_point,time=Core.ballistic_intercept(ball.Position,velocity,actual.Position.Y+settings.rebound_reach,gravity,settings.rebound_horizon)
+                        landing=catch_point and Vector3.new(catch_point.X,actual.Position.Y,catch_point.Z)
+                    else landing,time=Core.ballistic_landing(ball.Position,velocity,actual.Position.Y,gravity,settings.rebound_horizon) end
                 end
             end
             state.previous=ball.Position; state.previous_velocity=velocity
         else state.previous=nil; state.previous_velocity=nil; state.gravity=nil end
-        state.ball=ball; state.landing=landing; state.board.Enabled=landing~=nil
+        state.ball=ball; state.landing=landing; state.catch_point=catch_point; state.board.Enabled=landing~=nil
+        state.reachable=landing and mine and flat_distance(mine.Position,landing)/settings.rebound_run_speed<=math.max(0,time-.15) or false
         for i,part in ipairs(state.parts) do
             part.Transparency=landing and .2 or 1
             if landing then
@@ -3496,11 +3540,24 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
                 part.Size=Vector3.new(.1,.06,(q-p).Magnitude+.025); part.CFrame=CFrame.lookAt((p+q)/2,q); part.Color=cosmetic_color(settings.rebound_color)
             end
         end
-        if landing then state.anchor.CFrame=CFrame.new(landing); state.label.Text=string.format("REBOUND · %.1fs EST.",time); state.label.TextColor3=cosmetic_color(settings.rebound_color) end
+        for i,part in ipairs(state.catch_parts) do
+            part.Transparency=catch_point and .25 or 1
+            if catch_point then
+                local a=(i-1)*math.pi/8; local b=i*math.pi/8
+                local p=catch_point+Vector3.new(math.cos(a)*.7,0,math.sin(a)*.7); local q=catch_point+Vector3.new(math.cos(b)*.7,0,math.sin(b)*.7)
+                part.Size=Vector3.new(.06,.06,(q-p).Magnitude+.015); part.CFrame=CFrame.lookAt((p+q)/2,q); part.Color=cosmetic_color(settings.rebound_color)
+            end
+        end
+        if landing then
+            state.anchor.CFrame=CFrame.new(catch_point or landing)
+            state.label.Text=string.format("%s · %.1fs EST.\n%s",catch_point and "CATCH" or "REBOUND",time,state.reachable and "IN REACH" or "FAR")
+            state.label.TextColor3=cosmetic_color(settings.rebound_color)
+        end
     end,interval=.08})
     Engine.cosmetic_fields.shot_quality={{"quality_radius","Defender range"},{"quality_range","Comfortable shot range"},{"quality_bottom","Distance from bottom"}}
     Engine.cosmetic_fields.open_teammates={{"teammate_color","Arrow color"},{"teammate_range","Teammate range"},{"teammate_coverage","Maximum estimated coverage"},{"teammate_height","Arrow height"}}
-    Engine.cosmetic_fields.rebound_estimate={{"rebound_color","Marker color"},{"rebound_distance","Ball tracking range"},{"rebound_horizon","Prediction horizon"},{"rebound_size","Marker radius"}}
+    Engine.cosmetic_choices.rebound_estimate={{"rebound_mode","Marker target",{"Catch height","Floor"}}}
+    Engine.cosmetic_fields.rebound_estimate={{"rebound_color","Marker color"},{"rebound_distance","Ball tracking range"},{"rebound_horizon","Prediction horizon"},{"rebound_size","Marker radius"},{"rebound_reach","Catch height above floor"},{"rebound_run_speed","Estimated run speed"}}
 
     Engine.cosmetic_loadouts={version=1,loadouts={}}
     Engine.settings.cosmetic_loadout_name="My look"
@@ -3509,7 +3566,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
     look_modules.lightning_footsteps=true; look_modules.electric_ball_trail=true; look_modules.dunk_lightning=true
     look_modules.animated_cape=true; look_modules.animated_tail=true; look_modules.reactive_outfit=true; look_modules.controller_hud=true
     local prefixes={"ball_","court_","model_","wings_","aura_","lightning_","wing_trail_","rim_","impact_","indicator_","shoe_","jersey_","outfit_","sky_","outline_","player_trail_","crosshair_","coverage_"}
-    local look_extra={lighting_preset=true,lighting_intensity=true,effect_strength=true,green_style=true,green_color=true,green_duration=true,meter_style=true,shot_hud=true,shot_hud_compact=true}
+    local look_extra={lighting_preset=true,lighting_intensity=true,effect_strength=true,green_style=true,green_color=true,green_duration=true,meter_style=true,shot_hud=true,shot_hud_compact=true,shot_hud_type=true}
     prefixes[#prefixes+1]="footlight_"; prefixes[#prefixes+1]="dunk_lightning_"
     prefixes[#prefixes+1]="cape_"; prefixes[#prefixes+1]="tail_"; prefixes[#prefixes+1]="reactive_"; prefixes[#prefixes+1]="controller_"
     for key,value in pairs(Engine.settings) do
@@ -3589,10 +3646,38 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
     if type(readfile)=="function" then pcall(function() Engine:read_cosmetic_loadouts() end) end
 
     Engine.shot_stats={total=0,perfect=0,good=0,early=0,late=0,skipped=0,releases=0,unconfirmed=0,last="Waiting for a shot",history={}}
+    Engine.settings.shot_hud_type="All"
+    Engine.shot_stats.by_type={}; Engine.shot_stats.types_by_shot={}; Engine.shot_stats.type_order={}
+    for _,kind in ipairs({"Standing","Moving","Layups","Dunks"}) do Engine.shot_stats.by_type[kind]={total=0,perfect=0,good=0,early=0,late=0,skipped=0,releases=0,unconfirmed=0,last="Waiting for a shot"} end
+    function Engine:shot_profile_summary()
+        local lines={}
+        for _,kind in ipairs({"Standing","Moving","Layups","Dunks"}) do
+            local value=self.shot_stats.by_type[kind]
+            lines[#lines+1]=string.format("%s: %d/%d Perfect · G%d E%d L%d",kind,value.perfect,value.total,value.good,value.early,value.late)
+        end
+        return table.concat(lines,"\n")
+    end
     function Engine:record_shot(event)
         if self.visual_feedback then self:visual_feedback(event) end
         if self.reactive_feedback then self:reactive_feedback(event) end
         local stats=self.shot_stats; local kind=event.kind
+        local shot_type=event.shot_type or event.shot and stats.types_by_shot[event.shot] or Core.shot_type(event.name,event.details)
+        if not stats.by_type[shot_type] then shot_type="Standing" end
+        local bucket=stats.by_type[shot_type]
+        if kind=="release" then
+            bucket.releases=bucket.releases+1; stats.last_type=shot_type
+            if event.shot then
+                stats.types_by_shot[event.shot]=shot_type; stats.type_order[#stats.type_order+1]=event.shot
+                if #stats.type_order>32 then stats.types_by_shot[table.remove(stats.type_order,1)]=nil end
+            end
+        elseif kind=="feedback" then
+            bucket.total=bucket.total+1; stats.last_type=shot_type
+            local result=event.code==5 and "perfect" or event.code==4 and "good" or event.code<=3 and "early" or "late"
+            bucket[result]=bucket[result]+1; if event.shot then stats.types_by_shot[event.shot]=nil end
+        elseif kind=="unconfirmed" or kind=="skip" then
+            local field=kind=="skip" and "skipped" or "unconfirmed"; bucket[field]=bucket[field]+1
+            if event.shot then stats.types_by_shot[event.shot]=nil end
+        end
         if kind=="feedback" then
             stats.total=stats.total+1
             if event.code==5 then stats.perfect=stats.perfect+1; stats.last="Perfect · timing retained"
@@ -3604,7 +3689,8 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
         elseif kind=="release" then stats.releases=stats.releases+1; stats.last="Released · awaiting game feedback"
         elseif kind=="unconfirmed" then stats.unconfirmed=stats.unconfirmed+1; stats.last="No feedback received for an auto release"
         elseif kind=="refinement" then stats.last=event.reason end
-        local entry={kind=kind,code=event.code,shot=event.shot,name=event.name,reason=event.reason,ratio=event.ratio,position=event.position,speed=event.speed,details=event.details,time=os.clock()}
+        bucket.last=stats.last
+        local entry={kind=kind,code=event.code,shot=event.shot,shot_type=shot_type,name=event.name,reason=event.reason,ratio=event.ratio,position=event.position,speed=event.speed,details=event.details,time=os.clock()}
         stats.history[#stats.history+1]=entry; if #stats.history>100 then table.remove(stats.history,1) end
     end
     function Engine:attach_shot_hud(scope)
@@ -3624,15 +3710,16 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
         local collapse=Instance.new("TextButton"); collapse.Name="Collapse"; collapse.Position=UDim2.new(1,-32,0,5); collapse.Size=UDim2.fromOffset(25,25); collapse.BackgroundTransparency=1; collapse.Text="−"; collapse.TextColor3=Color3.fromRGB(170,182,199); collapse.TextSize=21; collapse.Font=Enum.Font.SourceSans; collapse.Parent=panel
         scope:defer(function() panel:Destroy() end)
         local function update()
-            local stats=self.shot_stats; local ratio=stats.total>0 and stats.perfect/stats.total or 0
+            local all=self.shot_stats; local filter=all.by_type[self.settings.shot_hud_type] and self.settings.shot_hud_type or "All"
+            local stats=filter=="All" and all or all.by_type[filter]; local ratio=stats.total>0 and stats.perfect/stats.total or 0
             local percentage=stats.total>0 and string.format("%.1f%%",ratio*100) or "--"
             local compact=self.settings.shot_hud_compact
             panel.Visible=self.settings.shot_hud; panel.Size=UDim2.fromOffset(compact and 210 or 292,compact and 36 or 116)
-            title.Text=compact and "Shooting  ·  "..percentage or "SHOOTING"; title.Size=UDim2.fromOffset(compact and 166 or 210,18); title.TextSize=compact and 14 or 12
+            title.Text=compact and (filter=="All" and "Shooting" or filter).." · "..percentage or "SHOOTING · "..filter; title.Size=UDim2.fromOffset(compact and 166 or 210,18); title.TextSize=compact and 14 or 12
             collapse.Text=compact and "+" or "−"
             for _,object in ipairs({rate,count,track,result,details}) do object.Visible=not compact end
             rate.Text=percentage; count.Text=stats.perfect.." / "..stats.total.." perfect"; fill.Size=UDim2.fromScale(math.max(0,math.min(1,ratio)),1)
-            result.Text=stats.last; details.Text="Skipped "..stats.skipped.."    Unconfirmed "..stats.unconfirmed
+            result.Text=stats.last; details.Text="Skipped "..stats.skipped.."    Unconfirmed "..stats.unconfirmed..(filter=="All" and all.last_type and " · "..all.last_type or "")
         end
         local click=collapse.Activated:Connect(function() self.settings.shot_hud_compact=not self.settings.shot_hud_compact; update() end); scope:defer(function() click:Disconnect() end)
         local elapsed=0; local connection=run.Heartbeat:Connect(function(dt) elapsed=elapsed+dt; if elapsed>=.1 then elapsed=0; update() end end)
@@ -4314,7 +4401,7 @@ do
     local rail_line=frame(shell,20,97,660,1,theme.line)
     local top_line=frame(shell,20,54,660,1,theme.line)
     local logo=label(shell,"Pivot",20,12,100,28,19,theme.text); logo.Font=Enum.Font.SourceSansBold; logo.TextXAlignment=Enum.TextXAlignment.Left
-    local build_label=label(shell,"BUILD 2026.11.06.7",242,17,150,18,10,theme.muted); build_label.Name="PivotBuild"; build_label.Font=Enum.Font.RobotoMono; build_label.TextWrapped=false
+    local build_label=label(shell,"BUILD 2026.11.06.8",242,17,150,18,10,theme.muted); build_label.Name="PivotBuild"; build_label.Font=Enum.Font.RobotoMono; build_label.TextWrapped=false
     local heading=label(shell,"Practical Basketball",94,14,240,26,11,theme.muted); heading.Font=Enum.Font.SourceSansSemibold
     close.BackgroundColor3=theme.rail; close.TextColor3=theme.muted; close.TextSize=14; corner(close,4)
     local search=make("TextBox",{Text="",PlaceholderText="Find a control...",PlaceholderColor3=theme.muted,Position=UDim2.fromOffset(484,10),Size=UDim2.fromOffset(166,23),
@@ -4719,10 +4806,10 @@ do
     local container=page
     local collapsed={}
     local expanded,choosing,section_button,record_tools,court_alignment
-    local dribble_editor_open=false; local character_open=false; local library_open=false; local module_selection_label
+    local dribble_editor_open=false; local character_open=false; local library_open=false; local module_selection_label; local shot_profile_label
     local auxiliary={}; local capture_switch; local character_status; local library_status
     local function clear()
-        for _,object in ipairs(rows) do object:Destroy() end; rows={}; fields={}; auxiliary={}; character_status=nil; library_status=nil; module_selection_label=nil; visual_status_label=nil; y=46
+        for _,object in ipairs(rows) do object:Destroy() end; rows={}; fields={}; auxiliary={}; character_status=nil; library_status=nil; module_selection_label=nil; shot_profile_label=nil; visual_status_label=nil; y=46
     end
     local function own(object) rows[#rows+1]=object; return object end
     local function text(value,size,color,height)
@@ -4837,6 +4924,7 @@ do
     end
     local buttons={}
     local function update_buttons()
+        if shot_profile_label and shot_profile_label.Parent then local summary=engine:shot_profile_summary(); if shot_profile_label.Text~=summary then shot_profile_label.Text=summary end end
         if visual_status_label and visual_status_label.Parent then
             local count=0; for id in pairs(engine.registry.active) do local definition=engine.registry.definitions[id]; if definition.category=="Cosmetics" or definition.category=="Character" or definition.category=="Visual+" then count=count+1 end end
             visual_status_label.Text=count.." active"
@@ -5158,6 +5246,7 @@ do
                 module_toggle("coverage_hud"); controls("coverage_hud")
                 toggle_action("Shooting HUD",function() return engine.settings.shot_hud end,function(on) engine.settings.shot_hud=on end)
                 toggle_action("Compact shooting HUD",function() return engine.settings.shot_hud_compact end,function(on) engine.settings.shot_hud_compact=on end)
+                choice("shot_hud_type","Shooting HUD filter",{"All","Standing","Moving","Layups","Dunks"})
                 module_toggle("crosshair"); controls("crosshair")
             end
 
@@ -5348,6 +5437,11 @@ do
                         elseif id=="meter_release" then
                             text(engine.release_storage_status,12,theme.muted,38)
                             toggle_action("Auto correct",function() return engine.settings.auto_calibrate end,function(on) engine.settings.auto_calibrate=on end)
+                            toggle_action("Separate shot timing profiles",function() return engine.settings.shot_type_profiles end,function(on) engine.settings.shot_type_profiles=on end)
+                            text("Separate profiles begin with your saved timing and apply from your next shot.",11,theme.muted,36)
+                            choice("shot_hud_type","Shooting HUD filter",{"All","Standing","Moving","Layups","Dunks"})
+                            text("G Good · E Early · L Late",11,theme.muted,20)
+                            shot_profile_label=text(engine:shot_profile_summary(),12,theme.muted,96)
                             toggle_action("Refine Good releases",function() return engine.settings.good_correction end,function(on) engine.settings.good_correction=on end)
                             toggle_action("Practice refinement",function() return engine.settings.practice_refinement end,function(on) engine.settings.practice_refinement=on end)
                             toggle_action("Perfect rate HUD",function() return engine.settings.shot_hud end,function(on) engine.settings.shot_hud=on end)
