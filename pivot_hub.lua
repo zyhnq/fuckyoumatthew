@@ -1867,6 +1867,7 @@ local function create_pivot_modules(ctx)
     end
     local function build_pb_costume(donor,source,scope,s,captured_joints)
         local basketball=s.model_style=="Basketball"
+        local imported=s.model_preset=="Avatar" or s.model_preset=="Outfit"
         local sasuke=basketball and s.model_preset=="Sasuke"
         local authored=sasuke
         local uniform,texture_error
@@ -1897,8 +1898,10 @@ local function create_pivot_modules(ctx)
             if real:IsA("BasePart") and body_names[real.Name] then
                 local look=donors[real.Name] or donors[r6_body[real.Name]]
                 local exact=donors[real.Name]
-                local copy=copy_part(not basketball and exact and look or real,basketball); copy.Name=real.Name; copy.CFrame=real.CFrame; copy.Size=real.Size*s.model_fit_scale
-                if basketball and (not authored or uniform) or not basketball and not exact and look then
+                local imported_head=imported and real.Name=="Head" and exact~=nil
+                local copy=copy_part(imported_head and look or not basketball and exact and look or real,basketball and not imported_head); copy.Name=real.Name; copy.CFrame=real.CFrame; copy.Size=real.Size*s.model_fit_scale
+                if imported_head then copy:SetAttribute("PivotImportedHead",true) end
+                if not imported_head and (basketball and (not authored or uniform) or not basketball and not exact and look) then
                     -- PB mesh textures can cover the selected outfit; keep geometry, replace its appearance.
                     if copy:IsA("MeshPart") then pcall(function() copy.TextureID="" end) end
                     for _,object in ipairs(copy:GetDescendants()) do if object:IsA("SurfaceAppearance") or object:IsA("Decal") or object:IsA("Texture") then object:Destroy() end end
@@ -2048,8 +2051,13 @@ local function create_pivot_modules(ctx)
             state.model.PrimaryPart=nil
             for _,binding in ipairs(costume.bindings) do
                 local real=source:FindFirstChild(binding.name)
-                if real then state.native_body[#state.native_body+1]={real=real,look=binding.part}; state.native_source_parts[real]=true end
-                binding.part.Parent=appearance
+                if binding.part:GetAttribute("PivotImportedHead") and real then
+                    state.replaced_head=real
+                    scope:set(real,"LocalTransparencyModifier",1)
+                else
+                    if real then state.native_body[#state.native_body+1]={real=real,look=binding.part}; state.native_source_parts[real]=true end
+                    binding.part.Parent=appearance
+                end
             end
             for _,object in ipairs(state.model:GetChildren()) do
                 if clothing(object) then
@@ -2133,7 +2141,8 @@ local function create_pivot_modules(ctx)
         local current=assert(root(),"Enter a court first"); model:PivotTo(current.CFrame)
         local rig_type=motors>0 and (model:FindFirstChild("UpperTorso",true) and "R15 joint rig" or model:FindFirstChild("Torso",true) and "R6 joint rig" or "Joint rig") or #bones>0 and "Bone rig" or "Static / welded model"
         state={model=model,parts=parts,source=rig(),height=s.model_height,last_position=current.Position,phase=0,speed=0,joints=joints,bones=bones,motor_count=motors,rig_scale=rig_scale,pb_costume=pb_costume,fit_scale=s.model_fit_scale,rig_label=pb_costume and (pb_costume.basketball and (pb_costume.texture_error and "PB basketball · custom textures unavailable" or pb_costume.uniform_ready and "PB basketball · authored textures registered" or "PB basketball · live body geometry") or "PB costume · live body proportions and poses") or s.model_fit_pb and motors==0 and #bones==0 and "Single-piece fitted costume · limited limb animation" or rig_type.." · "..motors.." animated joints / "..#bones.." bones"}
-        -- Faceless costumes: remove face art in every style, retaining hair and glasses.
+        -- Legacy presets remain faceless; imported avatars retain their authored head and face.
+        if s.model_preset~="Avatar" and s.model_preset~="Outfit" then
         for _,part in ipairs(parts) do
             if canonical_body(part.Name)=="Head" then
                 if part:IsA("MeshPart") then pcall(function() part.TextureID="" end) end
@@ -2144,6 +2153,7 @@ local function create_pivot_modules(ctx)
             end
             local name=part.Name:lower()
             if part:GetAttribute("PivotFaceGeometry") or not canonical_body(part.Name) and not name:find("glasses",1,true) and not name:find("mask",1,true) and (name:find("face",1,true) or name:find("eyebrow",1,true) or name:find("eyelash",1,true) or name:find("mouth",1,true) or name=="eye" or name=="eyes") then part.Transparency=1 end
+        end
         end
         Engine:prepare_native_costume(scope,state,s)
         state.accessories={}
@@ -2183,9 +2193,9 @@ local function create_pivot_modules(ctx)
         if state.pb_costume then Engine:pose_pb_costume(state,source,s) elseif s.model_follow_pose then Engine:pose_character(state,source) end
         for _,original in ipairs(source:GetDescendants()) do
             if original:IsA("BasePart") then
-                if s.model_hide_avatar and not (state.native_source_parts and state.native_source_parts[original]) then scope:set(original,"LocalTransparencyModifier",1) else scope:restore(original,"LocalTransparencyModifier") end
+                if state.replaced_head==original or s.model_hide_avatar and not (state.native_source_parts and state.native_source_parts[original]) then scope:set(original,"LocalTransparencyModifier",1) else scope:restore(original,"LocalTransparencyModifier") end
             elseif original:IsA("Decal") or original:IsA("Texture") then
-                if s.model_hide_avatar then scope:set(original,"Transparency",1) else scope:restore(original,"Transparency") end
+                if s.model_hide_avatar or state.replaced_head and original:IsDescendantOf(state.replaced_head) then scope:set(original,"Transparency",1) else scope:restore(original,"Transparency") end
             end
         end
     end})
@@ -2335,7 +2345,7 @@ local function create_pivot_modules(ctx)
     end,conflicts={"dribble_macros","auto_ankle"}})
     if type(readfile)=="function" then pcall(function() Engine:read_dribble_library() end) end
 
-    Engine.build="2026.11.05.2"
+    Engine.build="2026.11.05.3"
     local s=Engine.settings
     local defaults={ball_finish="Custom",court_preset="Custom",lighting_preset="Warm gym",lighting_intensity=.65,shoe_color="#B79AFF",jersey_color="#FFFFFF",shoe_trail=true,landing_particles=true,effect_strength=.5,indicator_style="Ring",indicator_color="#B79AFF",indicator_radius=2.6,indicator_opacity=.7,green_style="Badge",green_color="#89DEAC",green_duration=.7,outfit_jersey=true,outfit_shoes=true,outfit_accessories=false}
     for key,value in pairs(defaults) do s[key]=value end
@@ -3628,8 +3638,8 @@ do
         object.Parent=parent; return object
     end
     local function rgb(r,g,b) return Color3.fromRGB(r,g,b) end
-    local theme={base=rgb(14,17,23),rail=rgb(14,17,23),panel=rgb(20,25,33),input=rgb(16,21,29),line=rgb(34,43,57),
-        text=rgb(229,237,248),muted=rgb(135,150,172),accent=rgb(137,183,245),selected=rgb(27,39,55),green=rgb(159,190,170)}
+    local theme={base=rgb(17,20,26),rail=rgb(12,15,20),panel=rgb(25,29,37),input=rgb(20,24,31),line=rgb(42,48,60),
+        text=rgb(234,239,247),muted=rgb(145,157,176),accent=rgb(151,190,246),selected=rgb(35,48,67),green=rgb(159,190,170)}
     local function corner(object,n)
         local c=object:FindFirstChildWhichIsA("UICorner") or make("UICorner",{},object); c.CornerRadius=UDim.new(0,n)
     end
@@ -3784,8 +3794,8 @@ do
     local function small_button(parent,value,callback)
         local b=make("TextButton",{Text=value,Size=UDim2.fromOffset(110,28),BackgroundColor3=theme.panel,BorderSizePixel=0,
             TextColor3=theme.text,TextSize=14,Font=Enum.Font.SourceSans,AutoButtonColor=false},parent)
-        corner(b,5)
-        border(b).Transparency=.6
+        corner(b,7)
+        border(b).Transparency=.72
         on(b.Activated,callback)
         hover_button(b)
         return b
@@ -3805,7 +3815,7 @@ do
     end
     assert(header and status and pages.Diagnostics,"Unsupported Pivot layout.")
     make("Folder",{Name="CompactVisuals"},gui)
-    shell.BackgroundColor3=theme.base; corner(shell,9); border(shell)
+    shell.BackgroundColor3=theme.base; corner(shell,12); border(shell)
     header.Text=""; header.Position=UDim2.fromOffset(68,0); header.Size=UDim2.new(1,-112,0,42)
     subtitle.Visible=false
     nav.Visible=false
@@ -3813,12 +3823,12 @@ do
     local rail_line=frame(shell,20,97,660,1,theme.line)
     local top_line=frame(shell,20,54,660,1,theme.line)
     local logo=label(shell,"Pivot",20,12,100,28,19,theme.text); logo.Font=Enum.Font.SourceSansBold; logo.TextXAlignment=Enum.TextXAlignment.Left
-    local build_label=label(shell,"BUILD 2026.11.05.2",242,17,150,18,10,theme.muted); build_label.Name="PivotBuild"; build_label.Font=Enum.Font.RobotoMono; build_label.TextWrapped=false
+    local build_label=label(shell,"BUILD 2026.11.05.3",242,17,150,18,10,theme.muted); build_label.Name="PivotBuild"; build_label.Font=Enum.Font.RobotoMono; build_label.TextWrapped=false
     local heading=label(shell,"Practical Basketball",94,14,240,26,11,theme.muted); heading.Font=Enum.Font.SourceSansSemibold
     close.BackgroundColor3=theme.rail; close.TextColor3=theme.muted; close.TextSize=14; corner(close,4)
     local search=make("TextBox",{Text="",PlaceholderText="Find a control...",PlaceholderColor3=theme.muted,Position=UDim2.fromOffset(484,10),Size=UDim2.fromOffset(166,23),
         ClearTextOnFocus=false,TextSize=14,TextColor3=theme.text,BackgroundColor3=theme.input,BorderSizePixel=0,Font=Enum.Font.SourceSans},shell)
-    corner(search,4)
+    corner(search,7); border(search).Transparency=.5
     search.TextXAlignment=Enum.TextXAlignment.Left
     make("UIPadding",{PaddingLeft=UDim.new(0,26),PaddingRight=UDim.new(0,8)},search)
     local search_symbol=icon(shell,"Search",487,12,theme.muted)
@@ -3998,8 +4008,15 @@ do
         top_line.Position=UDim2.fromOffset(left,desktop and 64 or 54); top_line.Size=UDim2.new(1,-left-20,0,1)
         brand_subtitle.Visible=desktop; nav_caption.Visible=desktop
         logo.Position=UDim2.fromOffset(18,desktop and 15 or 12)
-        heading.Position=UDim2.fromOffset(desktop and 176 or 120,desktop and 20 or 14)
-        heading.TextSize=desktop and 22 or 16; heading.TextColor3=theme.text
+        heading.Position=UDim2.fromOffset(desktop and 178 or 120,desktop and 22 or 14)
+        heading.Font=Enum.Font.SourceSansBold; heading.TextSize=desktop and 24 or 16; heading.TextColor3=theme.text
+        if desktop then
+            search.Position=UDim2.new(1,-292,0,19); search.Size=UDim2.fromOffset(194,30)
+            search_symbol.Position=UDim2.new(1,-287,0,24)
+            close.Position=UDim2.new(1,-44,0,19); close.Size=UDim2.fromOffset(28,30)
+        else search.Size=UDim2.fromOffset(166,23) end
+        local minimize_button=shell:FindFirstChild("Minimize")
+        if minimize_button then minimize_button.Position=desktop and UDim2.new(1,-78,0,19) or UDim2.new(1,-64,0,10); minimize_button.Size=desktop and UDim2.fromOffset(28,30) or UDim2.fromOffset(23,23) end
         build_label.Position=desktop and UDim2.new(0,18,1,-34) or UDim2.fromOffset(104,17)
         build_label.Size=UDim2.fromOffset(132,18); build_label.Visible=desktop
         for _,page in pairs(pages) do page.Position=UDim2.fromOffset(left,top); page.Size=UDim2.new(1,-left-14,1,-top-62) end
@@ -4016,6 +4033,8 @@ do
                 item.icon.Visible=not compact
                 item.label.Position=UDim2.fromOffset(compact and 0 or 33,0); item.label.Size=UDim2.new(1,compact and 0 or -35,1,0)
                 item.label.TextXAlignment=compact and Enum.TextXAlignment.Center or Enum.TextXAlignment.Left
+                item.label.Font=selected==key and Enum.Font.SourceSansSemibold or Enum.Font.SourceSans
+                local stroke=item.button:FindFirstChildWhichIsA("UIStroke"); if stroke then stroke.Transparency=1 end
                 item.icon.Position=UDim2.fromOffset(9,desktop and 9 or 5)
                 if item.indicator then item.indicator.Position=desktop and UDim2.fromOffset(0,10) or UDim2.new(0,7,1,-1); item.indicator.Size=desktop and UDim2.fromOffset(2,18) or UDim2.new(1,-14,0,2) end
             end
@@ -4093,7 +4112,7 @@ do
     local function set_theme(mode)
         reset_hovers()
         local palettes={
-            Graphite={base=rgb(14,17,23),rail=rgb(14,17,23),panel=rgb(20,25,33),input=rgb(16,21,29),line=rgb(34,43,57),text=rgb(229,237,248),muted=rgb(135,150,172),accent=rgb(137,183,245),selected=rgb(27,39,55),green=rgb(159,190,170)},
+            Graphite={base=rgb(17,20,26),rail=rgb(12,15,20),panel=rgb(25,29,37),input=rgb(20,24,31),line=rgb(42,48,60),text=rgb(234,239,247),muted=rgb(145,157,176),accent=rgb(151,190,246),selected=rgb(35,48,67),green=rgb(159,190,170)},
             Slate={base=rgb(23,28,35),rail=rgb(23,28,35),panel=rgb(31,38,47),input=rgb(26,32,40),line=rgb(48,57,70),text=rgb(229,234,242),muted=rgb(151,163,182),accent=rgb(172,193,220),selected=rgb(43,54,69),green=rgb(159,190,170)},
             Light={base=rgb(241,242,244),rail=rgb(241,242,244),panel=rgb(250,250,251),input=rgb(232,234,238),line=rgb(213,216,223),text=rgb(33,37,44),muted=rgb(102,110,124),accent=rgb(67,83,111),selected=rgb(221,227,237),green=rgb(64,124,88)}
         }
@@ -4151,17 +4170,17 @@ do
         local track=button:FindFirstChild("Track"); local knob=track and track:FindFirstChild("Knob")
         if not knob then return end
         ui.animate(track,{BackgroundColor3=on and theme.accent or theme.line})
-        ui.animate(knob,{BackgroundColor3=on and theme.base or theme.muted,Position=UDim2.fromOffset(on and 20 or 2,2)})
+        ui.animate(knob,{BackgroundColor3=on and theme.base or theme.muted,Position=UDim2.fromOffset(on and 22 or 2,2)})
         local row=button.Parent
         local marker=row and row:FindFirstChild("StateMark"); if marker then marker.Visible=on end
         if row and row.Name:sub(1,10)=="ModuleRow_" then row.BackgroundColor3=on and theme.selected or theme.panel; row.BackgroundTransparency=on and .4 or 1 end
     end
     local function switch(parent,callback)
         local button=make("TextButton",{Name="Toggle",Text="",AutoButtonColor=false,BackgroundTransparency=1,BorderSizePixel=0,Size=UDim2.fromOffset(44,26)},parent)
-        local track=make("Frame",{Name="Track",Position=UDim2.fromOffset(4,4),Size=UDim2.fromOffset(36,18),BorderSizePixel=0},button)
-        make("UICorner",{CornerRadius=UDim.new(0,9)},track)
-        local knob=make("Frame",{Name="Knob",Size=UDim2.fromOffset(14,14),BorderSizePixel=0},track)
-        make("UICorner",{CornerRadius=UDim.new(0,7)},knob)
+        local track=make("Frame",{Name="Track",Position=UDim2.fromOffset(0,2),Size=UDim2.fromOffset(42,22),BorderSizePixel=0},button)
+        make("UICorner",{CornerRadius=UDim.new(0,11)},track)
+        local knob=make("Frame",{Name="Knob",Size=UDim2.fromOffset(18,18),BorderSizePixel=0},track)
+        make("UICorner",{CornerRadius=UDim.new(0,9)},knob)
         connect(button.Activated,callback); paint_switch(button,false)
         ui.hover(button,{rounding=9,inset=4,growth=1})
         return button
@@ -4656,8 +4675,8 @@ do
             for _,group in ipairs(groups) do
                 local column=columns==2 and (heights[1]<=heights[2] and 1 or 2) or 1
                 local card=own(make("Frame",{Name="Group_"..group,Position=UDim2.new((column-1)/columns,(column-1)*4,0,heights[column]),Size=UDim2.new(1/columns,columns==2 and -10 or -6,0,40),BackgroundColor3=theme.panel,BorderSizePixel=0},page))
-                make("UICorner",{CornerRadius=UDim.new(0,6)},card)
-                make("UIStroke",{Color=theme.line,Thickness=1,ApplyStrokeMode=Enum.ApplyStrokeMode.Border},card)
+                make("UICorner",{CornerRadius=UDim.new(0,9)},card)
+                make("UIStroke",{Color=theme.line,Transparency=.35,Thickness=1,ApplyStrokeMode=Enum.ApplyStrokeMode.Border},card)
                 local header=ui.button(card,group..(collapsed[group] and "  +" or "  −"),function() collapsed[group]=not collapsed[group]; rebuild() end)
                 header.Size=UDim2.new(1,-20,0,32); header.Position=UDim2.fromOffset(10,0); header.BackgroundTransparency=1; header.TextXAlignment=Enum.TextXAlignment.Left
                 local divider=make("Frame",{Position=UDim2.fromOffset(0,32),Size=UDim2.new(1,0,0,1),BackgroundColor3=theme.line,BorderSizePixel=0},card)
