@@ -971,12 +971,17 @@ local function create_pivot_modules(ctx)
     end
     function Engine:run_combo()
         local s=self.settings
+        assert(not self.dribble_job,"Another dribble combo is running")
+        local allowed,reason=self:combo_allowed(); assert(allowed,reason)
         local steps,err=Core.parse(s.custom_combo,40,s.combo_delay); assert(steps,err)
+        local owner
         local ok,message=ctx.runner:start(function(token)
+            self.combo_token=token; owner=token
             for _,step in ipairs(steps) do
+                local allowed,reason=self:combo_allowed(); assert(allowed,reason)
                 if not ctx.runner:step(step.keys,step.hold,token) or not ctx.runner:wait(step.gap,token) then return end
             end
-        end,function(success,result) ctx.report(success and "Combo finished" or tostring(result)) end)
+        end,function(success,result) if self.combo_token==owner then self.combo_token=nil end; ctx.report(success and "Combo finished" or tostring(result)) end)
         assert(ok,message)
     end
     add("dribble_macros","Dribble macros","Dribbling","Runs your custom sequence from its assigned keybind",{start=function(scope,s)
@@ -2382,11 +2387,13 @@ local function create_pivot_modules(ctx)
         assert(not self.dribble_job and not ctx.runner.current,"Another combo is running")
         assert(type(steps)=="table" and #steps>0,"Add a move first")
         local controller,keyboard=client_parts(); local endpoint=assert(keyboard.Services.InputService.Dribble,"Dribble input unavailable")
+        local allowed,reason=self:combo_allowed(); assert(allowed,reason)
         local job={cancelled=false}; self.dribble_job=job
         task.spawn(function()
             local ok,err=pcall(function()
                 for i,step in ipairs(steps) do
                     if job.cancelled then break end
+                    local allowed,reason=self:combo_allowed(); assert(allowed,reason)
                     assert(registry.active.dribble_library and not input:GetFocusedTextBox() and not ctx.runner.current,"Dribble combo paused")
                     local character=assert(controller:GetCharacter(),"Enter a court first"); local a=character.data and character.data.Attributes or {}
                     assert(held_ball(rig()) or rig() and rig():GetAttribute("Basketball")==true,"Hold the ball first")
@@ -2419,7 +2426,7 @@ local function create_pivot_modules(ctx)
     end,conflicts={"dribble_macros","auto_ankle"}})
     if type(readfile)=="function" then pcall(function() Engine:read_dribble_library() end) end
 
-    Engine.build="2026.11.06.4"
+    Engine.build="2026.11.06.5"
     local s=Engine.settings
     local defaults={ball_finish="Custom",court_preset="Custom",lighting_preset="Warm gym",lighting_intensity=.65,shoe_color="#B79AFF",jersey_color="#FFFFFF",shoe_trail=true,landing_particles=true,effect_strength=.5,indicator_style="Ring",indicator_color="#B79AFF",indicator_radius=2.6,indicator_opacity=.7,green_style="Badge",green_color="#89DEAC",green_duration=.7,outfit_jersey=true,outfit_shoes=true,outfit_accessories=false}
     for key,value in pairs(defaults) do s[key]=value end
@@ -3250,6 +3257,192 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
         state.draw(s); return state
     end,step=function(_,state,settings) state.draw(settings) end,interval=.02})
 
+    for key,value in pairs({quality_radius=12,quality_range=26,quality_bottom=24,teammate_range=90,teammate_coverage=30,teammate_height=3.5,teammate_color="#8CF0BA",rebound_color="#B8A7F6",rebound_distance=130,rebound_horizon=3,rebound_size=2}) do Engine.settings[key]=value end
+    for key,value in pairs({quality_radius={6,20},quality_range={10,40},quality_bottom={8,180},teammate_range={20,160},teammate_coverage={5,60},teammate_height={2,6},rebound_distance={30,220},rebound_horizon={.5,4},rebound_size={1,4}}) do Engine.ranges[key]=value end
+    local function flat_distance(a,b) local d=a-b; return Vector3.new(d.X,0,d.Z).Magnitude end
+    function Core.pass_lane_distance(point,a,b)
+        local dx,dz=b.X-a.X,b.Z-a.Z; local length=dx*dx+dz*dz
+        if length<.001 then return flat_distance(point,a),0 end
+        local t=math.max(0,math.min(1,((point.X-a.X)*dx+(point.Z-a.Z)*dz)/length))
+        return math.sqrt((point.X-a.X-dx*t)^2+(point.Z-a.Z-dz*t)^2),t
+    end
+    function Core.shot_quality(coverage,distance,speed,stamina,range)
+        local contest=math.max(0,math.min(100,coverage or 0))*.65
+        local reach=math.min(28,math.max(0,(distance or 0)-(range or 26))*1.5)
+        local motion=math.min(20,math.max(0,speed or 0)*.8)
+        local fatigue=stamina and (100-math.max(0,math.min(100,stamina)))*.15 or 0
+        return math.floor(math.max(0,math.min(100,100-contest-reach-motion-fatigue))+.5)
+    end
+    function Core.ballistic_landing(position,velocity,floor_y,gravity,horizon)
+        if not position or not velocity or type(floor_y)~="number" or position.Y<floor_y then return nil end
+        gravity=tonumber(gravity) or 196.2; local t
+        if gravity>.001 then t=(velocity.Y+math.sqrt(velocity.Y*velocity.Y+2*gravity*(position.Y-floor_y)))/gravity
+        elseif velocity.Y<-.001 then t=(floor_y-position.Y)/velocity.Y else return nil end
+        if t~=t or t<=.02 or t>(horizon or 3) then return nil end
+        return Vector3.new(position.X+velocity.X*t,floor_y,position.Z+velocity.Z*t),t
+    end
+    local function tool_object(scope,class,props,parent)
+        local object=Instance.new(class); for key,value in pairs(props or {}) do object[key]=value end; object.Parent=parent
+        scope:defer(function() object:Destroy() end); return object
+    end
+    local function tool_label(scope,parent,text,size,color)
+        return tool_object(scope,"TextLabel",{Text=text,Size=UDim2.fromScale(1,1),BackgroundTransparency=1,TextSize=size,Font=Enum.Font.SourceSansSemibold,TextColor3=color or Color3.fromRGB(231,237,245),TextWrapped=false},parent)
+    end
+    local function team_value(model) local value=model and model:GetAttribute("Team"); return value~=nil and value~=0 and value~="" and value or nil end
+    local rim_cache={time=-10,items={}}
+    local function tool_rims()
+        if os.clock()-rim_cache.time>=1 then rim_cache.items=candidates("rims"); rim_cache.time=os.clock() end
+        return rim_cache.items
+    end
+    local function tool_nearest_rim(origin)
+        local best,distance
+        for _,item in ipairs(tool_rims()) do if item.object.Parent then local value=(item.object.Position-origin).Magnitude; if not distance or value<distance then best=item.object; distance=value end end end
+        return best
+    end
+    local function defenders_for(team)
+        local result={}
+        for _,who in ipairs(players:GetPlayers()) do if who~=ctx.player then
+            local model=rig(who); local point=root(who); local humanoid=model and model:FindFirstChildOfClass("Humanoid")
+            if point and model and (not humanoid or not humanoid.Health or humanoid.Health>0) and (not team or team_value(model)~=team) then result[#result+1]=point.Position end
+        end end
+        return result
+    end
+    local function court_ray(origin,direction,extra)
+        local params=RaycastParams.new(); params.FilterType=Enum.RaycastFilterType.Exclude; params.IgnoreWater=true
+        local excluded={}
+        for _,name in ipairs({"Characters","Basketballs","Hoops","PivotLocalCosmetics","PivotReboundEstimate"}) do local folder=workspace:FindFirstChild(name); if folder then excluded[#excluded+1]=folder end end
+        local mine=rig(); if mine then excluded[#excluded+1]=mine end
+        if extra then excluded[#excluded+1]=extra end
+        for _,item in ipairs(tool_rims()) do if item.object.Parent then excluded[#excluded+1]=item.object end end
+        params.FilterDescendantsInstances=excluded
+        return workspace:Raycast(origin,direction,params)
+    end
+    function Engine:combo_allowed()
+        if not registry.active.possession_safeguards then return true end
+        local model=rig(); if not model or not (held_ball(model) or model:GetAttribute("Basketball")==true) then return false,"Possession lost" end
+        if input:GetFocusedTextBox() then return false,"Text input active" end
+        local ok,c=pcall(local_state); local attrs=ok and c.data and c.data.Attributes or {}
+        local action=attrs.Action or model:GetAttribute("Action")
+        if action=="Shooting" or action=="Dunking" then return false,"Shot started" end
+        return true
+    end
+    add("possession_safeguards","Possession safeguards","Dribbling","Stops Pivot combo playback on possession loss, shooting or text input; prevents overlapping combo systems",{start=function() return {} end,step=function(_,state)
+        local allowed,reason=Engine:combo_allowed()
+        if not allowed then
+            local stopped=false
+            if Engine.dribble_job then Engine.dribble_job.cancelled=true; Engine.dribble_job=nil; stopped=true end
+            if Engine.combo_token and ctx.runner.current==Engine.combo_token then ctx.runner:cancel(); Engine.combo_token=nil; stopped=true end
+            if stopped then state.reason=reason; ctx.report("Combo stopped / "..reason) end
+        end
+    end,interval=.02})
+    add("shot_quality","Shot quality","Shooting","Estimated shot setup from coverage, range, movement and observed stamina; rating is not a make percentage",{start=function(scope)
+        local panel=tool_object(scope,"Frame",{Name="PivotShotQuality",AnchorPoint=Vector2.new(.5,1),Position=UDim2.new(.5,0,1,-24),Size=UDim2.fromOffset(330,72),BackgroundColor3=Color3.fromRGB(17,19,26),BackgroundTransparency=.08,BorderSizePixel=0},ctx.gui)
+        tool_object(scope,"UICorner",{CornerRadius=UDim.new(0,10)},panel)
+        tool_object(scope,"UIStroke",{Color=Color3.fromRGB(67,64,85),Thickness=1},panel)
+        local title=tool_label(scope,panel,"SHOT QUALITY · ESTIMATE",13); title.Position=UDim2.fromOffset(12,6); title.Size=UDim2.new(1,-24,0,18)
+        local result=tool_label(scope,panel,"Hold the ball",21); result.Position=UDim2.fromOffset(12,24); result.Size=UDim2.new(1,-24,0,25)
+        local detail=tool_label(scope,panel,"Waiting for court data",12,Color3.fromRGB(150,159,178)); detail.Position=UDim2.fromOffset(12,50); detail.Size=UDim2.new(1,-24,0,17)
+        local scale=tool_object(scope,"UIScale",{Scale=1},panel)
+        return {panel=panel,result=result,detail=detail,scale=scale}
+    end,step=function(_,state,settings,dt)
+        state.panel.Position=UDim2.new(.5,0,1,-settings.quality_bottom)
+        local camera=workspace.CurrentCamera; state.scale.Scale=math.min(1,((camera and camera.ViewportSize.X or 800)-16)/330)
+        local mine=root(); local model=rig()
+        if not mine or not model then state.result.Text="Enter a court"; state.detail.Text="No character data"; state.previous=nil; return end
+        local rim=tool_nearest_rim(mine.Position)
+        if not rim then state.result.Text="No basket found"; state.detail.Text="Waiting for court data"; return end
+        local velocity=mine.AssemblyLinearVelocity or Vector3.zero; local speed=Vector3.new(velocity.X,0,velocity.Z).Magnitude
+        if state.previous and dt>0 then local delta=mine.Position-state.previous; if delta.Magnitude<8 then speed=math.max(speed,Vector3.new(delta.X,0,delta.Z).Magnitude/dt) end end
+        state.previous=mine.Position
+        local coverage=Core.coverage_estimate(mine.Position,rim.Position,defenders_for(team_value(model)),settings.quality_radius)
+        local distance=flat_distance(mine.Position,rim.Position); local stamina=tonumber(model:GetAttribute("Stamina"))
+        if not stamina then local ok,c=pcall(local_state); stamina=ok and c.data and c.data.Attributes and tonumber(c.data.Attributes.Stamina) or nil end
+        local rating=Core.shot_quality(coverage,distance,speed,stamina,settings.quality_range); state.rating=rating; state.coverage=coverage
+        local held=held_ball(model) or model:GetAttribute("Basketball")==true
+        state.result.Text=held and ((rating>=80 and "Favorable" or rating>=55 and "Mixed" or "Difficult").." · "..rating.."/100") or "Hold the ball"
+        state.result.TextColor3=rating>=80 and Color3.fromRGB(140,240,186) or rating>=55 and Color3.fromRGB(244,204,117) or Color3.fromRGB(240,133,145)
+        state.detail.Text=string.format("Cover %d%% · %.0f studs · Move %.0f · Stamina %s",math.floor(coverage+.5),distance,speed,stamina and tostring(math.floor(stamina)) or "--")
+    end,interval=.08})
+    add("open_teammates","Open teammate arrows","Visuals","Head arrows for confirmed teammates with low estimated coverage and a clear estimated passing lane",{start=function() return {boards={}} end,step=function(scope,state,settings)
+        local mine=root(); local source=rig(); local team=team_value(source); local seen={}
+        if mine and team then
+            local defenders=defenders_for(team)
+            for _,who in ipairs(players:GetPlayers()) do if who~=ctx.player then
+                local model=rig(who); local point=root(who); local head=model and (model:FindFirstChild("Head") or point)
+                local humanoid=model and model:FindFirstChildOfClass("Humanoid")
+                if point and head and team_value(model)==team and (not humanoid or not humanoid.Health or humanoid.Health>0) and (point.Position-mine.Position).Magnitude<=settings.teammate_range then
+                    seen[who]=true
+                    local item=state.boards[who]
+                    if not item then
+                        local board=tool_object(scope,"BillboardGui",{Name="PivotOpenTeammate",Size=UDim2.fromOffset(130,62),AlwaysOnTop=false,LightInfluence=0,MaxDistance=settings.teammate_range},ctx.gui)
+                        local arrow=tool_label(scope,board,"▼",30); arrow.Position=UDim2.fromOffset(0,24); arrow.Size=UDim2.new(1,0,0,34); arrow.TextStrokeTransparency=.4
+                        local label=tool_label(scope,board,"OPEN",13); label.Size=UDim2.new(1,0,0,23); label.TextStrokeTransparency=.35
+                        item={board=board,arrow=arrow,label=label}; state.boards[who]=item
+                    end
+                    local rim=tool_nearest_rim(point.Position)
+                    local coverage=Core.coverage_estimate(point.Position,rim and rim.Position,defenders,settings.quality_radius)
+                    local clear=true
+                    for _,position in ipairs(defenders) do local distance,t=Core.pass_lane_distance(position,mine.Position,point.Position); if t>.1 and t<.95 and distance<2.8 then clear=false; break end end
+                    if clear then local a=mine.Position+Vector3.new(0,1,0); local b=point.Position+Vector3.new(0,1,0); local hit=court_ray(a,b-a,model); if hit then clear=false end end
+                    item.board.Adornee=head; item.board.StudsOffsetWorldSpace=Vector3.new(0,settings.teammate_height,0); item.board.MaxDistance=settings.teammate_range
+                    item.board.Enabled=clear and coverage<=settings.teammate_coverage
+                    item.arrow.TextColor3=cosmetic_color(settings.teammate_color); item.label.TextColor3=item.arrow.TextColor3
+                    item.coverage=coverage
+                end
+            end end
+        end
+        for who,item in pairs(state.boards) do if not seen[who] then item.board:Destroy(); state.boards[who]=nil end end
+    end,interval=.12})
+    add("rebound_estimate","Rebound estimate","Visuals","Floor marker for the nearest unheld airborne ball using current velocity and gravity; recalculates after trajectory changes",{start=function(scope)
+        local folder=tool_object(scope,"Folder",{Name="PivotReboundEstimate"},workspace); local parts={}
+        for i=1,24 do parts[i]=tool_object(scope,"Part",{Name="EstimateRing",Anchored=true,CanCollide=false,CanTouch=false,CanQuery=false,CastShadow=false,Material=Enum.Material.Neon,Transparency=1},folder) end
+        local anchor=tool_object(scope,"Part",{Name="LabelAnchor",Size=Vector3.new(.1,.1,.1),Anchored=true,CanCollide=false,CanTouch=false,CanQuery=false,Transparency=1},folder)
+        local board=tool_object(scope,"BillboardGui",{Adornee=anchor,Size=UDim2.fromOffset(180,30),StudsOffsetWorldSpace=Vector3.new(0,1,0),AlwaysOnTop=false,Enabled=false},ctx.gui)
+        local label=tool_label(scope,board,"REBOUND · EST.",14)
+        return {folder=folder,parts=parts,anchor=anchor,board=board,label=label}
+    end,step=function(_,state,settings,dt)
+        local mine=root(); local ball,best
+        local held={}; for _,who in ipairs(players:GetPlayers()) do local object=held_ball(rig(who)); if object then held[object]=true end end
+        if mine then for _,item in ipairs(candidates("balls")) do
+            local object=item.object; local velocity=object.AssemblyLinearVelocity or Vector3.zero; local distance=(object.Position-mine.Position).Magnitude
+            if not held[object] and distance<=settings.rebound_distance and (object:GetAttribute("MidShot")==true or velocity.Magnitude>2) and (not best or distance<best) then ball=object; best=distance end
+        end end
+        local landing,time
+        if ball then
+            local velocity=ball.AssemblyLinearVelocity or Vector3.zero
+            if velocity.Magnitude<.1 and state.ball==ball and state.previous and dt>0 then local delta=ball.Position-state.previous; if delta.Magnitude<30 then velocity=delta/dt end end
+            if state.ball~=ball then state.gravity=nil; state.previous_velocity=nil end
+            if state.previous_velocity and dt>0 then
+                local observed=(state.previous_velocity.Y-velocity.Y)/dt
+                if observed>5 and observed<400 then state.gravity=state.gravity and state.gravity*.75+observed*.25 or observed end
+            end
+            local floor=court_ray(ball.Position,Vector3.new(0,-200,0),state.folder)
+            if floor and floor.Normal.Y>.7 and ball.Position.Y-floor.Position.Y>2 then
+                landing,time=Core.ballistic_landing(ball.Position,velocity,floor.Position.Y,state.gravity or workspace.Gravity,settings.rebound_horizon)
+                if landing then
+                    local actual=court_ray(landing+Vector3.new(0,20,0),Vector3.new(0,-40,0),state.folder)
+                    if not actual or actual.Normal.Y<.7 then landing=nil
+                    else landing,time=Core.ballistic_landing(ball.Position,velocity,actual.Position.Y,state.gravity or workspace.Gravity,settings.rebound_horizon) end
+                end
+            end
+            state.previous=ball.Position; state.previous_velocity=velocity
+        else state.previous=nil; state.previous_velocity=nil; state.gravity=nil end
+        state.ball=ball; state.landing=landing; state.board.Enabled=landing~=nil
+        for i,part in ipairs(state.parts) do
+            part.Transparency=landing and .2 or 1
+            if landing then
+                local a=(i-1)*math.pi/12; local b=i*math.pi/12; local center=landing+Vector3.new(0,.06,0)
+                local p=center+Vector3.new(math.cos(a)*settings.rebound_size,0,math.sin(a)*settings.rebound_size)
+                local q=center+Vector3.new(math.cos(b)*settings.rebound_size,0,math.sin(b)*settings.rebound_size)
+                part.Size=Vector3.new(.1,.06,(q-p).Magnitude+.025); part.CFrame=CFrame.lookAt((p+q)/2,q); part.Color=cosmetic_color(settings.rebound_color)
+            end
+        end
+        if landing then state.anchor.CFrame=CFrame.new(landing); state.label.Text=string.format("REBOUND · %.1fs EST.",time); state.label.TextColor3=cosmetic_color(settings.rebound_color) end
+    end,interval=.08})
+    Engine.cosmetic_fields.shot_quality={{"quality_radius","Defender range"},{"quality_range","Comfortable shot range"},{"quality_bottom","Distance from bottom"}}
+    Engine.cosmetic_fields.open_teammates={{"teammate_color","Arrow color"},{"teammate_range","Teammate range"},{"teammate_coverage","Maximum estimated coverage"},{"teammate_height","Arrow height"}}
+    Engine.cosmetic_fields.rebound_estimate={{"rebound_color","Marker color"},{"rebound_distance","Ball tracking range"},{"rebound_horizon","Prediction horizon"},{"rebound_size","Marker radius"}}
+
     Engine.cosmetic_loadouts={version=1,loadouts={}}
     Engine.settings.cosmetic_loadout_name="My look"
     local look_modules={crosshair=true,ball_trail=true,player_trail=true,ball_appearance=true,court_appearance=true,self_outline=true,sky=true,custom_model=true,coverage_hud=true,player_indicator=true,shoe_effects=true,outfit_tint=true,lighting_preset=true,green_effect=true,wings=true,character_aura=true,ball_impacts=true,wing_trails=true,rim_effects=true,lightning_aura=true,meter_style=true,hide_meters=true}
@@ -4062,7 +4255,7 @@ do
     local rail_line=frame(shell,20,97,660,1,theme.line)
     local top_line=frame(shell,20,54,660,1,theme.line)
     local logo=label(shell,"Pivot",20,12,100,28,19,theme.text); logo.Font=Enum.Font.SourceSansBold; logo.TextXAlignment=Enum.TextXAlignment.Left
-    local build_label=label(shell,"BUILD 2026.11.06.4",242,17,150,18,10,theme.muted); build_label.Name="PivotBuild"; build_label.Font=Enum.Font.RobotoMono; build_label.TextWrapped=false
+    local build_label=label(shell,"BUILD 2026.11.06.5",242,17,150,18,10,theme.muted); build_label.Name="PivotBuild"; build_label.Font=Enum.Font.RobotoMono; build_label.TextWrapped=false
     local heading=label(shell,"Practical Basketball",94,14,240,26,11,theme.muted); heading.Font=Enum.Font.SourceSansSemibold
     close.BackgroundColor3=theme.rail; close.TextColor3=theme.muted; close.TextSize=14; corner(close,4)
     local search=make("TextBox",{Text="",PlaceholderText="Find a control...",PlaceholderColor3=theme.muted,Position=UDim2.fromOffset(484,10),Size=UDim2.fromOffset(166,23),
@@ -4642,16 +4835,21 @@ do
     local loop_token
     local function playback(loop)
         stop_capture(); local recording,err=Core.validate_recording(engine.recording); assert(recording,err)
+        assert(not engine.dribble_job,"Another dribble combo is running")
+        local allowed,reason=engine:combo_allowed(); assert(allowed,reason)
+        local owner
         local ok,message=runner:start(function(token)
+            owner=token; engine.combo_token=token
             if loop then loop_token=token end
             repeat
                 for _,step in ipairs(recording.steps) do
+                    local allowed,reason=engine:combo_allowed(); assert(allowed,reason)
                     local keys=step.shift and {"LeftShift",step.key} or {step.key}
                     if not runner:step(keys,step.hold,token) or not runner:wait(step.gap,token) then return end
                 end
                 if loop and not runner:wait(150,token) then return end
             until not loop or token.cancelled
-        end,function(success,result) if loop then loop_token=nil end; report(success and "Recording playback finished" or tostring(result)) end)
+        end,function(success,result) if engine.combo_token==owner then engine.combo_token=nil end; if loop then loop_token=nil end; report(success and "Recording playback finished" or tostring(result)) end)
         assert(ok,message)
     end
     connect(input.InputBegan,function(event,processed)
@@ -4954,7 +5152,11 @@ do
             local groups=category=="All" and {"Shooting","Defense","Dribbling","Cosmetics","Character","Player","Visuals","Camera","World"} or {category}
             local columns=category=="All" and (ui.content_width and ui.content_width() or window.Size.X.Offset)>=620 and 2 or 1
             local heights={46,46}
-            local display_definitions={}; for _,definition in ipairs(engine.definitions) do if definition.id=="dribble_library" then table.insert(display_definitions,1,definition) else display_definitions[#display_definitions+1]=definition end end
+            local display_definitions={}; local priority={}
+            for _,id in ipairs({"shot_quality","open_teammates","rebound_estimate","possession_safeguards","dribble_library"}) do
+                local definition=engine.registry.definitions[id]; if definition then display_definitions[#display_definitions+1]=definition; priority[id]=true end
+            end
+            for _,definition in ipairs(engine.definitions) do if not priority[definition.id] then display_definitions[#display_definitions+1]=definition end end
             for _,group in ipairs(groups) do
                 local column=columns==2 and (heights[1]<=heights[2] and 1 or 2) or 1
                 local card=own(make("Frame",{Name="Group_"..group,Position=UDim2.new((column-1)/columns,(column-1)*4,0,heights[column]),Size=UDim2.new(1/columns,columns==2 and -10 or -6,0,40),BackgroundColor3=theme.panel,BorderSizePixel=0},page))
