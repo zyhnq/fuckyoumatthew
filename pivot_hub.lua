@@ -1565,9 +1565,68 @@ local function create_pivot_modules(ctx)
     }
     local model_presets={}
     for _,entry in ipairs(Engine.characters) do model_presets[entry.name]=entry.asset end
+    Engine.settings.model_outfit=""; Engine.settings.model_username=""
+    function Engine:validate_character_reference(source,reference)
+        assert(source=="Model" or source=="Outfit" or source=="Avatar","Unknown character source")
+        reference=tostring(reference or ""):match("^%s*(.-)%s*$")
+        if source=="Avatar" then
+            assert(#reference>=1 and #reference<=21 and reference:match("^@?[%w_]+$"),"Enter a Roblox username or numeric user ID")
+        else
+            assert(reference:match("^%d+$") and #reference<=18 and reference:find("[1-9]"),source=="Outfit" and "Enter a positive numeric outfit ID" or "Enter a positive numeric Roblox model ID")
+        end
+        return reference
+    end
+    function Engine:source_cache_key(source,reference)
+        return source=="Model" and reference or source:lower()..":"..reference:lower()
+    end
+    function Engine:character_reference(settings,name)
+        settings=settings or self.settings; name=name or settings.model_preset
+        if name=="Outfit" then return "Outfit",self:validate_character_reference("Outfit",settings.model_outfit)
+        elseif name=="Avatar" then return "Avatar",self:validate_character_reference("Avatar",settings.model_username)
+        else return "Model",self:validate_character_reference("Model",model_presets[name] or settings.model_asset) end
+    end
+    function Engine:source_objects(source,reference)
+        reference=self:validate_character_reference(source,reference)
+        if source=="Model" then return self:model_objects(reference) end
+        local key=self:source_cache_key(source,reference); local cached=self.model_cache and self.model_cache[key]
+        if cached then local copies={}; for _,object in ipairs(cached) do copies[#copies+1]=object:Clone() end; return copies end
+        local service=ctx.players; local description
+        local ok,err=pcall(function()
+            if source=="Outfit" then
+                local id=assert(Core.bounded(reference,1,9007199254740991),"Outfit ID is out of range")
+                assert(type(service.GetHumanoidDescriptionFromOutfitIdAsync)=="function","Outfit import is unavailable in this client")
+                description=service:GetHumanoidDescriptionFromOutfitIdAsync(id)
+            else
+                local user_id
+                if reference:sub(1,1)~="@" and reference:match("^%d+$") then user_id=Core.bounded(reference,1,9007199254740991); assert(user_id,"User ID is out of range")
+                else
+                    assert(type(service.GetUserIdFromNameAsync)=="function","Username lookup is unavailable in this client")
+                    user_id=service:GetUserIdFromNameAsync(reference:gsub("^@",""))
+                end
+                assert(type(service.GetHumanoidDescriptionFromUserIdAsync)=="function","Avatar import is unavailable in this client")
+                description=service:GetHumanoidDescriptionFromUserIdAsync(user_id)
+            end
+        end)
+        assert(ok,source.." lookup failed: "..tostring(err))
+        assert(description,"Roblox returned no appearance for this source")
+        local created,model=pcall(function()
+            assert(type(service.CreateHumanoidModelFromDescriptionAsync)=="function","Avatar model creation is unavailable in this client")
+            return service:CreateHumanoidModelFromDescriptionAsync(description,Enum.HumanoidRigType.R15)
+        end)
+        pcall(function() description:Destroy() end)
+        assert(created,source.." model could not be created: "..tostring(model))
+        assert(model and model:IsA("Model") and not model:IsDescendantOf(workspace),"Avatar import must return a detached model")
+        return {model}
+    end
+    function Engine:selected_character_objects(name)
+        local source,reference=self:character_reference(self.settings,name)
+        return self:source_objects(source,reference)
+    end
+
     Engine.model_library={version=1,models={}}
     Engine.model_cache={}; Engine.model_preload={busy=false,done=0,total=0,failed=0}
     local library_defaults={}
+    library_defaults.model_outfit=Engine.settings.model_outfit; library_defaults.model_username=Engine.settings.model_username
     for _,key in ipairs({"model_style","model_fit_pb","model_fit_scale","model_accessory_scale","model_height","model_offset","model_rotation","model_follow_pose","model_motion","model_hide_avatar","model_high_detail","model_show_hair","model_show_hats","model_show_masks","model_show_capes","model_show_weapons","model_show_extras"}) do library_defaults[key]=Engine.settings[key] end
     function Engine:validate_model_library(data)
         if type(data)~="table" or data.version~=1 or type(data.models)~="table" then return nil,"Invalid model library" end
@@ -1577,12 +1636,15 @@ local function create_pivot_modules(ctx)
         for i=1,count do
             local item=data.models[i]
             if type(item)~="table" or type(item.name)~="string" or #item.name<1 or #item.name>40 or item.name:find("[%c]") or names[item.name:lower()] then return nil,"Invalid or duplicate model name" end
-            if type(item.asset)~="string" or not item.asset:match("^%d+$") or #item.asset>18 or not item.asset:find("[1-9]") then return nil,"Invalid model asset ID" end
+            local source=item.source or "Model"
+            if type(item.asset)~="string" then return nil,"Invalid character reference" end
+            local ok,reference=pcall(self.validate_character_reference,self,source,item.asset); if not ok then return nil,tostring(reference) end
             local settings,err=Core.validate_module_settings(item.settings or {},library_defaults,self.ranges)
             if not settings then return nil,err end
             if settings.model_style~="Basketball" and settings.model_style~="Original costume" then return nil,"Invalid costume style" end
-            local preset="Custom"; if type(item.preset)=="string" and model_presets[item.preset]==item.asset then preset=item.preset end
-            names[item.name:lower()]=true; result.models[i]={name=item.name,asset=item.asset,preset=preset,settings=settings}
+            local preset=source=="Avatar" and "Avatar" or source=="Outfit" and "Outfit" or "Custom"
+            if source=="Model" and type(item.preset)=="string" and model_presets[item.preset]==reference then preset=item.preset end
+            names[item.name:lower()]=true; result.models[i]={name=item.name,source=source,asset=reference,preset=preset,settings=settings}
         end
         return result
     end
@@ -1599,7 +1661,8 @@ local function create_pivot_modules(ctx)
     end
     function Engine:save_current_model(name)
         name=tostring(name or ""):match("^%s*(.-)%s*$"); if name=="" then name=self.settings.model_preset end
-        local item={name=name,preset=self.settings.model_preset,asset=model_presets[self.settings.model_preset] or tostring(self.settings.model_asset):match("^%s*(%d+)%s*$"),settings={}}
+        local source,reference=self:character_reference()
+        local item={name=name,preset=self.settings.model_preset,source=source,asset=reference,settings={}}
         for key in pairs(library_defaults) do item.settings[key]=self.settings[key] end
         local next_library={version=1,models={}}; local replaced=false
         for i,old in ipairs(self.model_library.models) do if old.name:lower()==name:lower() then next_library.models[i]=item; replaced=true else next_library.models[i]=old end end
@@ -1617,6 +1680,7 @@ local function create_pivot_modules(ctx)
         local was_active=registry.active.custom_model~=nil; registry:disable("custom_model")
         for key,value in pairs(item.settings) do self.settings[key]=value end
         self.settings.model_preset=item.preset; self.settings.model_asset=item.asset
+        if item.source=="Outfit" then self.settings.model_outfit=item.asset elseif item.source=="Avatar" then self.settings.model_username=item.asset end
         local ok,failure=registry:enable("custom_model",self.settings)
         if not ok then for key,value in pairs(previous) do self.settings[key]=value end; if was_active then registry:enable("custom_model",self.settings) end; error(failure) end
         self.settings.model_save_name=item.name; ctx.report("Equipped "..item.name); return true
@@ -1634,7 +1698,7 @@ local function create_pivot_modules(ctx)
         for _,objects in pairs(self.model_cache) do for _,object in ipairs(objects) do object:Destroy() end end; self.model_cache={}
     end
     function Engine:prune_model_cache()
-        local keep={}; for _,item in ipairs(self.model_library.models) do keep[item.asset]=true end
+        local keep={}; for _,item in ipairs(self.model_library.models) do keep[self:source_cache_key(item.source or "Model",item.asset)]=true end
         for asset,objects in pairs(self.model_cache) do if not keep[asset] then for _,object in ipairs(objects) do object:Destroy() end; self.model_cache[asset]=nil end end
     end
     function Engine:preload_model_library()
@@ -1644,10 +1708,11 @@ local function create_pivot_modules(ctx)
         task.spawn(function()
             for _,item in ipairs(valid.models) do
                 if self.library_closed then break end
-                if not self.model_cache[item.asset] then
+                local cache_key=self:source_cache_key(item.source,item.asset)
+                if not self.model_cache[cache_key] then
                     local objects
                     local ok=pcall(function()
-                        objects=game:GetObjects("rbxassetid://"..item.asset); local parts=0
+                        objects=self:source_objects(item.source,item.asset); local parts=0
                         for _,object in ipairs(objects) do
                             assert(not object:IsDescendantOf(workspace),"Asset must be detached")
                             local all={object}; for _,child in ipairs(object:GetDescendants()) do all[#all+1]=child end
@@ -1658,13 +1723,13 @@ local function create_pivot_modules(ctx)
                         end
                         assert(parts>0,"Asset contains no model geometry")
                         if self.library_closed then error("Library closed") end
-                        self.model_cache[item.asset]=objects
+                        self.model_cache[cache_key]=objects
                         local provider=game:GetService("ContentProvider"); if provider then
                             local failures=0; provider:PreloadAsync(objects,function(_,status) if status~=Enum.AssetFetchStatus.Success then failures=failures+1 end end)
                             assert(failures==0,"Some textures could not preload")
                         end
                     end)
-                    if not ok then progress.failed=progress.failed+1; self.model_cache[item.asset]=nil; if objects then for _,object in ipairs(objects) do object:Destroy() end end end
+                    if not ok then progress.failed=progress.failed+1; self.model_cache[cache_key]=nil; if objects then for _,object in ipairs(objects) do object:Destroy() end end end
                 end
                 progress.done=progress.done+1; task.wait()
             end
@@ -1698,16 +1763,18 @@ local function create_pivot_modules(ctx)
     end
     Engine.settings.model_last_preset=Engine.settings.model_preset
     function Engine:skin_source()
-        return self.settings.model_preset=="Custom" and "Roblox model ID" or "Preset character"
+        return self.settings.model_preset=="Custom" and "Roblox model ID" or self.settings.model_preset=="Outfit" and "Outfit ID" or self.settings.model_preset=="Avatar" and "Roblox username" or "Preset character"
     end
     function Engine:set_skin_source(source)
-        assert(source=="Preset character" or source=="Roblox model ID","Choose a valid skin source")
+        assert(source=="Preset character" or source=="Roblox model ID" or source=="Outfit ID" or source=="Roblox username","Choose a valid skin source")
         if source==self:skin_source() then return end
         registry:disable("custom_model")
-        if source=="Roblox model ID" then
-            self.settings.model_last_preset=self.settings.model_preset; self.settings.model_preset="Custom"
+        if model_presets[self.settings.model_preset] then self.settings.model_last_preset=self.settings.model_preset end
+        if source=="Roblox model ID" then self.settings.model_preset="Custom"
+        elseif source=="Outfit ID" then self.settings.model_preset="Outfit"
+        elseif source=="Roblox username" then self.settings.model_preset="Avatar"
         else self.settings.model_preset=model_presets[self.settings.model_last_preset] and self.settings.model_last_preset or "Sasuke" end
-        ctx.report(source=="Roblox model ID" and "Enter a Roblox model ID, then press Equip selected character" or "Choose a preset, then press Equip selected character")
+        ctx.report("Selected "..source.." / preview or equip when ready")
     end
     function Engine:equip_selected_character()
         registry:disable("custom_model")
@@ -2020,10 +2087,8 @@ local function create_pivot_modules(ctx)
 
     add("custom_model","Character skin","Character","Basketball style preserves PB body meshes; Sasuke includes a custom Uchiha uniform. Original costume keeps the donor appearance",{start=function(scope,s)
         s.model_renderer="Native world"
-        assert(model_presets[s.model_preset] or s.model_preset=="Custom","Unknown character preset")
-        local asset=model_presets[s.model_preset] or s.model_asset
-        asset=tostring(asset):match("^%s*(%d+)%s*$"); assert(asset and #asset<=18,"Enter a numeric Roblox model asset ID")
-        local objects=Engine:model_objects(asset); assert(type(objects)=="table" and #objects>0,"Model asset could not be loaded")
+        assert(model_presets[s.model_preset] or s.model_preset=="Custom" or s.model_preset=="Outfit" or s.model_preset=="Avatar","Unknown character preset")
+        local objects=Engine:selected_character_objects(); assert(type(objects)=="table" and #objects>0,"Character source could not be loaded")
         local model=Instance.new("Model"); model.Name="PivotCosmeticModel"; local donor_container=model; scope:defer(function() donor_container:Destroy() end)
         local captured_joints,captured_bones={},{}
         -- Objects remain outside the data model until all executable descendants are removed.
@@ -2270,7 +2335,7 @@ local function create_pivot_modules(ctx)
     end,conflicts={"dribble_macros","auto_ankle"}})
     if type(readfile)=="function" then pcall(function() Engine:read_dribble_library() end) end
 
-    Engine.build="2026.11.05.1"
+    Engine.build="2026.11.05.2"
     local s=Engine.settings
     local defaults={ball_finish="Custom",court_preset="Custom",lighting_preset="Warm gym",lighting_intensity=.65,shoe_color="#B79AFF",jersey_color="#FFFFFF",shoe_trail=true,landing_particles=true,effect_strength=.5,indicator_style="Ring",indicator_color="#B79AFF",indicator_radius=2.6,indicator_opacity=.7,green_style="Badge",green_color="#89DEAC",green_duration=.7,outfit_jersey=true,outfit_shoes=true,outfit_accessories=false}
     for key,value in pairs(defaults) do s[key]=value end
@@ -2391,8 +2456,7 @@ local function create_pivot_modules(ctx)
         if active and event.kind=="feedback" and event.code==5 then active.state.untilTime=os.clock()+s.green_duration end
     end
     function Engine:preview_character(viewport,name)
-        local asset=model_presets[name] or name=="Custom" and tostring(self.settings.model_asset):match("^%s*(%d+)%s*$"); assert(asset and #asset<=18,"Choose a preset character or enter a numeric Roblox model ID")
-        local objects=self:model_objects(asset)
+        local objects=self:selected_character_objects(name)
         if not viewport.Parent then for _,o in ipairs(objects) do o:Destroy() end; return end
         viewport:ClearAllChildren()
         local world=Instance.new("WorldModel")
@@ -3749,7 +3813,7 @@ do
     local rail_line=frame(shell,20,97,660,1,theme.line)
     local top_line=frame(shell,20,54,660,1,theme.line)
     local logo=label(shell,"Pivot",20,12,100,28,19,theme.text); logo.Font=Enum.Font.SourceSansBold; logo.TextXAlignment=Enum.TextXAlignment.Left
-    local build_label=label(shell,"BUILD 2026.11.05.1",242,17,150,18,10,theme.muted); build_label.Name="PivotBuild"; build_label.Font=Enum.Font.RobotoMono; build_label.TextWrapped=false
+    local build_label=label(shell,"BUILD 2026.11.05.2",242,17,150,18,10,theme.muted); build_label.Name="PivotBuild"; build_label.Font=Enum.Font.RobotoMono; build_label.TextWrapped=false
     local heading=label(shell,"Practical Basketball",94,14,240,26,11,theme.muted); heading.Font=Enum.Font.SourceSansSemibold
     close.BackgroundColor3=theme.rail; close.TextColor3=theme.muted; close.TextSize=14; corner(close,4)
     local search=make("TextBox",{Text="",PlaceholderText="Find a control...",PlaceholderColor3=theme.muted,Position=UDim2.fromOffset(484,10),Size=UDim2.fromOffset(166,23),
@@ -3875,7 +3939,7 @@ do
         reset_hovers()
         selected=name; result_page.Visible=false; if PivotUI and PivotUI.hide_extra then PivotUI.hide_extra() end
         for key,page in pairs(pages) do page.Visible=key==name end
-        heading.Text="Practical Basketball"
+        heading.Text=({Diagnostics="Dashboard",["Shot Lab"]="Main",Profiles="Profiles"})[name] or name
         for key,item in pairs(rail_items) do
             local active=key==name; item.button.BackgroundColor3=active and theme.selected or theme.rail
             icon_color(item.icon,active and theme.accent or theme.muted); item.label.TextColor3=active and theme.accent or theme.muted
@@ -3919,18 +3983,41 @@ do
     local cancel_text=label(cancel,"Stop all  ·  F8",0,0,96,28,11); cancel_text.TextXAlignment=Enum.TextXAlignment.Center
     hover_button(close,{rounding=4}); hover_button(cancel,{rounding=4}); style_input(search)
     local scale=shell:FindFirstChildWhichIsA("UIScale")
+    local brand_subtitle=label(shell,"Practical Basketball",18,43,130,18,10,theme.muted)
+    local nav_caption=label(shell,"WORKSPACE",18,83,130,18,10,theme.muted)
+    local function content_width() return shell.Size.X.Offset-(shell.Size.X.Offset>=760 and 190 or 40) end
     local function layout_nav()
         local w=shell.Size.X.Offset
+        local desktop=w>=760
+        local stacked=w<560
+        local left=desktop and 174 or 20
+        local top=desktop and 84 or stacked and 152 or 112
+        rail.Visible=desktop; rail.Size=UDim2.new(0,154,1,0)
+        rail_line.Position=desktop and UDim2.fromOffset(154,0) or UDim2.fromOffset(20,stacked and 137 or 97)
+        rail_line.Size=desktop and UDim2.new(0,1,1,0) or UDim2.new(1,-40,0,1)
+        top_line.Position=UDim2.fromOffset(left,desktop and 64 or 54); top_line.Size=UDim2.new(1,-left-20,0,1)
+        brand_subtitle.Visible=desktop; nav_caption.Visible=desktop
+        logo.Position=UDim2.fromOffset(18,desktop and 15 or 12)
+        heading.Position=UDim2.fromOffset(desktop and 176 or 120,desktop and 20 or 14)
+        heading.TextSize=desktop and 22 or 16; heading.TextColor3=theme.text
+        build_label.Position=desktop and UDim2.new(0,18,1,-34) or UDim2.fromOffset(104,17)
+        build_label.Size=UDim2.fromOffset(132,18); build_label.Visible=desktop
+        for _,page in pairs(pages) do page.Position=UDim2.fromOffset(left,top); page.Size=UDim2.new(1,-left-14,1,-top-62) end
+        result_page.Position=UDim2.fromOffset(left,top); result_page.Size=UDim2.new(1,-left-14,1,-top-62)
+        footer.Position=UDim2.new(0,left,1,-49); footer.Size=UDim2.new(1,-left-20,0,1)
+        status.Position=UDim2.new(0,left,1,-43); status.Size=UDim2.new(1,-left-125,0,34)
         for i,key in ipairs({"Diagnostics","Shot Lab","Modules","Visual+","Combos","Profiles"}) do
             local item=rail_items[key]
             if item then
-                local width=(w-40)/6
-                item.button.Position=UDim2.fromOffset(20+(i-1)*width,62); item.button.Size=UDim2.fromOffset(width-4,30)
+                local width=(w-40)/(stacked and 3 or 6)
+                item.button.Position=desktop and UDim2.fromOffset(12,112+(i-1)*46) or UDim2.fromOffset(20+((i-1)%(stacked and 3 or 6))*width,62+(stacked and math.floor((i-1)/3)*38 or 0))
+                item.button.Size=desktop and UDim2.fromOffset(130,38) or UDim2.fromOffset(width-4,30)
                 local compact=w<700
                 item.icon.Visible=not compact
                 item.label.Position=UDim2.fromOffset(compact and 0 or 33,0); item.label.Size=UDim2.new(1,compact and 0 or -35,1,0)
                 item.label.TextXAlignment=compact and Enum.TextXAlignment.Center or Enum.TextXAlignment.Left
-                if item.indicator then item.indicator.Position=UDim2.new(0,7,1,-1); item.indicator.Size=UDim2.new(1,-14,0,2) end
+                item.icon.Position=UDim2.fromOffset(9,desktop and 9 or 5)
+                if item.indicator then item.indicator.Position=desktop and UDim2.fromOffset(0,10) or UDim2.new(0,7,1,-1); item.indicator.Size=desktop and UDim2.fromOffset(2,18) or UDim2.new(1,-14,0,2) end
             end
         end
     end
@@ -3945,7 +4032,7 @@ do
     local function fit()
         local camera=workspace.CurrentCamera; if not camera then return end
         local v=camera.ViewportSize
-        local w=math.max(340,math.min(800,v.X-24)); local h=math.max(430,math.min(620,v.Y-32))
+        local w=math.max(340,math.min(940,v.X-24)); local h=math.max(430,math.min(680,v.Y-32))
         scale.Scale=math.min(1,(v.X-12)/w,(v.Y-12)/h); shell.Size=UDim2.fromOffset(w,h)
         rail_line.Size=UDim2.new(1,-40,0,1); top_line.Size=UDim2.new(1,-40,0,1)
         layout_nav()
@@ -3978,6 +4065,7 @@ do
         report_card.Position=compact and UDim2.fromOffset(0,66) or UDim2.new(.5,4,0,0)
         report_card.Size=storage.Size
         home.CanvasSize=UDim2.fromOffset(0,compact and 510 or 404)
+        layout_nav()
         local p=shell.Position; local hw=w*scale.Scale/2; local hh=h*scale.Scale/2
         shell.Position=UDim2.fromOffset(math.max(hw+6,math.min(v.X-hw-6,p.X.Scale*v.X+p.X.Offset)),math.max(hh+6,math.min(v.Y-hh-6,p.Y.Scale*v.Y+p.Y.Offset)))
     end
@@ -4047,7 +4135,7 @@ do
         end
         shell.BackgroundTransparency=custom and 1-settings.ui_opacity or 0
     end
-    PivotUI={theme=theme,label=label,button=small_button,pages=pages,rail_items=rail_items,show=show,heading=heading,search=search,cancel=cancel,actions=actions,icon=icon,icon_color=icon_color,animate=animate,hover=hover_button,release_hover=release_hover,input_style=style_input,add_search=add_search,layout_nav=layout_nav,set_theme=set_theme,edit_theme=edit_theme}
+    PivotUI={theme=theme,label=label,button=small_button,pages=pages,rail_items=rail_items,show=show,heading=heading,search=search,cancel=cancel,actions=actions,icon=icon,icon_color=icon_color,animate=animate,hover=hover_button,release_hover=release_hover,input_style=style_input,add_search=add_search,layout_nav=layout_nav,content_width=content_width,set_theme=set_theme,edit_theme=edit_theme}
     on(gui.Destroying,function() for _,c in ipairs(connections) do c:Disconnect() end end)
 end
 
@@ -4249,11 +4337,16 @@ do
         end)
     end
     local function skin_source_control()
-        local source=engine:skin_source()
-        local b=action("Skin source  /  "..source,function()
-            engine:set_skin_source(source=="Preset character" and "Roblox model ID" or "Preset character")
-            character_open=false; visual_character_open=false; visual_preview_open=false; rebuild()
-        end); b.Name="SkinSource"
+        text("Skin source",13,theme.muted,20)
+        local holder=own(make("Frame",{Name="SkinSource",Position=UDim2.fromOffset(0,y),Size=UDim2.new(1,-6,0,72),BackgroundTransparency=1},container)); y=y+82
+        for i,source in ipairs({"Preset character","Roblox model ID","Outfit ID","Roblox username"}) do
+            local b=ui.button(holder,source,function()
+                engine:set_skin_source(source); character_open=false; visual_character_open=false; visual_preview_open=false; rebuild()
+            end)
+            b.Name="SkinSource_"..i; b.Position=UDim2.new((i-1)%2/2,0,0,math.floor((i-1)/2)*38); b.Size=UDim2.new(.5,-5,0,34)
+            b.BackgroundColor3=engine:skin_source()==source and theme.selected or theme.input
+            b.TextColor3=engine:skin_source()==source and theme.accent or theme.muted
+        end
     end
     local capture_key,capture_started,last_ended
     local function stop_capture()
@@ -4313,7 +4406,7 @@ do
             for _,name in ipairs(tabs) do action(name,function() category=name; choosing=false; expanded=nil; page.CanvasPosition=Vector2.new(0,0); rebuild() end) end
         elseif category=="Visual+" then
             y=0
-            local header=text("Visual+",22,theme.text,30); header.Font=Enum.Font.SourceSansSemibold
+            local header=text(visual_section,22,theme.text,30); header.Font=Enum.Font.SourceSansSemibold
             visual_status_label=own(ui.label(container,"0 active",0,5,100,22,12,theme.accent)); visual_status_label.Position=UDim2.new(1,-110,0,5); visual_status_label.TextXAlignment=Enum.TextXAlignment.Right
             local categories={"Ball","Court","Outfit","Effects","Lighting","HUD","Loadouts"}
             local columns=window.Size.X.Offset<560 and 4 or 7; local nav_height=columns==4 and 76 or 38
@@ -4376,6 +4469,8 @@ do
                     local list=own(make("ScrollingFrame",{Name="VisualCharacterList",Position=UDim2.fromOffset(0,y),Size=UDim2.new(1,-6,0,168),BackgroundColor3=theme.panel,BorderSizePixel=0,ScrollBarThickness=3,CanvasSize=UDim2.fromOffset(0,#engine.characters*32)},container)); y=y+178
                     local n=0; for _,entry in ipairs(engine.characters) do if entry.name~="Custom" then local name=entry.name; local b=ui.button(list,name,function() engine.settings.model_preset=name; visual_character_open=false; visual_preview_open=false; rebuild() end); b.Position=UDim2.fromOffset(0,n*32); b.Size=UDim2.new(1,-8,0,30); n=n+1 end end
                 end
+                elseif engine:skin_source()=="Outfit ID" then field("model_outfit","Outfit ID")
+                elseif engine:skin_source()=="Roblox username" then field("model_username","Username / user ID")
                 else field("model_asset","Roblox model ID") end
                 if visual_preview_open then
                     visual_character_preview=own(make("ViewportFrame",{Name="CharacterPreview",Position=UDim2.fromOffset(0,y),Size=UDim2.new(1,-6,0,220),BackgroundColor3=theme.panel,BorderSizePixel=0,Ambient=Color3.fromRGB(180,185,200),LightColor=Color3.fromRGB(255,255,255)},container)); y=y+230
@@ -4555,7 +4650,7 @@ do
         else
             local options={auto_shoot={{"shot_range","Shoot range / studs"}},rim_range={{"shot_range","Shoot range / studs"}},dribble_glide={{"glide_speed","Glide speed"}},auto_ankle={{"ankle_range","Ankle break range"},{"ankle_delay","Attempt interval / seconds"},{"ankle_combo","Dribble inputs"}},dribble_macros={{"custom_combo","Custom combo"},{"combo_delay","Combo delay / ms"},{"combo_bind","Combo keybind / F1–F12"}},auto_takeover={{"takeover_threshold","Takeover threshold"}},speed={{"walk_speed","Client walk speed"}},split_speed={{"on_ball_speed","On-ball speed"},{"off_ball_speed","Off-ball speed"}},jump={{"jump_power","Jump power"}},fly={{"fly_speed","Flight speed"}},spin={{"spin_speed","Degrees / second"}},guard={{"guard_target","Target username"},{"guard_distance","Guard spacing"},{"guard_range","Activation range"},{"guard_strength","Guard strength"}},block={{"guard_target","Target username"},{"block_range","Activation range"},{"block_delay","Block delay / seconds"},{"jump_key","Jump / block key"}},rebound={{"rebound_range","Activation range"},{"jump_key","Jump key"}},range_circle={{"range","Range / studs"}},time={{"time","Time / 0-24"}},fov={{"fov","Field of view"}},spectate={{"spectate","Target username"}}}
             local groups=category=="All" and {"Shooting","Defense","Dribbling","Cosmetics","Character","Player","Visuals","Camera","World"} or {category}
-            local columns=category=="All" and window.Size.X.Offset>=620 and 2 or 1
+            local columns=category=="All" and (ui.content_width and ui.content_width() or window.Size.X.Offset)>=620 and 2 or 1
             local heights={46,46}
             local display_definitions={}; for _,definition in ipairs(engine.definitions) do if definition.id=="dribble_library" then table.insert(display_definitions,1,definition) else display_definitions[#display_definitions+1]=definition end end
             for _,group in ipairs(groups) do
@@ -4594,7 +4689,9 @@ do
                         y=y+176
                     end
                     else
-                        field("model_asset","Roblox model ID")
+                        if engine:skin_source()=="Outfit ID" then field("model_outfit","Outfit ID")
+                        elseif engine:skin_source()=="Roblox username" then field("model_username","Username / user ID")
+                        else field("model_asset","Roblox model ID") end
                     end
                     action("Equip selected character",function() engine:equip_selected_character(); rebuild() end)
                     action("Saved models  /  "..#engine.model_library.models..(library_open and "  −" or "  +"),function() library_open=not library_open; rebuild() end)
