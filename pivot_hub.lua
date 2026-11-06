@@ -2345,7 +2345,7 @@ local function create_pivot_modules(ctx)
     end,conflicts={"dribble_macros","auto_ankle"}})
     if type(readfile)=="function" then pcall(function() Engine:read_dribble_library() end) end
 
-    Engine.build="2026.11.05.4"
+    Engine.build="2026.11.06.1"
     local s=Engine.settings
     local defaults={ball_finish="Custom",court_preset="Custom",lighting_preset="Warm gym",lighting_intensity=.65,shoe_color="#B79AFF",jersey_color="#FFFFFF",shoe_trail=true,landing_particles=true,effect_strength=.5,indicator_style="Ring",indicator_color="#B79AFF",indicator_radius=2.6,indicator_opacity=.7,green_style="Badge",green_color="#89DEAC",green_duration=.7,outfit_jersey=true,outfit_shoes=true,outfit_accessories=false}
     for key,value in pairs(defaults) do s[key]=value end
@@ -3638,8 +3638,8 @@ do
         object.Parent=parent; return object
     end
     local function rgb(r,g,b) return Color3.fromRGB(r,g,b) end
-    local theme={base=rgb(17,20,26),rail=rgb(12,15,20),panel=rgb(25,29,37),input=rgb(20,24,31),line=rgb(42,48,60),
-        text=rgb(234,239,247),muted=rgb(145,157,176),accent=rgb(151,190,246),selected=rgb(35,48,67),green=rgb(159,190,170)}
+    local theme={base=rgb(17,17,23),rail=rgb(11,11,16),panel=rgb(25,25,34),input=rgb(20,20,28),line=rgb(43,43,57),
+        text=rgb(239,238,248),muted=rgb(151,150,173),accent=rgb(184,167,246),selected=rgb(48,42,68),green=rgb(159,190,170)}
     local function corner(object,n)
         local c=object:FindFirstChildWhichIsA("UICorner") or make("UICorner",{},object); c.CornerRadius=UDim.new(0,n)
     end
@@ -3815,7 +3815,7 @@ do
     end
     assert(header and status and pages.Diagnostics,"Unsupported Pivot layout.")
     make("Folder",{Name="CompactVisuals"},gui)
-    shell.BackgroundColor3=theme.base; corner(shell,12); border(shell)
+    shell.BackgroundColor3=theme.base; corner(shell,16); border(shell)
     header.Text=""; header.Position=UDim2.fromOffset(68,0); header.Size=UDim2.new(1,-112,0,42)
     subtitle.Visible=false
     nav.Visible=false
@@ -3823,7 +3823,7 @@ do
     local rail_line=frame(shell,20,97,660,1,theme.line)
     local top_line=frame(shell,20,54,660,1,theme.line)
     local logo=label(shell,"Pivot",20,12,100,28,19,theme.text); logo.Font=Enum.Font.SourceSansBold; logo.TextXAlignment=Enum.TextXAlignment.Left
-    local build_label=label(shell,"BUILD 2026.11.05.4",242,17,150,18,10,theme.muted); build_label.Name="PivotBuild"; build_label.Font=Enum.Font.RobotoMono; build_label.TextWrapped=false
+    local build_label=label(shell,"BUILD 2026.11.06.1",242,17,150,18,10,theme.muted); build_label.Name="PivotBuild"; build_label.Font=Enum.Font.RobotoMono; build_label.TextWrapped=false
     local heading=label(shell,"Practical Basketball",94,14,240,26,11,theme.muted); heading.Font=Enum.Font.SourceSansSemibold
     close.BackgroundColor3=theme.rail; close.TextColor3=theme.muted; close.TextSize=14; corner(close,4)
     local search=make("TextBox",{Text="",PlaceholderText="Find a control...",PlaceholderColor3=theme.muted,Position=UDim2.fromOffset(484,10),Size=UDim2.fromOffset(166,23),
@@ -3999,20 +3999,24 @@ do
     local scale=shell:FindFirstChildWhichIsA("UIScale")
     local brand_subtitle=label(shell,"Practical Basketball",18,43,130,18,10,theme.muted)
     local nav_caption=label(shell,"NAVIGATION",22,94,140,18,10,theme.muted)
-    local function content_width() return shell.Size.X.Offset-(shell.Size.X.Offset>=760 and 228 or 40) end
+    local function content_width() return shell.Size.X.Offset-(shell.Size.X.Offset>=760 and 152 or 40) end
     local function layout_nav()
         local w=shell.Size.X.Offset
         local desktop=w>=760
         local stacked=w<560
-        local left=desktop and 208 or 20
+        local left=desktop and 132 or 20
         local top=desktop and 108 or stacked and 152 or 112
-        rail.Visible=desktop; rail.Size=UDim2.new(0,184,1,0)
-        rail_line.Position=desktop and UDim2.fromOffset(184,0) or UDim2.fromOffset(20,stacked and 137 or 97)
+        rail.Visible=desktop; rail.Size=UDim2.new(0,104,1,0)
+        rail_line.Position=desktop and UDim2.fromOffset(104,0) or UDim2.fromOffset(20,stacked and 137 or 97)
         rail_line.Size=desktop and UDim2.new(0,1,1,0) or UDim2.new(1,-40,0,1)
         top_line.Position=UDim2.fromOffset(left,desktop and 87 or 54); top_line.Size=UDim2.new(1,-left-20,0,1)
-        brand_subtitle.Visible=desktop; nav_caption.Visible=desktop; page_description.Visible=desktop; page_description.Position=UDim2.fromOffset(left+2,55); page_description.Size=UDim2.new(1,-left-30,0,20)
-        logo.Position=UDim2.fromOffset(18,desktop and 15 or 12)
-        heading.Position=UDim2.fromOffset(desktop and 210 or 120,desktop and 20 or 14)
+        brand_subtitle.Visible=false; nav_caption.Visible=false; page_description.Visible=desktop; page_description.Position=UDim2.fromOffset(left+2,55); page_description.Size=UDim2.new(1,-left-232,0,20)
+        logo.Position=UDim2.fromOffset(desktop and 24 or 18,desktop and 21 or 12)
+        logo.Size=UDim2.fromOffset(desktop and 56 or 100,desktop and 48 or 28)
+        logo.Text=desktop and "P" or "Pivot"; logo.TextSize=desktop and 32 or 21
+        logo.TextXAlignment=desktop and Enum.TextXAlignment.Center or Enum.TextXAlignment.Left
+        logo.BackgroundTransparency=desktop and 0 or 1; logo.BackgroundColor3=theme.selected; logo.TextColor3=desktop and theme.accent or theme.text; corner(logo,14)
+        heading.Position=UDim2.fromOffset(desktop and 134 or 120,desktop and 20 or 14)
         heading.Font=Enum.Font.SourceSansBold; heading.TextSize=desktop and 26 or 16; heading.TextColor3=theme.text
         if desktop then
             search.Position=UDim2.new(1,-292,0,19); search.Size=UDim2.fromOffset(194,30)
@@ -4021,7 +4025,7 @@ do
         else search.Size=UDim2.fromOffset(166,23) end
         local minimize_button=shell:FindFirstChild("Minimize")
         if minimize_button then minimize_button.Position=desktop and UDim2.new(1,-78,0,19) or UDim2.new(1,-64,0,10); minimize_button.Size=desktop and UDim2.fromOffset(28,30) or UDim2.fromOffset(23,23) end
-        build_label.Position=desktop and UDim2.new(0,22,1,-29) or UDim2.fromOffset(104,17)
+        build_label.Position=desktop and UDim2.new(1,-203,0,57) or UDim2.fromOffset(104,17)
         build_label.Size=UDim2.fromOffset(158,18); build_label.Visible=desktop
         for _,page in pairs(pages) do page.Position=UDim2.fromOffset(left,top); page.Size=UDim2.new(1,-left-14,1,-top-62) end
         result_page.Position=UDim2.fromOffset(left,top); result_page.Size=UDim2.new(1,-left-14,1,-top-62)
@@ -4031,16 +4035,17 @@ do
             local item=rail_items[key]
             if item then
                 local width=(w-40)/(stacked and 3 or 6)
-                item.button.Position=desktop and UDim2.fromOffset(14,126+(i-1)*48) or UDim2.fromOffset(20+((i-1)%(stacked and 3 or 6))*width,62+(stacked and math.floor((i-1)/3)*38 or 0))
-                item.button.Size=desktop and UDim2.fromOffset(156,40) or UDim2.fromOffset(width-4,30)
+                item.button.Position=desktop and UDim2.fromOffset(18,108+(i-1)*76) or UDim2.fromOffset(20+((i-1)%(stacked and 3 or 6))*width,62+(stacked and math.floor((i-1)/3)*38 or 0))
+                item.button.Size=desktop and UDim2.fromOffset(68,64) or UDim2.fromOffset(width-4,30)
                 local compact=w<700
                 item.icon.Visible=not compact
-                item.label.Position=UDim2.fromOffset(compact and 0 or 33,0); item.label.Size=UDim2.new(1,compact and 0 or -35,1,0)
-                item.label.TextXAlignment=compact and Enum.TextXAlignment.Center or Enum.TextXAlignment.Left
+                item.label.Position=desktop and UDim2.fromOffset(0,35) or UDim2.fromOffset(compact and 0 or 33,0); item.label.Size=desktop and UDim2.new(1,0,0,23) or UDim2.new(1,compact and 0 or -35,1,0)
+                item.label.TextSize=desktop and 15 or 14
+                item.label.TextXAlignment=(desktop or compact) and Enum.TextXAlignment.Center or Enum.TextXAlignment.Left
                 item.label.Font=selected==key and Enum.Font.SourceSansSemibold or Enum.Font.SourceSans
                 local stroke=item.button:FindFirstChildWhichIsA("UIStroke"); if stroke then stroke.Transparency=1 end
-                item.icon.Position=UDim2.fromOffset(9,desktop and 9 or 5)
-                if item.indicator then item.indicator.Position=desktop and UDim2.fromOffset(0,10) or UDim2.new(0,7,1,-1); item.indicator.Size=desktop and UDim2.fromOffset(2,18) or UDim2.new(1,-14,0,2) end
+                item.icon.Position=desktop and UDim2.fromOffset(24,10) or UDim2.fromOffset(9,5)
+                if item.indicator then item.indicator.Position=desktop and UDim2.fromOffset(-9,22) or UDim2.new(0,7,1,-1); item.indicator.Size=desktop and UDim2.fromOffset(2,18) or UDim2.new(1,-14,0,2) end
             end
         end
     end
@@ -4092,8 +4097,8 @@ do
         runtime.Position=UDim2.fromOffset(0,compact and 346 or 306)
         bottom.Position=UDim2.fromOffset(0,compact and 410 or 370)
         home.CanvasSize=UDim2.fromOffset(0,compact and 548 or 444)
-        profile_circle.Visible=w>=760; rail_name.Visible=w>=760
-        profile_circle.Position=UDim2.new(0,22,1,-94); profile_circle.Size=UDim2.fromOffset(30,30)
+        profile_circle.Visible=w>=760; rail_name.Visible=false
+        profile_circle.Position=UDim2.new(0,37,1,-62); profile_circle.Size=UDim2.fromOffset(30,30)
         rail_name.Position=UDim2.new(0,62,1,-90); rail_name.Size=UDim2.fromOffset(105,22); rail_name.TextXAlignment=Enum.TextXAlignment.Left
         if content_width()>=650 then
             server.Position=UDim2.fromOffset(0,186); server.Size=UDim2.new(.6,-10,0,172)
@@ -4135,7 +4140,7 @@ do
     local function set_theme(mode)
         reset_hovers()
         local palettes={
-            Graphite={base=rgb(17,20,26),rail=rgb(12,15,20),panel=rgb(25,29,37),input=rgb(20,24,31),line=rgb(42,48,60),text=rgb(234,239,247),muted=rgb(145,157,176),accent=rgb(151,190,246),selected=rgb(35,48,67),green=rgb(159,190,170)},
+            Graphite={base=rgb(17,17,23),rail=rgb(11,11,16),panel=rgb(25,25,34),input=rgb(20,20,28),line=rgb(43,43,57),text=rgb(239,238,248),muted=rgb(151,150,173),accent=rgb(184,167,246),selected=rgb(48,42,68),green=rgb(159,190,170)},
             Slate={base=rgb(23,28,35),rail=rgb(23,28,35),panel=rgb(31,38,47),input=rgb(26,32,40),line=rgb(48,57,70),text=rgb(229,234,242),muted=rgb(151,163,182),accent=rgb(172,193,220),selected=rgb(43,54,69),green=rgb(159,190,170)},
             Light={base=rgb(241,242,244),rail=rgb(241,242,244),panel=rgb(250,250,251),input=rgb(232,234,238),line=rgb(213,216,223),text=rgb(33,37,44),muted=rgb(102,110,124),accent=rgb(67,83,111),selected=rgb(221,227,237),green=rgb(64,124,88)}
         }
@@ -4549,8 +4554,10 @@ do
                     make("UICorner",{CornerRadius=UDim.new(0,8)},card)
                     make("UIStroke",{Color=theme.line,Thickness=1,ApplyStrokeMode=Enum.ApplyStrokeMode.Border},card)
                     make("Frame",{Name="StateMark",Position=UDim2.fromOffset(0,14),Size=UDim2.fromOffset(3,30),BackgroundColor3=theme.accent,BorderSizePixel=0,Visible=false},card)
-                    local title=ui.label(card,engine.registry.definitions[id].title,14,7,300,24,14,theme.text); title.Font=Enum.Font.SourceSansSemibold; title.Size=UDim2.new(1,-112,0,24)
-                    local subtitle=ui.label(card,description,14,31,300,18,11,theme.muted); subtitle.Size=UDim2.new(1,-112,0,18); subtitle.TextWrapped=false; subtitle.TextTruncate=Enum.TextTruncate.AtEnd
+                    local emblem=make("Frame",{Name="EffectEmblem",Position=UDim2.fromOffset(12,12),Size=UDim2.fromOffset(34,34),BackgroundColor3=theme.input,BorderSizePixel=0},card)
+                    make("UICorner",{CornerRadius=UDim.new(0,10)},emblem); ui.icon(emblem,"Visual+",7,7,theme.accent)
+                    local title=ui.label(card,engine.registry.definitions[id].title,58,7,300,24,14,theme.text); title.Font=Enum.Font.SourceSansSemibold; title.Size=UDim2.new(1,-156,0,24)
+                    local subtitle=ui.label(card,description,58,31,300,18,11,theme.muted); subtitle.Size=UDim2.new(1,-156,0,18); subtitle.TextWrapped=false; subtitle.TextTruncate=Enum.TextTruncate.AtEnd
                     local hit=make("TextButton",{Name="EffectHeaderHit",Text="",TextTransparency=1,BackgroundTransparency=1,BorderSizePixel=0,Size=UDim2.new(1,-105,0,58)},card)
                     connect(hit.Activated,function() if engine.registry.active[id] then engine.registry:disable(id) else local ok,err=engine.registry:enable(id,engine.settings); if not ok then report(tostring(err)) end end; update_buttons() end)
                     ui.hover(hit,{surface=card,rounding=8,growth=2})
@@ -4767,8 +4774,9 @@ do
                     local row=own(make("Frame",{Name="ModuleRow_"..id,Position=UDim2.fromOffset(0,y),Size=UDim2.new(1,0,0,60),BackgroundColor3=theme.panel,BackgroundTransparency=1,BorderSizePixel=0},container))
                     make("UICorner",{CornerRadius=UDim.new(0,5)},row)
                     make("Frame",{Name="StateMark",Position=UDim2.fromOffset(3,9),Size=UDim2.fromOffset(2,18),BackgroundColor3=theme.accent,BorderSizePixel=0,Visible=false},row)
-                    local title=ui.label(row,definition.title,14,7,300,24,14,theme.text); title.Font=Enum.Font.SourceSansSemibold; title.Size=UDim2.new(1,-100,0,24)
-                    local summary=ui.label(row,definition.description,14,32,300,18,11,theme.muted); summary.Size=UDim2.new(1,-100,0,18); summary.TextWrapped=false; summary.TextTruncate=Enum.TextTruncate.AtEnd
+                    local symbol=ui.icon(row,definition.category=="Shooting" and "Shot Lab" or definition.category=="Character" and "Visual+" or "Modules",12,17,theme.muted)
+                    local title=ui.label(row,definition.title,44,7,300,24,14,theme.text); title.Font=Enum.Font.SourceSansSemibold; title.Size=UDim2.new(1,-130,0,24)
+                    local summary=ui.label(row,definition.description,44,32,300,18,11,theme.muted); summary.Size=UDim2.new(1,-130,0,18); summary.TextWrapped=false; summary.TextTruncate=Enum.TextTruncate.AtEnd
 
                     local detail=ui.button(row,expanded==id and "−" or "+",function() if expanded==id then expanded=nil else expanded=id end; rebuild() end)
                     detail.Name="Details"; detail.Position=UDim2.new(1,-88,0,18); detail.Size=UDim2.fromOffset(24,24); detail.BackgroundTransparency=1
@@ -4779,6 +4787,7 @@ do
                     buttons[id].Position=UDim2.new(1,-54,0,17)
                     connect(row.MouseEnter,function() row.BackgroundColor3=theme.panel; row.BackgroundTransparency=.25 end)
                     connect(row.MouseLeave,function() row.BackgroundColor3=engine.registry.active[id] and theme.selected or theme.panel; row.BackgroundTransparency=engine.registry.active[id] and .4 or 1 end)
+                    make("Frame",{Name="RowDivider",Position=UDim2.new(0,44,1,-1),Size=UDim2.new(1,-58,0,1),BackgroundColor3=theme.line,BackgroundTransparency=.65,BorderSizePixel=0},row)
                     y=y+64
                     if expanded==id then
                         text(definition.description,12,theme.muted,id=="dribble_library" and 40 or 60).TextWrapped=true
