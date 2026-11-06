@@ -621,8 +621,21 @@ local function create_pivot_modules(ctx)
             local folder=workspace:FindFirstChild("Basketballs")
             if folder then for _,obj in ipairs(folder:GetChildren()) do if obj:IsA("BasePart") then list[#list+1]={object=obj,label="Ball"} end end end
         elseif kind=="rims" then
-            local map=workspace:FindFirstChild("Map")
-            if map then for _,obj in ipairs(map:GetDescendants()) do if obj:IsA("BasePart") and obj.Name=="Rim" then list[#list+1]={object=obj,label="Rim"} end end end
+            -- Courts can stream under Hoops, Courts or Blacktop rather than Map.
+            for _,obj in ipairs(workspace:GetDescendants()) do
+                if obj:IsA("BasePart") then
+                    local name=obj.Name:lower():gsub("[^%w]","")
+                    local rim=name=="rim" or name=="basketrim" or name=="hooprim"
+                    local excluded=false; local ancestor=obj.Parent; local hoop_context=false
+                    while ancestor and ancestor~=workspace do
+                        local key=ancestor.Name:lower()
+                        if key=="characters" or key=="basketballs" or key:sub(1,5)=="pivot" or ancestor:IsA("Camera") then excluded=true; break end
+                        if key:find("hoop",1,true) or key:find("basket",1,true) or key:find("goal",1,true) then hoop_context=true end
+                        ancestor=ancestor.Parent
+                    end
+                    if not excluded and (rim or name=="ring" and hoop_context) then list[#list+1]={object=obj,label="Rim"} end
+                end
+            end
         end
         return list
     end
@@ -2426,7 +2439,7 @@ local function create_pivot_modules(ctx)
     end,conflicts={"dribble_macros","auto_ankle"}})
     if type(readfile)=="function" then pcall(function() Engine:read_dribble_library() end) end
 
-    Engine.build="2026.11.06.5"
+    Engine.build="2026.11.06.6"
     local s=Engine.settings
     local defaults={ball_finish="Custom",court_preset="Custom",lighting_preset="Warm gym",lighting_intensity=.65,shoe_color="#B79AFF",jersey_color="#FFFFFF",shoe_trail=true,landing_particles=true,effect_strength=.5,indicator_style="Ring",indicator_color="#B79AFF",indicator_radius=2.6,indicator_opacity=.7,green_style="Badge",green_color="#89DEAC",green_duration=.7,outfit_jersey=true,outfit_shoes=true,outfit_accessories=false}
     for key,value in pairs(defaults) do s[key]=value end
@@ -3348,9 +3361,9 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
         state.panel.Position=UDim2.new(.5,0,1,-settings.quality_bottom)
         local camera=workspace.CurrentCamera; state.scale.Scale=math.min(1,((camera and camera.ViewportSize.X or 800)-16)/330)
         local mine=root(); local model=rig()
-        if not mine or not model then state.result.Text="Enter a court"; state.detail.Text="No character data"; state.previous=nil; return end
+        if not mine or not model then state.result.Text="Enter a court"; state.detail.Text="No character data"; state.previous=nil; state.rating=nil; state.coverage=nil; return end
         local rim=tool_nearest_rim(mine.Position)
-        if not rim then state.result.Text="No basket found"; state.detail.Text="Waiting for court data"; return end
+        if not rim then state.result.Text="No basket found"; state.detail.Text="Waiting for court data"; state.rating=nil; state.coverage=nil; return end
         local velocity=mine.AssemblyLinearVelocity or Vector3.zero; local speed=Vector3.new(velocity.X,0,velocity.Z).Magnitude
         if state.previous and dt>0 then local delta=mine.Position-state.previous; if delta.Magnitude<8 then speed=math.max(speed,Vector3.new(delta.X,0,delta.Z).Magnitude/dt) end end
         state.previous=mine.Position
@@ -4255,7 +4268,7 @@ do
     local rail_line=frame(shell,20,97,660,1,theme.line)
     local top_line=frame(shell,20,54,660,1,theme.line)
     local logo=label(shell,"Pivot",20,12,100,28,19,theme.text); logo.Font=Enum.Font.SourceSansBold; logo.TextXAlignment=Enum.TextXAlignment.Left
-    local build_label=label(shell,"BUILD 2026.11.06.5",242,17,150,18,10,theme.muted); build_label.Name="PivotBuild"; build_label.Font=Enum.Font.RobotoMono; build_label.TextWrapped=false
+    local build_label=label(shell,"BUILD 2026.11.06.6",242,17,150,18,10,theme.muted); build_label.Name="PivotBuild"; build_label.Font=Enum.Font.RobotoMono; build_label.TextWrapped=false
     local heading=label(shell,"Practical Basketball",94,14,240,26,11,theme.muted); heading.Font=Enum.Font.SourceSansSemibold
     close.BackgroundColor3=theme.rail; close.TextColor3=theme.muted; close.TextSize=14; corner(close,4)
     local search=make("TextBox",{Text="",PlaceholderText="Find a control...",PlaceholderColor3=theme.muted,Position=UDim2.fromOffset(484,10),Size=UDim2.fromOffset(166,23),
