@@ -613,6 +613,54 @@ local function create_pivot_modules(ctx)
         end
         state.mover.VectorVelocity=vector.Magnitude>0 and vector.Unit*s.fly_speed or Vector3.zero
     end,conflicts={"spin","guard"}})
+    local basket_index={parts={},ready=false,links={},last_scan=-10,scans=0}
+    local function possible_rim(object)
+        if not object:IsA("BasePart") then return false end
+        local name=object.Name:lower():gsub("[^%w]","")
+        return name=="rim" or name=="basketrim" or name=="hooprim" or name=="ring"
+    end
+    local function valid_rim(object)
+        if not object.Parent or not object:IsDescendantOf(workspace) or not possible_rim(object) then return false end
+        local ring=object.Name:lower():gsub("[^%w]","")=="ring"
+        local ancestor=object.Parent; local hoop_context=false
+        while ancestor and ancestor~=workspace do
+            local key=ancestor.Name:lower()
+            if key=="characters" or key=="basketballs" or key:sub(1,5)=="pivot" or ancestor:IsA("Camera") then return false end
+            if ring and (key:find("hoop",1,true) or key:find("basket",1,true) or key:find("goal",1,true)) then hoop_context=true end
+            ancestor=ancestor.Parent
+        end
+        return not ring or hoop_context
+    end
+    local function seed_rims()
+        basket_index.parts={}; basket_index.scans=basket_index.scans+1; basket_index.last_scan=os.clock()
+        for _,object in ipairs(workspace:GetDescendants()) do if possible_rim(object) then basket_index.parts[object]=true end end
+    end
+    local function indexed_rims()
+        if not basket_index.ready then
+            basket_index.ready=true
+            local added,removed=workspace.DescendantAdded,workspace.DescendantRemoving
+            basket_index.streaming=added and removed and type(added.Connect)=="function" and type(removed.Connect)=="function"
+            if basket_index.streaming then
+                basket_index.links[1]=added:Connect(function(object) if possible_rim(object) then basket_index.parts[object]=true end end)
+                basket_index.links[2]=removed:Connect(function(object) basket_index.parts[object]=nil end)
+            end
+            seed_rims()
+        elseif not basket_index.streaming and os.clock()-basket_index.last_scan>=1 then
+            -- Compatibility fallback only when descendant events are unavailable.
+            seed_rims()
+        end
+        local result={}
+        for object in pairs(basket_index.parts) do
+            if not object.Parent or not object:IsDescendantOf(workspace) then basket_index.parts[object]=nil
+            elseif valid_rim(object) then result[#result+1]={object=object,label="Rim"} end
+        end
+        return result
+    end
+    function Engine:close_rim_index()
+        for _,link in ipairs(basket_index.links) do link:Disconnect() end
+        basket_index.links={}; basket_index.parts={}; basket_index.ready=false
+    end
+    Engine.rim_lookup_stats=basket_index
     local function candidates(kind)
         local list={}
         if kind=="players" then
@@ -621,21 +669,7 @@ local function create_pivot_modules(ctx)
             local folder=workspace:FindFirstChild("Basketballs")
             if folder then for _,obj in ipairs(folder:GetChildren()) do if obj:IsA("BasePart") then list[#list+1]={object=obj,label="Ball"} end end end
         elseif kind=="rims" then
-            -- Courts can stream under Hoops, Courts or Blacktop rather than Map.
-            for _,obj in ipairs(workspace:GetDescendants()) do
-                if obj:IsA("BasePart") then
-                    local name=obj.Name:lower():gsub("[^%w]","")
-                    local rim=name=="rim" or name=="basketrim" or name=="hooprim"
-                    local excluded=false; local ancestor=obj.Parent; local hoop_context=false
-                    while ancestor and ancestor~=workspace do
-                        local key=ancestor.Name:lower()
-                        if key=="characters" or key=="basketballs" or key:sub(1,5)=="pivot" or ancestor:IsA("Camera") then excluded=true; break end
-                        if key:find("hoop",1,true) or key:find("basket",1,true) or key:find("goal",1,true) then hoop_context=true end
-                        ancestor=ancestor.Parent
-                    end
-                    if not excluded and (rim or name=="ring" and hoop_context) then list[#list+1]={object=obj,label="Rim"} end
-                end
-            end
+            list=indexed_rims()
         end
         return list
     end
@@ -1169,13 +1203,19 @@ local function create_pivot_modules(ctx)
         local source=rig(); local mine=root(); local head=source and (source:FindFirstChild("Head") or mine)
         if not mine or not head then state.board.Enabled=false; state.value=nil; return end
         if state.source~=source then state.value=nil; state.source=source end
-        state.board.Adornee=head; state.board.Enabled=true; state.board.Size=UDim2.fromOffset(148*s.coverage_scale,72*s.coverage_scale); state.board.StudsOffsetWorldSpace=Vector3.new(0,s.coverage_height,0)
+        if state.board.Adornee~=head then state.board.Adornee=head end
+        if not state.board.Enabled then state.board.Enabled=true end
+        if state.scale~=s.coverage_scale then
+            state.scale=s.coverage_scale; state.board.Size=UDim2.fromOffset(148*s.coverage_scale,72*s.coverage_scale)
+            state.label.TextSize=27*s.coverage_scale; state.caption.TextSize=15*s.coverage_scale
+        end
+        if state.height~=s.coverage_height then state.height=s.coverage_height; state.board.StudsOffsetWorldSpace=Vector3.new(0,s.coverage_height,0) end
         local defenders={}; local team=source:GetAttribute("Team")
         for _,who in ipairs(players:GetPlayers()) do
             if who~=ctx.player then
                 local other=rig(who); local point=root(who)
                 local teammate=other and team and team~=0 and other:GetAttribute("Team")==team
-                if other and point and not teammate then
+                if other and point and not teammate and (point.Position-mine.Position).Magnitude<=s.coverage_radius then
                     local humanoid=other:FindFirstChildOfClass("Humanoid")
                     if not humanoid or humanoid.Health>0 then defenders[#defenders+1]=point.Position end
                 end
@@ -1185,12 +1225,18 @@ local function create_pivot_modules(ctx)
         local target=Core.coverage_estimate(mine.Position,rim and rim.Position,defenders,s.coverage_radius)
         state.value=state.value and state.value+(target-state.value)*(1-math.exp(-s.coverage_response*(dt or .05))) or target
         local value=math.floor(state.value+.5)
-        state.label.Text=tostring(value).."%"; state.label.TextSize=27*s.coverage_scale; state.caption.TextSize=15*s.coverage_scale
-        state.label.Visible=s.coverage_display~="Bar"; state.track.Visible=s.coverage_display~="Number"; state.fill.Size=UDim2.fromScale(state.value/100,1)
-        state.caption.Text=(value<15 and "OPEN" or value<40 and "LIGHT" or value<70 and "CONTESTED" or "SMOTHERED").." · EST."
-        state.label.TextColor3=value<25 and Color3.fromRGB(132,222,164) or value<60 and Color3.fromRGB(242,205,115) or Color3.fromRGB(240,133,133)
-        state.caption.TextColor3=state.label.TextColor3; state.fill.BackgroundColor3=state.label.TextColor3
-    end,interval=.05})
+        if state.rounded~=value then state.rounded=value; state.label.Text=tostring(value).."%" end
+        if state.display~=s.coverage_display then state.display=s.coverage_display; state.label.Visible=s.coverage_display~="Bar"; state.track.Visible=s.coverage_display~="Number" end
+        local fill=math.floor(state.value*2+.5)/200
+        if state.fill_value~=fill then state.fill_value=fill; state.fill.Size=UDim2.fromScale(fill,1) end
+        local band=value<15 and "OPEN" or value<40 and "LIGHT" or value<70 and "CONTESTED" or "SMOTHERED"
+        if state.band~=band then state.band=band; state.caption.Text=band.." · EST." end
+        local tone=value<25 and 1 or value<60 and 2 or 3
+        if state.tone~=tone then
+            state.tone=tone; state.label.TextColor3=tone==1 and Color3.fromRGB(132,222,164) or tone==2 and Color3.fromRGB(242,205,115) or Color3.fromRGB(240,133,133)
+            state.caption.TextColor3=state.label.TextColor3; state.fill.BackgroundColor3=state.label.TextColor3
+        end
+    end,interval=.1})
     local function material(name)
         local allowed={SmoothPlastic=true,Plastic=true,Neon=true,Metal=true,Wood=true,WoodPlanks=true,Concrete=true,Glass=true}
         assert(allowed[name],"Choose a supported material"); return Enum.Material[name]
@@ -2439,7 +2485,7 @@ local function create_pivot_modules(ctx)
     end,conflicts={"dribble_macros","auto_ankle"}})
     if type(readfile)=="function" then pcall(function() Engine:read_dribble_library() end) end
 
-    Engine.build="2026.11.06.6"
+    Engine.build="2026.11.06.7"
     local s=Engine.settings
     local defaults={ball_finish="Custom",court_preset="Custom",lighting_preset="Warm gym",lighting_intensity=.65,shoe_color="#B79AFF",jersey_color="#FFFFFF",shoe_trail=true,landing_particles=true,effect_strength=.5,indicator_style="Ring",indicator_color="#B79AFF",indicator_radius=2.6,indicator_opacity=.7,green_style="Badge",green_color="#89DEAC",green_duration=.7,outfit_jersey=true,outfit_shoes=true,outfit_accessories=false}
     for key,value in pairs(defaults) do s[key]=value end
@@ -3600,7 +3646,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
         if next(held) then ctx.report("Input release pending / press F8 to retry") end
         return next(held)==nil
     end
-    function Engine:close() self.library_closed=true; self:stop(); self.registry:close(); if self.clear_model_cache then self:clear_model_cache() end end
+    function Engine:close() self.library_closed=true; self:stop(); self.registry:close(); self:close_rim_index(); if self.clear_model_cache then self:clear_model_cache() end end
     function Engine:stop_controls()
         -- Auto Green pauses through adapter.paused while typing, retaining its toggle and profiles.
         for _,id in ipairs({"auto_sprint","guard","block","rebound","fly","spin"}) do self.registry:disable(id) end
@@ -4268,7 +4314,7 @@ do
     local rail_line=frame(shell,20,97,660,1,theme.line)
     local top_line=frame(shell,20,54,660,1,theme.line)
     local logo=label(shell,"Pivot",20,12,100,28,19,theme.text); logo.Font=Enum.Font.SourceSansBold; logo.TextXAlignment=Enum.TextXAlignment.Left
-    local build_label=label(shell,"BUILD 2026.11.06.6",242,17,150,18,10,theme.muted); build_label.Name="PivotBuild"; build_label.Font=Enum.Font.RobotoMono; build_label.TextWrapped=false
+    local build_label=label(shell,"BUILD 2026.11.06.7",242,17,150,18,10,theme.muted); build_label.Name="PivotBuild"; build_label.Font=Enum.Font.RobotoMono; build_label.TextWrapped=false
     local heading=label(shell,"Practical Basketball",94,14,240,26,11,theme.muted); heading.Font=Enum.Font.SourceSansSemibold
     close.BackgroundColor3=theme.rail; close.TextColor3=theme.muted; close.TextSize=14; corner(close,4)
     local search=make("TextBox",{Text="",PlaceholderText="Find a control...",PlaceholderColor3=theme.muted,Position=UDim2.fromOffset(484,10),Size=UDim2.fromOffset(166,23),
