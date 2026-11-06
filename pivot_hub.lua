@@ -418,7 +418,7 @@ local function create_pivot_modules(ctx)
         ball_trail_color="#AAC8FF",ball_trail_lifetime=.35,ball_trail_width=.6,ball_trail_opacity=.7,player_trail_color="#C6CFFF",player_trail_lifetime=.3,player_trail_width=.7,player_trail_opacity=.5,
         ball_color="#D1D6E0",ball_material="SmoothPlastic",ball_reflectance=0,ball_remove_texture=true,ball_glow=true,ball_glow_strength=.8,ball_bloom=.7,court_color="#444C60",court_line_color="#E6E8ED",court_material="SmoothPlastic",court_reflectance=0,court_part_name="CourtFloor",court_color_lines=true,court_remove_texture=true,court_three_color="#E6E8ED",court_free_color="#E6E8ED",court_three_enabled=true,court_free_enabled=true,court_rebuild_markings=true,court_three_radius=34,court_three_angle=128,court_free_radius=8,court_free_distance=21.5,court_corner_depth=6,court_line_width=.18,
         outline_color="#C0C9DC",outline_fill_color="#C0C9DC",outline_opacity=1,outline_fill_opacity=0,outline_through_walls=false,sky_preset="Night",sky_asset="",sky_tint="#8799BB",sky_decay="#283650",sky_stars=3000,sky_density=.22,sky_haze=.5,
-        dribble_sprint=false,dribble_gap=180,dribble_combo_name="My combo",shot_hud_compact=false,module_preset_name="Favorites",model_preset="Sasuke",model_catalog="Curated",model_save_name="",model_style="Basketball",model_renderer="Native world",model_high_detail=true,model_show_hair=true,model_show_hats=true,model_show_masks=true,model_show_capes=true,model_show_weapons=true,model_show_extras=true,coverage_radius=12,coverage_display="Both",coverage_scale=1,coverage_height=2.6,coverage_response=12,model_fit_pb=true,model_fit_scale=1.015,model_accessory_scale=1,model_asset="",model_height=6,model_offset=0,model_rotation=0,model_follow_pose=true,model_motion=true,model_hide_avatar=true,
+        dribble_sprint=false,dribble_gap=180,dribble_combo_name="My combo",shot_hud_compact=false,module_preset_name="Favorites",model_preset="Sasuke",model_catalog="Curated",model_save_name="",model_style="Basketball",model_renderer="Native world",model_high_detail=true,model_headless=false,model_show_hair=true,model_show_hats=true,model_show_masks=true,model_show_capes=true,model_show_weapons=true,model_show_extras=true,coverage_radius=12,coverage_display="Both",coverage_scale=1,coverage_height=2.6,coverage_response=12,model_fit_pb=true,model_fit_scale=1.015,model_accessory_scale=1,model_asset="",model_height=6,model_offset=0,model_rotation=0,model_follow_pose=true,model_motion=true,model_hide_avatar=true,
         theme_custom=false,ui_accent="#C0C9DC",ui_font_size=14,ui_rounding=6,ui_opacity=1,refine_good=true,shot_hud=true},ranges={dribble_gap={80,1200},coverage_scale={.75,1.5},coverage_height={1,5},coverage_response={2,25},model_accessory_scale={.5,1.5},coverage_radius={4,20},model_fit_scale={.95,1.12},court_three_radius={20,45},court_three_angle={90,180},court_free_radius={3,12},court_free_distance={10,30},court_corner_depth={0,12},court_line_width={.05,.8},ball_glow_strength={.05,1},ball_bloom={0,2},crosshair_size={2,24},crosshair_gap={0,20},crosshair_thickness={1,6},crosshair_opacity={.1,1},ball_trail_lifetime={.05,2},ball_trail_width={.1,4},ball_trail_opacity={.05,1},player_trail_lifetime={.05,2},player_trail_width={.1,4},player_trail_opacity={.05,1},ball_reflectance={0,1},court_reflectance={0,1},outline_opacity={0,1},outline_fill_opacity={0,1},sky_stars={0,5000},sky_density={0,.6},sky_haze={0,5},model_height={2,12},model_offset={-6,6},model_rotation={0,360},ui_font_size={14,20},ui_rounding={0,14},ui_opacity={.2,1},guard_strength={.5,2},block_delay={0,.5},shot_range={5,60},glide_speed={4,60},ankle_range={2,20},ankle_delay={.5,5},combo_delay={20,500},ping_factor={0,1},takeover_threshold={1,100},walk_speed={4,60},jump_power={10,120},fly_speed={4,100},spin_speed={10,360},fov={40,110},time={0,24},range={5,60},esp_distance={30,1000},guard_distance={2,10},guard_range={5,60},block_range={3,18},steal_range={2,8},on_ball_speed={4,60},off_ball_speed={4,60},rebound_range={3,15}},definitions={},recording={version=1,steps={}}}
     local registry=Core.module_registry(ctx.report); Engine.registry=registry
     local players,input,run=ctx.players,ctx.input,ctx.run
@@ -1627,7 +1627,7 @@ local function create_pivot_modules(ctx)
     Engine.model_cache={}; Engine.model_preload={busy=false,done=0,total=0,failed=0}
     local library_defaults={}
     library_defaults.model_outfit=Engine.settings.model_outfit; library_defaults.model_username=Engine.settings.model_username
-    for _,key in ipairs({"model_style","model_fit_pb","model_fit_scale","model_accessory_scale","model_height","model_offset","model_rotation","model_follow_pose","model_motion","model_hide_avatar","model_high_detail","model_show_hair","model_show_hats","model_show_masks","model_show_capes","model_show_weapons","model_show_extras"}) do library_defaults[key]=Engine.settings[key] end
+    for _,key in ipairs({"model_style","model_fit_pb","model_fit_scale","model_accessory_scale","model_height","model_offset","model_rotation","model_follow_pose","model_motion","model_hide_avatar","model_high_detail","model_headless","model_show_hair","model_show_hats","model_show_masks","model_show_capes","model_show_weapons","model_show_extras"}) do library_defaults[key]=Engine.settings[key] end
     function Engine:validate_model_library(data)
         if type(data)~="table" or data.version~=1 or type(data.models)~="table" then return nil,"Invalid model library" end
         local result={version=1,models={}}; local names={}; local count=0
@@ -1982,6 +1982,23 @@ local function create_pivot_modules(ctx)
         if not model.PrimaryPart then model.PrimaryPart=parts[1] end
         return {model=model,parts=parts,bindings=bindings,extras=extras,nested=nested,fit_scale=s.model_fit_scale,matched=matched,basketball=basketball,uniform_ready=uniform~=nil,texture_error=texture_error}
     end
+    function Engine:is_head_visual(part,head)
+        if head and (part==head or part:IsDescendantOf(head)) then return true end
+        local group=accessory_group(part)
+        if group=="hair" or group=="hats" or group=="masks" then return true end
+        for _,object in ipairs(part:GetDescendants()) do
+            if object:IsA("Attachment") and head and head:FindFirstChild(object.Name,true) then return true end
+            if (object:IsA("JointInstance") or object:IsA("Weld") or object:IsA("WeldConstraint")) and head and (object.Part0==head or object.Part1==head) then return true end
+        end
+        return false
+    end
+    function Engine:apply_headless(state,s)
+        for part,transparency in pairs(state.head_parts or {}) do
+            local group=part:GetAttribute("PivotAccessoryGroup") or accessory_group(part)
+            part.Transparency=s.model_headless and 1 or group and not s["model_show_"..group] and 1 or transparency
+        end
+        for object,transparency in pairs(state.head_art or {}) do object.Transparency=(s.model_headless or object.Parent and object.Parent:IsA("BasePart") and object.Parent.Transparency>=1) and 1 or transparency end
+    end
     function Engine:pose_pb_costume(state,source,s)
         local costume=state.pb_costume
         local root_part=source:FindFirstChild("HumanoidRootPart") or source.PrimaryPart
@@ -2156,11 +2173,25 @@ local function create_pivot_modules(ctx)
         end
         end
         Engine:prepare_native_costume(scope,state,s)
+        state.head_parts={}
+        local costume_head=model:FindFirstChild("Head",true) or state.appearance_template and state.appearance_template:FindFirstChild("Head")
+        for _,part in ipairs(parts) do if Engine:is_head_visual(part,costume_head) then state.head_parts[part]=part.Transparency end end
+        if pb_costume then
+            for _,extra in ipairs(pb_costume.extras) do if extra.target=="Head" then
+                state.head_parts[extra.part]=extra.part.Transparency
+                for _,child in ipairs(extra.part:GetDescendants()) do if child:IsA("BasePart") then state.head_parts[child]=child.Transparency end end
+            end end
+        end
+        state.head_art={}
+        for part in pairs(state.head_parts) do for _,object in ipairs(part:GetDescendants()) do
+            if object:IsA("Decal") or object:IsA("Texture") then state.head_art[object]=object.Transparency end
+        end end
         state.accessories={}
         for _,part in ipairs(parts) do
             local group=part:GetAttribute("PivotAccessoryGroup") or accessory_group(part)
             if group then state.accessories[#state.accessories+1]={part=part,group=group,transparency=part.Transparency} end
         end
+        Engine:apply_headless(state,s)
         state.mesh_fidelity={}
         for _,part in ipairs(parts) do if part:IsA("MeshPart") then state.mesh_fidelity[part]=part.RenderFidelity; if s.model_high_detail then pcall(function() part.RenderFidelity=Enum.RenderFidelity.Precise end) end end end
         local provider=game:GetService("ContentProvider")
@@ -2178,6 +2209,7 @@ local function create_pivot_modules(ctx)
         Engine:apply_native_appearance(scope,state,s)
         for part,original in pairs(state.mesh_fidelity) do pcall(function() part.RenderFidelity=s.model_high_detail and Enum.RenderFidelity.Precise or original end) end
         for _,entry in ipairs(state.accessories) do entry.part.Transparency=s["model_show_"..entry.group] and entry.transparency or 1 end
+        Engine:apply_headless(state,s)
         if not s.model_fit_pb and s.model_height~=state.height then local factor=s.model_height/state.height; state.model:ScaleTo(state.model:GetScale()*factor); state.rig_scale=state.rig_scale*factor; state.height=s.model_height end
         if s.model_fit_pb and not state.pb_costume and state.fit_scale~=s.model_fit_scale then local factor=s.model_fit_scale/state.fit_scale; state.model:ScaleTo(state.model:GetScale()*factor); state.rig_scale=state.rig_scale*factor; state.fit_scale=s.model_fit_scale end
         dt=math.max(.001,tonumber(dt) or 1/60)
@@ -2193,9 +2225,10 @@ local function create_pivot_modules(ctx)
         if state.pb_costume then Engine:pose_pb_costume(state,source,s) elseif s.model_follow_pose then Engine:pose_character(state,source) end
         for _,original in ipairs(source:GetDescendants()) do
             if original:IsA("BasePart") then
-                if state.replaced_head==original or s.model_hide_avatar and not (state.native_source_parts and state.native_source_parts[original]) then scope:set(original,"LocalTransparencyModifier",1) else scope:restore(original,"LocalTransparencyModifier") end
+                if s.model_headless and Engine:is_head_visual(original,source:FindFirstChild("Head")) or state.replaced_head==original or s.model_hide_avatar and not (state.native_source_parts and state.native_source_parts[original]) then scope:set(original,"LocalTransparencyModifier",1) else scope:restore(original,"LocalTransparencyModifier") end
             elseif original:IsA("Decal") or original:IsA("Texture") then
-                if s.model_hide_avatar or state.replaced_head and original:IsDescendantOf(state.replaced_head) then scope:set(original,"Transparency",1) else scope:restore(original,"Transparency") end
+                local source_head=source:FindFirstChild("Head")
+                if s.model_hide_avatar or state.replaced_head and original:IsDescendantOf(state.replaced_head) or s.model_headless and source_head and original:IsDescendantOf(source_head) then scope:set(original,"Transparency",1) else scope:restore(original,"Transparency") end
             end
         end
     end})
@@ -2219,7 +2252,7 @@ local function create_pivot_modules(ctx)
         sky={{"sky_preset","Sky preset",{"Night","Galaxy","Sunset","Day","Custom"}}},
         custom_model={{"model_style","Costume style",{"Basketball","Original costume"}}}
     }
-    Engine.cosmetic_toggles={ball_appearance={{"ball_remove_texture","Remove ball texture"},{"ball_glow","Neon glow"}},court_appearance={{"court_color_lines","Customize court markings"},{"court_remove_texture","Remove floor textures"},{"court_three_enabled","Custom three-point color"},{"court_free_enabled","Custom free-throw color"},{"court_rebuild_markings","Rebuild baked markings"}},self_outline={{"outline_through_walls","Show through walls"}},custom_model={{"model_show_hair","Show hair"},{"model_show_hats","Show hats / headbands"},{"model_show_masks","Show masks / glasses"},{"model_show_capes","Show capes / coats"},{"model_show_weapons","Show weapons"},{"model_show_extras","Show other accessories"},{"model_high_detail","High mesh detail"},{"model_fit_pb","Fit costume to PB body"},{"model_motion","Single-piece motion"},{"model_hide_avatar","Hide your normal avatar"},{"model_follow_pose","Follow player pose"}}}
+    Engine.cosmetic_toggles={ball_appearance={{"ball_remove_texture","Remove ball texture"},{"ball_glow","Neon glow"}},court_appearance={{"court_color_lines","Customize court markings"},{"court_remove_texture","Remove floor textures"},{"court_three_enabled","Custom three-point color"},{"court_free_enabled","Custom free-throw color"},{"court_rebuild_markings","Rebuild baked markings"}},self_outline={{"outline_through_walls","Show through walls"}},custom_model={{"model_headless","Headless"},{"model_show_hair","Show hair"},{"model_show_hats","Show hats / headbands"},{"model_show_masks","Show masks / glasses"},{"model_show_capes","Show capes / coats"},{"model_show_weapons","Show weapons"},{"model_show_extras","Show other accessories"},{"model_high_detail","High mesh detail"},{"model_fit_pb","Fit costume to PB body"},{"model_motion","Single-piece motion"},{"model_hide_avatar","Hide your normal avatar"},{"model_follow_pose","Follow player pose"}}}
 
     Engine.dribble_moves={
         {id="cross_left",name="Crossover right → left",code="Z"},{id="cross_right",name="Crossover left → right",code="C"},
@@ -2345,7 +2378,7 @@ local function create_pivot_modules(ctx)
     end,conflicts={"dribble_macros","auto_ankle"}})
     if type(readfile)=="function" then pcall(function() Engine:read_dribble_library() end) end
 
-    Engine.build="2026.11.06.1"
+    Engine.build="2026.11.06.2"
     local s=Engine.settings
     local defaults={ball_finish="Custom",court_preset="Custom",lighting_preset="Warm gym",lighting_intensity=.65,shoe_color="#B79AFF",jersey_color="#FFFFFF",shoe_trail=true,landing_particles=true,effect_strength=.5,indicator_style="Ring",indicator_color="#B79AFF",indicator_radius=2.6,indicator_opacity=.7,green_style="Badge",green_color="#89DEAC",green_duration=.7,outfit_jersey=true,outfit_shoes=true,outfit_accessories=false}
     for key,value in pairs(defaults) do s[key]=value end
@@ -2475,6 +2508,13 @@ local function create_pivot_modules(ctx)
         for _,object in ipairs(model:GetDescendants()) do
             if object:IsA("LuaSourceContainer") or object:IsA("Script") or object:IsA("LocalScript") or object:IsA("ModuleScript") or object:IsA("Tool") or object:IsA("BodyMover") or object:IsA("Constraint") then object:Destroy()
             elseif object:IsA("BasePart") then object.Anchored=true; object.CanCollide=false; object.CanTouch=false; object.CanQuery=false end
+        end
+        if self.settings.model_headless then
+            local head=model:FindFirstChild("Head",true)
+            for _,part in ipairs(model:GetDescendants()) do if part:IsA("BasePart") and self:is_head_visual(part,head) then
+                part.Transparency=1
+                for _,object in ipairs(part:GetDescendants()) do if object:IsA("Decal") or object:IsA("Texture") then object.Transparency=1 end end
+            end end
         end
         if not viewport.Parent then world:Destroy(); return end
         world.Parent=viewport
@@ -3823,7 +3863,7 @@ do
     local rail_line=frame(shell,20,97,660,1,theme.line)
     local top_line=frame(shell,20,54,660,1,theme.line)
     local logo=label(shell,"Pivot",20,12,100,28,19,theme.text); logo.Font=Enum.Font.SourceSansBold; logo.TextXAlignment=Enum.TextXAlignment.Left
-    local build_label=label(shell,"BUILD 2026.11.06.1",242,17,150,18,10,theme.muted); build_label.Name="PivotBuild"; build_label.Font=Enum.Font.RobotoMono; build_label.TextWrapped=false
+    local build_label=label(shell,"BUILD 2026.11.06.2",242,17,150,18,10,theme.muted); build_label.Name="PivotBuild"; build_label.Font=Enum.Font.RobotoMono; build_label.TextWrapped=false
     local heading=label(shell,"Practical Basketball",94,14,240,26,11,theme.muted); heading.Font=Enum.Font.SourceSansSemibold
     close.BackgroundColor3=theme.rail; close.TextColor3=theme.muted; close.TextSize=14; corner(close,4)
     local search=make("TextBox",{Text="",PlaceholderText="Find a control...",PlaceholderColor3=theme.muted,Position=UDim2.fromOffset(484,10),Size=UDim2.fromOffset(166,23),
@@ -4532,6 +4572,7 @@ do
                 end)
                 action("Equip selected character",function() engine:equip_selected_character(); rebuild() end)
                 module_toggle("custom_model")
+                toggle_action("Headless",function() return engine.settings.model_headless end,function(on) engine.settings.model_headless=on; visual_preview_open=false; rebuild() end)
                 for _,entry in ipairs({{"model_show_hair","Hair"},{"model_show_hats","Hats / headbands"},{"model_show_masks","Masks / glasses"},{"model_show_capes","Capes / coats"},{"model_show_weapons","Weapons"},{"model_show_extras","Other accessories"}}) do
                     local key=entry[1]; toggle_action(entry[2],function() return engine.settings[key] end,function(on)
                         engine.settings[key]=on
