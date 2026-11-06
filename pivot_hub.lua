@@ -2111,12 +2111,17 @@ local function create_pivot_modules(ctx)
         return {model=model,parts=parts,bindings=bindings,extras=extras,nested=nested,fit_scale=s.model_fit_scale,matched=matched,basketball=basketball,uniform_ready=uniform~=nil,texture_error=texture_error}
     end
     function Engine:is_head_visual(part,head)
+        local body=canonical_body(part.Name)
+        if body then return body=="Head" end
         if head and (part==head or part:IsDescendantOf(head)) then return true end
-        local group=accessory_group(part)
+        local group=part:GetAttribute("PivotAccessoryGroup") or accessory_group(part)
         if group=="hair" or group=="hats" or group=="masks" then return true end
+        local wearable=part:GetAttribute("PivotAccessoryGroup")~=nil; local ancestor=part.Parent
+        while ancestor and ancestor~=workspace do if ancestor:IsA("Accessory") then wearable=true; break end; ancestor=ancestor.Parent end
+        if not wearable then return false end
         for _,object in ipairs(part:GetDescendants()) do
-            if object:IsA("Attachment") and head and head:FindFirstChild(object.Name,true) then return true end
-            if (object:IsA("JointInstance") or object:IsA("Weld") or object:IsA("WeldConstraint")) and head and (object.Part0==head or object.Part1==head) then return true end
+            if object:IsA("Attachment") and not object.Name:lower():find("neck",1,true) and head and head:FindFirstChild(object.Name,true) then return true end
+            if not object.Name:lower():find("neck",1,true) and (object:IsA("JointInstance") or object:IsA("Weld") or object:IsA("WeldConstraint")) and head and ((object.Part0==head and object.Part1==part) or (object.Part1==head and object.Part0==part)) then return true end
         end
         return false
     end
@@ -2305,9 +2310,9 @@ local function create_pivot_modules(ctx)
         local costume_head=model:FindFirstChild("Head",true) or state.appearance_template and state.appearance_template:FindFirstChild("Head")
         for _,part in ipairs(parts) do if Engine:is_head_visual(part,costume_head) then state.head_parts[part]=part.Transparency end end
         if pb_costume then
-            for _,extra in ipairs(pb_costume.extras) do if extra.target=="Head" then
+            for _,extra in ipairs(pb_costume.extras) do if extra.target=="Head" and not canonical_body(extra.part.Name) then
                 state.head_parts[extra.part]=extra.part.Transparency
-                for _,child in ipairs(extra.part:GetDescendants()) do if child:IsA("BasePart") then state.head_parts[child]=child.Transparency end end
+                for _,child in ipairs(extra.part:GetDescendants()) do if child:IsA("BasePart") and not canonical_body(child.Name) then state.head_parts[child]=child.Transparency end end
             end end
         end
         state.head_art={}
@@ -2508,7 +2513,7 @@ local function create_pivot_modules(ctx)
     end,conflicts={"dribble_macros","auto_ankle"}})
     if type(readfile)=="function" then pcall(function() Engine:read_dribble_library() end) end
 
-    Engine.build="2026.11.06.9"
+    Engine.build="2026.11.06.10"
     local s=Engine.settings
     local defaults={ball_finish="Custom",court_preset="Custom",lighting_preset="Warm gym",lighting_intensity=.65,shoe_color="#B79AFF",jersey_color="#FFFFFF",shoe_trail=true,landing_particles=true,effect_strength=.5,indicator_style="Ring",indicator_color="#B79AFF",indicator_radius=2.6,indicator_opacity=.7,green_style="Badge",green_color="#89DEAC",green_duration=.7,outfit_jersey=true,outfit_shoes=true,outfit_accessories=false}
     for key,value in pairs(defaults) do s[key]=value end
@@ -4402,7 +4407,7 @@ do
     local rail_line=frame(shell,20,97,660,1,theme.line)
     local top_line=frame(shell,20,54,660,1,theme.line)
     local logo=label(shell,"Pivot",20,12,100,28,19,theme.text); logo.Font=Enum.Font.SourceSansBold; logo.TextXAlignment=Enum.TextXAlignment.Left
-    local build_label=label(shell,"BUILD 2026.11.06.9",242,17,150,18,10,theme.muted); build_label.Name="PivotBuild"; build_label.Font=Enum.Font.RobotoMono; build_label.TextWrapped=false
+    local build_label=label(shell,"BUILD 2026.11.06.10",242,17,150,18,10,theme.muted); build_label.Name="PivotBuild"; build_label.Font=Enum.Font.RobotoMono; build_label.TextWrapped=false
     local heading=label(shell,"Practical Basketball",94,14,240,26,11,theme.muted); heading.Font=Enum.Font.SourceSansSemibold
     close.BackgroundColor3=theme.rail; close.TextColor3=theme.muted; close.TextSize=14; corner(close,4)
     local search=make("TextBox",{Text="",PlaceholderText="Find a control...",PlaceholderColor3=theme.muted,Position=UDim2.fromOffset(484,10),Size=UDim2.fromOffset(166,23),
