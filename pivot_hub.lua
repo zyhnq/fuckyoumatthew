@@ -1696,6 +1696,24 @@ local function create_pivot_modules(ctx)
         end
         return true
     end
+    Engine.settings.model_last_preset=Engine.settings.model_preset
+    function Engine:skin_source()
+        return self.settings.model_preset=="Custom" and "Roblox model ID" or "Preset character"
+    end
+    function Engine:set_skin_source(source)
+        assert(source=="Preset character" or source=="Roblox model ID","Choose a valid skin source")
+        if source==self:skin_source() then return end
+        registry:disable("custom_model")
+        if source=="Roblox model ID" then
+            self.settings.model_last_preset=self.settings.model_preset; self.settings.model_preset="Custom"
+        else self.settings.model_preset=model_presets[self.settings.model_last_preset] and self.settings.model_last_preset or "Sasuke" end
+        ctx.report(source=="Roblox model ID" and "Enter a Roblox model ID, then press Equip selected character" or "Choose a preset, then press Equip selected character")
+    end
+    function Engine:equip_selected_character()
+        registry:disable("custom_model")
+        local ok,err=registry:enable("custom_model",self.settings); assert(ok,err)
+        return true
+    end
     local function rig_key(name) return tostring(name):lower():gsub("mixamorig",""):gsub("[^%w]","") end
     local bone_alias={hips="rootjoint",pelvis="rootjoint",spine="waist",spine1="waist",spine2="waist",head="neck",leftarm="leftshoulder",rightarm="rightshoulder",leftforearm="leftelbow",rightforearm="rightelbow",lefthand="leftwrist",righthand="rightwrist",leftupleg="lefthip",rightupleg="righthip",leftleg="leftknee",rightleg="rightknee",leftfoot="leftankle",rightfoot="rightankle"}
     local function capture_character_rig(objects)
@@ -2252,7 +2270,7 @@ local function create_pivot_modules(ctx)
     end,conflicts={"dribble_macros","auto_ankle"}})
     if type(readfile)=="function" then pcall(function() Engine:read_dribble_library() end) end
 
-    Engine.build="2026.11.04.3"
+    Engine.build="2026.11.05.1"
     local s=Engine.settings
     local defaults={ball_finish="Custom",court_preset="Custom",lighting_preset="Warm gym",lighting_intensity=.65,shoe_color="#B79AFF",jersey_color="#FFFFFF",shoe_trail=true,landing_particles=true,effect_strength=.5,indicator_style="Ring",indicator_color="#B79AFF",indicator_radius=2.6,indicator_opacity=.7,green_style="Badge",green_color="#89DEAC",green_duration=.7,outfit_jersey=true,outfit_shoes=true,outfit_accessories=false}
     for key,value in pairs(defaults) do s[key]=value end
@@ -2373,7 +2391,7 @@ local function create_pivot_modules(ctx)
         if active and event.kind=="feedback" and event.code==5 then active.state.untilTime=os.clock()+s.green_duration end
     end
     function Engine:preview_character(viewport,name)
-        local asset=model_presets[name]; assert(asset,"Choose a preset character")
+        local asset=model_presets[name] or name=="Custom" and tostring(self.settings.model_asset):match("^%s*(%d+)%s*$"); assert(asset and #asset<=18,"Choose a preset character or enter a numeric Roblox model ID")
         local objects=self:model_objects(asset)
         if not viewport.Parent then for _,o in ipairs(objects) do o:Destroy() end; return end
         viewport:ClearAllChildren()
@@ -2830,14 +2848,107 @@ local function create_pivot_modules(ctx)
         assert(target,"No rim is visible"); assert(make_dunk_bolt(state,target,self.settings),"No floor detected beneath the rim")
     end
 
+    for key,value in pairs({cape_theme="Galaxy",cape_size=1,cape_length=1,cape_speed=1,cape_opacity=.95,tail_theme="Match cape",tail_shape="Soft",tail_length=3.5,tail_size=1,tail_speed=1.2,tail_sway=.6}) do s[key]=value end
+    for key,value in pairs({cape_size={.6,1.5},cape_length={.7,1.5},cape_speed={.2,2},cape_opacity={.3,1},tail_length={2,5},tail_size={.5,1.6},tail_speed={.3,2.5},tail_sway={.1,1}}) do Engine.ranges[key]=value end
+    local function fabric_color(theme,time,index)
+        if theme=="Snow" then return Color3.fromRGB(175+index%3*15,209+index%3*10,245) end
+        if theme=="Rainbow" then return Color3.fromRGB(155+95*math.sin(time+index*.4),155+95*math.sin(time+index*.4+2.1),155+95*math.sin(time+index*.4+4.2)) end
+        return Color3.fromRGB(43+18*math.sin(time*.4+index*.3),32+18*math.sin(time*.3+index*.5),95+40*math.sin(time*.4+index*.2))
+    end
+    local function cape_palette(theme,time,index)
+        if theme=="Rainbow" then
+            return ColorSequence.new({ColorSequenceKeypoint.new(0,Color3.fromRGB(255,102,138)),ColorSequenceKeypoint.new(.25,Color3.fromRGB(255,214,115)),ColorSequenceKeypoint.new(.5,Color3.fromRGB(111,230,180)),ColorSequenceKeypoint.new(.75,Color3.fromRGB(112,174,255)),ColorSequenceKeypoint.new(1,Color3.fromRGB(190,131,255))})
+        end
+        return ColorSequence.new({ColorSequenceKeypoint.new(0,fabric_color(theme,time,index)),ColorSequenceKeypoint.new(.5,theme=="Snow" and Color3.fromRGB(235,248,255) or Color3.fromRGB(101,57,147)),ColorSequenceKeypoint.new(1,theme=="Snow" and Color3.fromRGB(140,191,235) or Color3.fromRGB(28,49,94))})
+    end
+    add("animated_cape","Animated cape","Visual+","Moving Galaxy, Snow and Rainbow capes with layered cloth motion",{start=function(scope)
+        local folder=new_local(scope,"Folder",workspace); folder.Name="PivotAnimatedCape"
+        local panels={}
+        for i=1,10 do
+            local part=effect_part(scope,folder,"CapePanel"); local surfaces={}
+            for _,face in ipairs({Enum.NormalId.Front,Enum.NormalId.Back}) do
+                local surface=new_local(scope,"SurfaceGui",part); surface.Name="CapePattern"; surface.Face=face; surface.CanvasSize=Vector2.new(300,48); surface.LightInfluence=0; surface.AlwaysOnTop=false
+                local fill=new_local(scope,"Frame",surface); fill.Size=UDim2.fromScale(1,1); fill.BackgroundColor3=Color3.fromRGB(255,255,255); fill.BorderSizePixel=0
+                local gradient=new_local(scope,"UIGradient",fill)
+                local particles={}
+                for n=1,4 do
+                    local dot=new_local(scope,"TextLabel",fill); dot.BackgroundTransparency=1; dot.Size=UDim2.fromOffset(18,18); dot.AnchorPoint=Vector2.new(.5,.5); dot.Font=Enum.Font.SourceSansBold; dot.TextColor3=Color3.fromRGB(234,246,255)
+                    particles[n]=dot
+                end
+                surfaces[#surfaces+1]={gui=surface,fill=fill,gradient=gradient,particles=particles}
+            end
+            panels[i]={part=part,surfaces=surfaces}
+        end
+        return {panels=panels,motion=0}
+    end,step=function(_,state,settings,dt)
+        local model=rig(); local torso=model and (model:FindFirstChild("UpperTorso") or model:FindFirstChild("Torso") or root())
+        local r=root(); local now=os.clock()*settings.cape_speed
+        local speed=r and r.AssemblyLinearVelocity and r.AssemblyLinearVelocity.Magnitude or 0
+        if r and state.position and dt and dt>0 then local distance=(r.Position-state.position).Magnitude; if distance<8 then speed=math.max(speed,distance/dt) end end
+        state.position=r and r.Position; state.motion=state.motion+(math.min(1,speed/18)-state.motion)*(1-math.exp(-6*(dt or .03)))
+        local pattern=state.theme~=settings.cape_theme or os.clock()>=(state.next_pattern or 0)
+        if pattern then state.theme=settings.cape_theme; state.next_pattern=os.clock()+.08 end
+        for i,panel in ipairs(state.panels) do
+            local p=panel.part; local progress=i/10
+            p.Transparency=torso and 1-settings.cape_opacity or 1
+            if torso then
+                local width=(2.25+progress*.7)*settings.cape_size; local length=.37*settings.cape_length
+                p.Size=Vector3.new(width,length+.04,.045); p.Color=fabric_color(settings.cape_theme,now,i)
+                local sway=math.sin(now*1.8-i*.35)*(.035+.12*progress); local billow=state.motion*progress*progress*.8
+                p.CFrame=torso.CFrame*CFrame.new(sway,.75-i*length,.85+progress*.2+billow+math.sin(now*1.6-i*.3)*.06)*CFrame.Angles(-state.motion*progress*.35+math.sin(now*1.8-i*.3)*.045,0,sway*.12)
+            end
+            local palette=pattern and cape_palette(settings.cape_theme,now,i)
+            for _,surface in ipairs(panel.surfaces) do
+                surface.gui.Enabled=torso~=nil; surface.fill.BackgroundTransparency=1-settings.cape_opacity
+                if pattern then
+                surface.gradient.Color=palette; surface.gradient.Rotation=settings.cape_theme=="Rainbow" and 25+math.sin(now*.4)*20 or 35+math.sin(now*.2+i*.1)*15
+                surface.gradient.Offset=Vector2.new(math.sin(now*.35)*.25,0)
+                for n,dot in ipairs(surface.particles) do
+                    local snow=settings.cape_theme=="Snow"; dot.Visible=settings.cape_theme~="Rainbow"
+                    dot.Text=snow and "•" or "✦"; dot.TextSize=snow and 14 or 9+n%2*4
+                    dot.Position=UDim2.fromScale(((n*.217+i*.173)+(snow and math.sin(now*.6+n)*.03 or now*.005))%1,(n*.28+i*.19+(snow and now*.3 or 0))%1)
+                    dot.TextTransparency=snow and .1 or .25+math.sin(now*1.6+n+i)*.25
+                end
+                end
+            end
+        end
+    end,interval=.03})
+    add("animated_tail","Animated tail","Visual+","A smooth tapered tail with movement sway and matching cape themes",{start=function(scope)
+        local folder=new_local(scope,"Folder",workspace); folder.Name="PivotAnimatedTail"
+        local parts={}
+        for i=1,16 do local p=effect_part(scope,folder,"TailSegment"); local mesh=new_local(scope,"SpecialMesh",p); mesh.MeshType=Enum.MeshType.Sphere; parts[i]=p end
+        return {parts=parts,motion=0}
+    end,step=function(_,state,settings,dt)
+        local model=rig(); local torso=model and (model:FindFirstChild("LowerTorso") or model:FindFirstChild("Torso") or root())
+        local r=root(); local speed=r and r.AssemblyLinearVelocity and r.AssemblyLinearVelocity.Magnitude or 0
+        state.motion=state.motion+(math.min(1,speed/18)-state.motion)*(1-math.exp(-6*(dt or .03)))
+        local theme=settings.tail_theme=="Match cape" and settings.cape_theme or settings.tail_theme
+        local now=os.clock()*settings.tail_speed
+        local function point(t)
+            return Vector3.new(math.sin(now*1.8-t*2.6)*settings.tail_sway*t,-math.sin(t*math.pi)*.6+t*.45,t*settings.tail_length+state.motion*t*.25)
+        end
+        for i,p in ipairs(state.parts) do
+            p.Transparency=torso and .02 or 1
+            if torso then
+                local mount=torso.CFrame*CFrame.new(0,-.8,.7); local a=(mount*CFrame.new(point((i-1)/16))).Position; local b=(mount*CFrame.new(point(i/16))).Position
+                local thickness=(settings.tail_shape=="Soft" and .36 or .16)*(1-i/16*.8)*settings.tail_size
+                p.Size=Vector3.new(thickness,thickness,(b-a).Magnitude+.07); p.CFrame=CFrame.new((a+b)/2,b); p.Color=fabric_color(theme,now,i)
+                if theme=="Snow" and i>=12 then p.Color=Color3.fromRGB(236,248,255) end
+                p.Material=theme=="Rainbow" and Enum.Material.Neon or Enum.Material.SmoothPlastic
+            end
+        end
+    end,interval=.03})
+
     Engine.cosmetic_loadouts={version=1,loadouts={}}
     Engine.settings.cosmetic_loadout_name="My look"
     local look_modules={crosshair=true,ball_trail=true,player_trail=true,ball_appearance=true,court_appearance=true,self_outline=true,sky=true,custom_model=true,coverage_hud=true,player_indicator=true,shoe_effects=true,outfit_tint=true,lighting_preset=true,green_effect=true,wings=true,character_aura=true,ball_impacts=true,wing_trails=true,rim_effects=true,lightning_aura=true,meter_style=true,hide_meters=true}
     local look_defaults={}
     look_modules.lightning_footsteps=true; look_modules.electric_ball_trail=true; look_modules.dunk_lightning=true
+    look_modules.animated_cape=true; look_modules.animated_tail=true
     local prefixes={"ball_","court_","model_","wings_","aura_","lightning_","wing_trail_","rim_","impact_","indicator_","shoe_","jersey_","outfit_","sky_","outline_","player_trail_","crosshair_","coverage_"}
     local look_extra={lighting_preset=true,lighting_intensity=true,effect_strength=true,green_style=true,green_color=true,green_duration=true,meter_style=true,shot_hud=true,shot_hud_compact=true}
     prefixes[#prefixes+1]="footlight_"; prefixes[#prefixes+1]="dunk_lightning_"
+    prefixes[#prefixes+1]="cape_"; prefixes[#prefixes+1]="tail_"
     for key,value in pairs(Engine.settings) do
         local include=look_extra[key]
         for _,prefix in ipairs(prefixes) do if key:sub(1,#prefix)==prefix then include=true end end
@@ -3638,7 +3749,7 @@ do
     local rail_line=frame(shell,20,97,660,1,theme.line)
     local top_line=frame(shell,20,54,660,1,theme.line)
     local logo=label(shell,"Pivot",20,12,100,28,19,theme.text); logo.Font=Enum.Font.SourceSansBold; logo.TextXAlignment=Enum.TextXAlignment.Left
-    local build_label=label(shell,"BUILD 2026.11.04.3",242,17,150,18,10,theme.muted); build_label.Name="PivotBuild"; build_label.Font=Enum.Font.RobotoMono; build_label.TextWrapped=false
+    local build_label=label(shell,"BUILD 2026.11.05.1",242,17,150,18,10,theme.muted); build_label.Name="PivotBuild"; build_label.Font=Enum.Font.RobotoMono; build_label.TextWrapped=false
     local heading=label(shell,"Practical Basketball",94,14,240,26,11,theme.muted); heading.Font=Enum.Font.SourceSansSemibold
     close.BackgroundColor3=theme.rail; close.TextColor3=theme.muted; close.TextSize=14; corner(close,4)
     local search=make("TextBox",{Text="",PlaceholderText="Find a control...",PlaceholderColor3=theme.muted,Position=UDim2.fromOffset(484,10),Size=UDim2.fromOffset(166,23),
@@ -3975,6 +4086,7 @@ do
     local visual_lightning_open=false; local visual_rim_open=false
     local visual_electric_pack_open=false
     local visual_effect_filter="All"; local visual_effect_cards={}; local visual_status_label
+    local visual_preview_open=false; local visual_character_preview
     local tabs={"All","Saved modules","Shooting","Dribbling","Cosmetics","Character","Player","Defense","Visuals","World","Camera","Recorder","Options"}
     local category="All"; local rows={}; local fields={}; local y=0
     local container=page
@@ -4136,6 +4248,13 @@ do
             rebuild()
         end)
     end
+    local function skin_source_control()
+        local source=engine:skin_source()
+        local b=action("Skin source  /  "..source,function()
+            engine:set_skin_source(source=="Preset character" and "Roblox model ID" or "Preset character")
+            character_open=false; visual_character_open=false; visual_preview_open=false; rebuild()
+        end); b.Name="SkinSource"
+    end
     local capture_key,capture_started,last_ended
     local function stop_capture()
         engine.capturing=false; capture_key=nil; capture_started=nil; last_ended=nil
@@ -4250,17 +4369,24 @@ do
                 end
                 text("Team colors uses the floor and marking colors you choose above.",12,theme.muted,32)
             elseif visual_section=="Outfit" then
+                skin_source_control()
+                if engine:skin_source()=="Preset character" then
                 action("Character  /  "..engine.settings.model_preset,function() visual_character_open=not visual_character_open; rebuild() end)
                 if visual_character_open then
                     local list=own(make("ScrollingFrame",{Name="VisualCharacterList",Position=UDim2.fromOffset(0,y),Size=UDim2.new(1,-6,0,168),BackgroundColor3=theme.panel,BorderSizePixel=0,ScrollBarThickness=3,CanvasSize=UDim2.fromOffset(0,#engine.characters*32)},container)); y=y+178
-                    for i,entry in ipairs(engine.characters) do local name=entry.name; local b=ui.button(list,name,function() engine.settings.model_preset=name; visual_character_open=false; rebuild() end); b.Position=UDim2.fromOffset(0,(i-1)*32); b.Size=UDim2.new(1,-8,0,30) end
+                    local n=0; for _,entry in ipairs(engine.characters) do if entry.name~="Custom" then local name=entry.name; local b=ui.button(list,name,function() engine.settings.model_preset=name; visual_character_open=false; visual_preview_open=false; rebuild() end); b.Position=UDim2.fromOffset(0,n*32); b.Size=UDim2.new(1,-8,0,30); n=n+1 end end
                 end
-                local preview=own(make("ViewportFrame",{Name="CharacterPreview",Position=UDim2.fromOffset(0,y),Size=UDim2.new(1,-6,0,220),BackgroundColor3=theme.panel,BorderSizePixel=0,Ambient=Color3.fromRGB(180,185,200),LightColor=Color3.fromRGB(255,255,255)},container)); y=y+230
+                else field("model_asset","Roblox model ID") end
+                if visual_preview_open then
+                    visual_character_preview=own(make("ViewportFrame",{Name="CharacterPreview",Position=UDim2.fromOffset(0,y),Size=UDim2.new(1,-6,0,220),BackgroundColor3=theme.panel,BorderSizePixel=0,Ambient=Color3.fromRGB(180,185,200),LightColor=Color3.fromRGB(255,255,255)},container)); y=y+230
+                end
                 action("Preview selected character",function()
+                    if not visual_preview_open then visual_preview_open=true; rebuild() end
+                    local preview=visual_character_preview
                     report("Loading preview…")
                     task.spawn(function() local ok,err=pcall(function() engine:preview_character(preview,engine.settings.model_preset) end); report(ok and "Preview ready / use Equip to apply" or "Preview unavailable: "..tostring(err)) end)
                 end)
-                action("Equip selected character",function() engine:select_character(engine.settings.model_preset); rebuild() end)
+                action("Equip selected character",function() engine:equip_selected_character(); rebuild() end)
                 module_toggle("custom_model")
                 for _,entry in ipairs({{"model_show_hair","Hair"},{"model_show_hats","Hats / headbands"},{"model_show_masks","Masks / glasses"},{"model_show_capes","Capes / coats"},{"model_show_weapons","Weapons"},{"model_show_extras","Other accessories"}}) do
                     local key=entry[1]; toggle_action(entry[2],function() return engine.settings[key] end,function(on)
@@ -4314,6 +4440,12 @@ do
                     toggle_action("Animate wings",function() return engine.settings.wings_flap end,function(on) engine.settings.wings_flap=on end); field("wings_speed","Flap speed")
                     toggle_action("Fold while idle",function() return engine.settings.wings_fold_idle end,function(on) engine.settings.wings_fold_idle=on end); field("wings_fold","Idle fold amount")
                     module_toggle("wing_trails"); field("wing_trail_color","Wing trail color"); field("wing_trail_lifetime","Wing trail duration"); field("wing_trail_width","Wing trail width"); field("wing_trail_opacity","Wing trail opacity")
+                end)
+                effect_card("animated_cape","Character","Cape controls","Animated Galaxy, Snow and Rainbow fabric",function()
+                    choice("cape_theme","Cape theme",{"Galaxy","Snow","Rainbow"}); field("cape_size","Cape width"); field("cape_length","Cape length"); field("cape_speed","Animation speed"); field("cape_opacity","Cape opacity")
+                end)
+                effect_card("animated_tail","Character","Tail controls","A swaying tail with matching theme colors",function()
+                    choice("tail_theme","Tail theme",{"Match cape","Galaxy","Snow","Rainbow"}); choice("tail_shape","Tail shape",{"Soft","Slim"}); field("tail_length","Tail length"); field("tail_size","Tail thickness"); field("tail_speed","Tail speed"); field("tail_sway","Tail sway")
                 end)
                 effect_card("lightning_footsteps","Character","Footstep controls","Electric cracks on each grounded stride",function()
                     field("footlight_color","Footstep color"); field("footlight_size","Footstep spread"); field("footlight_duration","Footstep duration")
@@ -4437,8 +4569,10 @@ do
                 divider.Visible=not collapsed[group]
                 container=card; y=38
                 if not collapsed[group] and group=="Character" then
+                    skin_source_control()
+                    if engine:skin_source()=="Preset character" then
                     choice("model_catalog","Presets",{"Curated","All"})
-                    local choices=engine:character_choices()
+                    local choices={}; for _,entry in ipairs(engine:character_choices()) do if entry.name~="Custom" then choices[#choices+1]=entry end end
                     local selector=action("Character  /  "..engine.settings.model_preset..(character_open and "  ▴" or "  ▾"),function() character_open=not character_open; rebuild() end)
                     selector.Name="CharacterDropdown"
                     if character_open then
@@ -4459,6 +4593,10 @@ do
                         end
                         y=y+176
                     end
+                    else
+                        field("model_asset","Roblox model ID")
+                    end
+                    action("Equip selected character",function() engine:equip_selected_character(); rebuild() end)
                     action("Saved models  /  "..#engine.model_library.models..(library_open and "  −" or "  +"),function() library_open=not library_open; rebuild() end)
                     if library_open then
                         library_status=text("Saved models stay in pivot_models.json",11,theme.muted,24)
@@ -4504,7 +4642,7 @@ do
                         text(definition.description,12,theme.muted,id=="dribble_library" and 40 or 60).TextWrapped=true
                         for _,entry in ipairs(options[id] or {}) do field(entry[1],entry[2]) end
                         for _,entry in ipairs((engine.cosmetic_choices or {})[id] or {}) do if engine:show_cosmetic_control(entry[1]) then choice(entry[1],entry[2],entry[3]) end end
-                        for _,entry in ipairs((engine.cosmetic_fields or {})[id] or {}) do if engine:show_cosmetic_control(entry[1]) and (entry[1]~="model_asset" or engine.settings.model_preset=="Custom") and (entry[1]~="model_height" or not engine.settings.model_fit_pb) then field(entry[1],entry[2]) end end
+                        for _,entry in ipairs((engine.cosmetic_fields or {})[id] or {}) do if engine:show_cosmetic_control(entry[1]) and entry[1]~="model_asset" and (entry[1]~="model_height" or not engine.settings.model_fit_pb) then field(entry[1],entry[2]) end end
                         for _,entry in ipairs((engine.cosmetic_toggles or {})[id] or {}) do local key=entry[1]; if (key~="model_follow_pose" or not engine.settings.model_fit_pb) and engine:show_cosmetic_control(key) then toggle_action(entry[2],function() return engine.settings[key] end,function(on) engine.settings[key]=on; if key=="model_fit_pb" then local active=engine.registry.active.custom_model; if active then engine.registry:disable("custom_model"); local ok,err=engine.registry:enable("custom_model",engine.settings); if not ok then report(tostring(err)) end end; rebuild() end end) end end
                         if id=="dribble_library" then
                             toggle_action("Sprint variants",function() return engine.settings.dribble_sprint end,function(on) engine.settings.dribble_sprint=on end)
