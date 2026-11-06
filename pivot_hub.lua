@@ -2378,7 +2378,7 @@ local function create_pivot_modules(ctx)
     end,conflicts={"dribble_macros","auto_ankle"}})
     if type(readfile)=="function" then pcall(function() Engine:read_dribble_library() end) end
 
-    Engine.build="2026.11.06.2"
+    Engine.build="2026.11.06.3"
     local s=Engine.settings
     local defaults={ball_finish="Custom",court_preset="Custom",lighting_preset="Warm gym",lighting_intensity=.65,shoe_color="#B79AFF",jersey_color="#FFFFFF",shoe_trail=true,landing_particles=true,effect_strength=.5,indicator_style="Ring",indicator_color="#B79AFF",indicator_radius=2.6,indicator_opacity=.7,green_style="Badge",green_color="#89DEAC",green_duration=.7,outfit_jersey=true,outfit_shoes=true,outfit_accessories=false}
     for key,value in pairs(defaults) do s[key]=value end
@@ -2446,7 +2446,7 @@ local function create_pivot_modules(ctx)
                 local particles=new_local(scope,"ParticleEmitter",a); particles.Name="PivotLanding"; particles.Rate=0; particles.Lifetime=NumberRange.new(.2,.4); particles.Speed=NumberRange.new(1,3); particles.SpreadAngle=Vector2.new(80,80); particles.Size=NumberSequence.new(.12); particles.Transparency=NumberSequence.new(.25); particles.LightEmission=.6
                 item={a=a,b=b,trail=trail,particles=particles}; state.feet[p]=item
             end
-            local color=ColorSequence.new(cosmetic_color(settings.shoe_color))
+            local color=ColorSequence.new(Engine:reactive_outfit_color(settings.shoe_color))
             item.trail.Color=color; item.trail.Enabled=settings.shoe_trail; item.trail.Lifetime=.12+settings.effect_strength*.25; item.trail.WidthScale=NumberSequence.new(settings.effect_strength*.5); item.trail.Transparency=NumberSequence.new(.35)
             item.particles.Color=color
         end
@@ -2461,7 +2461,9 @@ local function create_pivot_modules(ctx)
         local sources={rig(),workspace:FindFirstChild("PivotLocalCosmetics")}
         for _,source in pairs(sources) do if source then for _,object in ipairs(source:GetDescendants()) do
             if object:IsA("Shirt") or object:IsA("Pants") then
-                if settings.outfit_jersey then scope:set(object,"Color3",cosmetic_color(settings.jersey_color)) else scope:restore(object,"Color3") end
+                if registry.active.reactive_outfit and settings.reactive_clothes then
+                    -- Reactive outfit owns clothing tint until its trigger module is disabled.
+                elseif settings.outfit_jersey then scope:set(object,"Color3",cosmetic_color(settings.jersey_color)) else scope:restore(object,"Color3") end
             elseif object:IsA("BasePart") then
                 local name=object.Name:lower(); local accessory=object.Parent and object.Parent:IsA("Accessory")
                 local shoe=name:find("shoe",1,true) or name:find("foot",1,true)
@@ -2551,7 +2553,7 @@ local function create_pivot_modules(ctx)
         local target=settings.wings_fold_idle and 1-settings.wings_fold*(1-math.min(1,speed/16)) or 1
         state.openness=state.openness+(target-state.openness)*(1-math.exp(-7*(dt or .02)))
         local flap=settings.wings_flap and math.sin(time*settings.wings_speed*math.pi)*(.1+.12*state.openness) or 0
-        local color=cosmetic_color(settings.wings_color); local tip=cosmetic_color(settings.wings_tip_color); local scale=settings.wings_scale
+        local color=Engine:reactive_outfit_color(settings.wings_color); local tip=cosmetic_color(settings.wings_tip_color); local scale=settings.wings_scale
         for _,entry in ipairs(state.feathers) do
             local p,i,side=entry.part,entry.index,entry.side
             local visible=torso~=nil and (settings.wings_style~="Bat" or i<=6)
@@ -2591,7 +2593,7 @@ local function create_pivot_modules(ctx)
         local orbs={}; for i=1,8 do local p=effect_part(scope,folder,"AuraOrb"); p.Shape=Enum.PartType.Ball; orbs[i]=p end
         return {orbs=orbs}
     end,step=function(scope,state,settings)
-        local r=root(); local color=cosmetic_color(settings.aura_color); local orbit=settings.aura_style=="Orbit"
+        local r=root(); local color=Engine:reactive_outfit_color(settings.aura_color); local orbit=settings.aura_style=="Orbit"
         if state.root~=r then
             if state.attachment then state.attachment:Destroy(); state.attachment=nil; state.emitter=nil end
             state.root=r
@@ -2700,7 +2702,7 @@ local function create_pivot_modules(ctx)
         return {bolts=bolts,folder=folder,speed=0}
     end,step=function(_,state,settings,dt)
         local r=root(); local now=os.clock(); local count=math.floor(2+settings.lightning_intensity*4)
-        local color=cosmetic_color(settings.lightning_color); local core_color=cosmetic_color(settings.lightning_core_color)
+        local color=Engine:reactive_outfit_color(settings.lightning_color); local core_color=cosmetic_color(settings.lightning_core_color)
         local speed=r and r.AssemblyLinearVelocity and r.AssemblyLinearVelocity.Magnitude or 0
         if r and state.last_position and dt and dt>0 then local distance=(r.Position-state.last_position).Magnitude; if distance<8 then speed=math.max(speed,distance/dt) end end
         state.last_position=r and r.Position
@@ -2770,7 +2772,7 @@ local function create_pivot_modules(ctx)
                 item={a=a,b=b,trail=trail}; state.items[part]=item
             end
             item.a.Position=Vector3.new(0,-part.Size.Y*.4,-settings.wing_trail_width/2); item.b.Position=Vector3.new(0,-part.Size.Y*.4,settings.wing_trail_width/2)
-            item.trail.Color=ColorSequence.new(cosmetic_color(settings.wing_trail_color)); item.trail.Lifetime=settings.wing_trail_lifetime; item.trail.WidthScale=NumberSequence.new(1); item.trail.Transparency=NumberSequence.new(1-settings.wing_trail_opacity)
+            item.trail.Color=ColorSequence.new(Engine:reactive_outfit_color(settings.wing_trail_color)); item.trail.Lifetime=settings.wing_trail_lifetime; item.trail.WidthScale=NumberSequence.new(1); item.trail.Transparency=NumberSequence.new(1-settings.wing_trail_opacity)
         end end
         for part,item in pairs(state.items) do if not seen[part] then item.trail:Destroy(); item.a:Destroy(); item.b:Destroy(); state.items[part]=nil end end
     end,interval=.04})
@@ -3053,16 +3055,138 @@ local function create_pivot_modules(ctx)
         end
     end,interval=.03})
 
+    for key,value in pairs({reactive_idle_color="#B8A7F6",reactive_move_color="#82CFFF",reactive_ball_color="#FFCC78",reactive_perfect_color="#87F6BE",reactive_miss_color="#FF8E9B",reactive_speed=14,reactive_response=8,reactive_flash=.8,reactive_tint=.55,reactive_motion=true,reactive_possession=true,reactive_shots=true,reactive_clothes=true,reactive_effects=true}) do s[key]=value end
+    for key,value in pairs({reactive_speed={4,30},reactive_response={2,20},reactive_flash={.2,2},reactive_tint={.1,1}}) do Engine.ranges[key]=value end
+    local function reaction_mix(a,b,t) return Color3.new(a.R+(b.R-a.R)*t,a.G+(b.G-a.G)*t,a.B+(b.B-a.B)*t) end
+    function Engine:reactive_outfit_color(fallback)
+        local active=registry.active.reactive_outfit
+        return active and s.reactive_effects and active.state.color or cosmetic_color(fallback)
+    end
+    function Engine:reactive_feedback(event)
+        local active=registry.active.reactive_outfit
+        if active and s.reactive_shots and event.kind=="feedback" and type(event.code)=="number" then
+            active.state.flash_until=os.clock()+s.reactive_flash
+            active.state.flash=event.code==5 and "Perfect" or "Feedback"
+        end
+    end
+    add("reactive_outfit","Reactive outfit","Visual+","Clothing, wings, aura and lightning colors react to movement, possession and observed shot feedback",{start=function()
+        return {color=cosmetic_color(s.reactive_idle_color),mode="Idle",flash_until=0,garments={}}
+    end,step=function(scope,state,settings,dt)
+        local model=rig(); local r=root(); local speed=0
+        if r then
+            local velocity=r.AssemblyLinearVelocity
+            if velocity then speed=Vector3.new(velocity.X,0,velocity.Z).Magnitude end
+            if state.previous and dt>0 then local delta=r.Position-state.previous; if delta.Magnitude<8 then speed=math.max(speed,Vector3.new(delta.X,0,delta.Z).Magnitude/dt) end end
+            state.previous=r.Position
+        else state.previous=nil end
+        local mode="Idle"; local color=cosmetic_color(settings.reactive_idle_color)
+        if settings.reactive_motion and speed>.5 then
+            mode="Moving"; color=reaction_mix(color,cosmetic_color(settings.reactive_move_color),math.min(1,speed/settings.reactive_speed))
+        end
+        if settings.reactive_possession and held_ball(model) then mode="Possession"; color=cosmetic_color(settings.reactive_ball_color) end
+        if settings.reactive_shots and os.clock()<state.flash_until then mode=state.flash; color=cosmetic_color(mode=="Perfect" and settings.reactive_perfect_color or settings.reactive_miss_color) end
+        state.mode=mode; state.color=reaction_mix(state.color,color,1-math.exp(-settings.reactive_response*dt))
+        local found={}
+        if model then for _,object in ipairs(model:GetDescendants()) do
+            if object:IsA("Shirt") or object:IsA("Pants") then
+                local tint=registry.active.outfit_tint
+                if settings.reactive_clothes and tint then tint.scope:restore(object,"Color3") end
+                found[object]=true; local base=state.garments[object] or object.Color3 or Color3.new(1,1,1); state.garments[object]=base
+                if settings.reactive_clothes then scope:set(object,"Color3",reaction_mix(base,state.color,settings.reactive_tint)) else scope:restore(object,"Color3") end
+            end
+        end end
+        for object in pairs(state.garments) do if not found[object] then scope:restore(object,"Color3"); state.garments[object]=nil end end
+    end,interval=.04})
+
+    s.controller_scale=.85; s.controller_opacity=.95; s.controller_top=12
+    Engine.ranges.controller_scale={.6,1.4}; Engine.ranges.controller_opacity={.3,1}; Engine.ranges.controller_top={0,180}
+    add("controller_hud","Controller input","Visual+","A live controller at the top of the screen; reads buttons, sticks and trigger pressure without consuming inputs",{start=function(scope)
+        local palette={base=Color3.fromRGB(17,17,24),body=Color3.fromRGB(34,34,47),line=Color3.fromRGB(66,62,86),muted=Color3.fromRGB(143,140,163),accent=Color3.fromRGB(184,167,246),text=Color3.fromRGB(235,231,249)}
+        local function make(class,props,parent) local object=Instance.new(class); for key,value in pairs(props) do object[key]=value end; object.Parent=parent; return object end
+        local function round(object,radius) make("UICorner",{CornerRadius=UDim.new(0,radius)},object); return object end
+        local function box(name,x,y,w,h,color,parent)
+            return round(make("Frame",{Name=name,Position=UDim2.fromOffset(x,y),Size=UDim2.fromOffset(w,h),BackgroundColor3=color or palette.body,BorderSizePixel=0},parent),math.min(w,h)/3)
+        end
+        local panel=box("PivotControllerInput",0,0,252,148,palette.base,ctx.gui); panel.AnchorPoint=Vector2.new(.5,0); panel.Position=UDim2.new(.5,0,0,s.controller_top); panel.Active=false
+        make("UIStroke",{Color=palette.line,Thickness=1,Transparency=.35},panel)
+        local scale=make("UIScale",{Scale=s.controller_scale},panel)
+        scope:defer(function() panel:Destroy() end)
+        local state={panel=panel,scale=scale,values={},buttons={},sticks={},triggers={},connected=false,pad=Enum.UserInputType.Gamepad1}
+        local function text(parent,name,value,x,y,w,h,size,color)
+            return make("TextLabel",{Name=name,Text=value,Position=UDim2.fromOffset(x,y),Size=UDim2.fromOffset(w,h),BackgroundTransparency=1,TextColor3=color or palette.muted,TextSize=size or 12,Font=Enum.Font.SourceSansSemibold},parent)
+        end
+        local body=box("ControllerBody",24,41,204,72,palette.body,panel)
+        local left=box("LeftGrip",25,72,48,48,palette.body,panel); left.Rotation=15
+        local right=box("RightGrip",179,72,48,48,palette.body,panel); right.Rotation=-15
+        local function button(key,caption,x,y,w,h)
+            local part=box(key,x,y,w,h,palette.base,panel); round(part,math.min(w,h)/2)
+            local label=text(part,"Caption",caption,0,0,w,h,12,palette.text)
+            state.buttons[key]={part=part,label=label}; return part
+        end
+        button("ButtonL1","LB",29,26,62,16); button("ButtonR1","RB",161,26,62,16)
+        for _,entry in ipairs({{"ButtonL2","LT",29},{"ButtonR2","RT",161}}) do
+            local track=box(entry[1],entry[3],9,62,12,palette.body,panel)
+            local fill=box("Pressure",0,0,0,12,palette.accent,track); text(track,"Caption",entry[2],0,-1,62,14,11,palette.text); state.triggers[entry[1]]=fill
+        end
+        for _,entry in ipairs({{"ButtonY","Y",195,49},{"ButtonX","X",180,64},{"ButtonB","B",210,64},{"ButtonA","A",195,79}}) do button(entry[1],entry[2],entry[3],entry[4],18,18) end
+        for _,entry in ipairs({{"DPadUp","",49,52},{"DPadLeft","",38,63},{"DPadRight","",60,63},{"DPadDown","",49,74}}) do button(entry[1],entry[2],entry[3],entry[4],13,13) end
+        button("ButtonSelect","−",103,55,18,13); button("ButtonStart","≡",132,55,18,13)
+        for _,entry in ipairs({{"Thumbstick1","ButtonL3",83},{"Thumbstick2","ButtonR3",139}}) do
+            local well=box(entry[1],entry[3],82,30,30,palette.base,panel); round(well,15)
+            local knob=box("Stick",7,7,16,16,palette.muted,well); round(knob,8)
+            state.sticks[entry[1]]={knob=knob,click=entry[2]}
+        end
+        state.caption=text(panel,"Connection","NO CONTROLLER",0,126,252,16,11,palette.muted)
+        local function reset() state.values={}; state.connected=false end
+        local function receive(event,ended)
+            local kind=event.UserInputType and event.UserInputType.Name or ""
+            if not kind:match("^Gamepad[1-8]$") then return end
+            if event.UserInputType~=state.pad then reset(); state.pad=event.UserInputType end
+            state.connected=true
+            local key=event.KeyCode and event.KeyCode.Name
+            if key=="Thumbstick1" or key=="Thumbstick2" then
+                local p=not ended and event.Position or Vector3.zero
+                state.values[key]={x=math.max(-1,math.min(1,p and p.X or 0)),y=math.max(-1,math.min(1,p and p.Y or 0))}
+            elseif key=="ButtonL2" or key=="ButtonR2" then state.values[key]=ended and 0 or math.max(0,math.min(1,event.Position and event.Position.Z or 1))
+            elseif state.buttons[key] or key=="ButtonL3" or key=="ButtonR3" then state.values[key]=not ended end
+        end
+        local function listen(signal,callback) if signal and signal.Connect then local link=signal:Connect(callback); scope:defer(function() link:Disconnect() end) end end
+        listen(input.InputBegan,function(event) receive(event,false) end)
+        listen(input.InputChanged,function(event) receive(event,false) end)
+        listen(input.InputEnded,function(event) receive(event,true) end)
+        listen(input.GamepadDisconnected,function(pad) if pad==state.pad then reset() end end)
+        listen(input.GamepadConnected,function(pad) if not state.connected then reset(); state.pad=pad; state.connected=true end end)
+        listen(input.WindowFocusReleased,function() state.values={} end)
+        pcall(function()
+            local pads=input:GetConnectedGamepads(); if #pads>0 then state.pad=pads[1]; state.connected=true
+                for _,event in ipairs(input:GetGamepadState(state.pad)) do receive(event,event.UserInputState~=Enum.UserInputState.Begin and event.UserInputState~=Enum.UserInputState.Change) end
+            end
+        end)
+        function state.draw(settings)
+            local camera=workspace.CurrentCamera; local width=camera and camera.ViewportSize.X or 800
+            scale.Scale=math.min(settings.controller_scale,math.max(.4,(width-16)/252)); panel.Position=UDim2.new(.5,0,0,settings.controller_top); panel.BackgroundTransparency=1-settings.controller_opacity
+            state.caption.Text=state.connected and "CONTROLLER INPUT" or "NO CONTROLLER"
+            for key,item in pairs(state.buttons) do local on=state.connected and state.values[key]; item.part.BackgroundColor3=on and palette.accent or palette.base; item.label.TextColor3=on and palette.base or palette.text end
+            for key,fill in pairs(state.triggers) do fill.Size=UDim2.new(state.connected and (state.values[key] or 0) or 0,0,1,0) end
+            for key,item in pairs(state.sticks) do
+                local value=state.connected and state.values[key] or nil; local x,y=value and value.x or 0,value and value.y or 0
+                local length=math.sqrt(x*x+y*y); if length>1 then x=x/length; y=y/length end
+                item.knob.Position=UDim2.fromOffset(7+x*7,7-y*7); item.knob.BackgroundColor3=state.values[item.click] and palette.accent or palette.muted
+            end
+        end
+        state.draw(s); return state
+    end,step=function(_,state,settings) state.draw(settings) end,interval=.02})
+
     Engine.cosmetic_loadouts={version=1,loadouts={}}
     Engine.settings.cosmetic_loadout_name="My look"
     local look_modules={crosshair=true,ball_trail=true,player_trail=true,ball_appearance=true,court_appearance=true,self_outline=true,sky=true,custom_model=true,coverage_hud=true,player_indicator=true,shoe_effects=true,outfit_tint=true,lighting_preset=true,green_effect=true,wings=true,character_aura=true,ball_impacts=true,wing_trails=true,rim_effects=true,lightning_aura=true,meter_style=true,hide_meters=true}
     local look_defaults={}
     look_modules.lightning_footsteps=true; look_modules.electric_ball_trail=true; look_modules.dunk_lightning=true
-    look_modules.animated_cape=true; look_modules.animated_tail=true
+    look_modules.animated_cape=true; look_modules.animated_tail=true; look_modules.reactive_outfit=true; look_modules.controller_hud=true
     local prefixes={"ball_","court_","model_","wings_","aura_","lightning_","wing_trail_","rim_","impact_","indicator_","shoe_","jersey_","outfit_","sky_","outline_","player_trail_","crosshair_","coverage_"}
     local look_extra={lighting_preset=true,lighting_intensity=true,effect_strength=true,green_style=true,green_color=true,green_duration=true,meter_style=true,shot_hud=true,shot_hud_compact=true}
     prefixes[#prefixes+1]="footlight_"; prefixes[#prefixes+1]="dunk_lightning_"
-    prefixes[#prefixes+1]="cape_"; prefixes[#prefixes+1]="tail_"
+    prefixes[#prefixes+1]="cape_"; prefixes[#prefixes+1]="tail_"; prefixes[#prefixes+1]="reactive_"; prefixes[#prefixes+1]="controller_"
     for key,value in pairs(Engine.settings) do
         local include=look_extra[key]
         for _,prefix in ipairs(prefixes) do if key:sub(1,#prefix)==prefix then include=true end end
@@ -3142,6 +3266,7 @@ local function create_pivot_modules(ctx)
     Engine.shot_stats={total=0,perfect=0,good=0,early=0,late=0,skipped=0,releases=0,unconfirmed=0,last="Waiting for a shot",history={}}
     function Engine:record_shot(event)
         if self.visual_feedback then self:visual_feedback(event) end
+        if self.reactive_feedback then self:reactive_feedback(event) end
         local stats=self.shot_stats; local kind=event.kind
         if kind=="feedback" then
             stats.total=stats.total+1
@@ -3863,7 +3988,7 @@ do
     local rail_line=frame(shell,20,97,660,1,theme.line)
     local top_line=frame(shell,20,54,660,1,theme.line)
     local logo=label(shell,"Pivot",20,12,100,28,19,theme.text); logo.Font=Enum.Font.SourceSansBold; logo.TextXAlignment=Enum.TextXAlignment.Left
-    local build_label=label(shell,"BUILD 2026.11.06.2",242,17,150,18,10,theme.muted); build_label.Name="PivotBuild"; build_label.Font=Enum.Font.RobotoMono; build_label.TextWrapped=false
+    local build_label=label(shell,"BUILD 2026.11.06.3",242,17,150,18,10,theme.muted); build_label.Name="PivotBuild"; build_label.Font=Enum.Font.RobotoMono; build_label.TextWrapped=false
     local heading=label(shell,"Practical Basketball",94,14,240,26,11,theme.muted); heading.Font=Enum.Font.SourceSansSemibold
     close.BackgroundColor3=theme.rail; close.TextColor3=theme.muted; close.TextSize=14; corner(close,4)
     local search=make("TextBox",{Text="",PlaceholderText="Find a control...",PlaceholderColor3=theme.muted,Position=UDim2.fromOffset(484,10),Size=UDim2.fromOffset(166,23),
@@ -4256,6 +4381,7 @@ do
     local page=make("ScrollingFrame",{Name="PivotModules",Position=UDim2.fromOffset(20,112),Size=UDim2.new(1,-34,1,-174),BackgroundTransparency=1,BorderSizePixel=0,ScrollBarThickness=2,Visible=false,CanvasSize=UDim2.fromOffset(0,0)},window)
     local modules_page=page
     local visual_page=make("ScrollingFrame",{Name="PivotVisualPlus",Position=UDim2.fromOffset(20,112),Size=UDim2.new(1,-34,1,-174),BackgroundTransparency=1,BorderSizePixel=0,ScrollBarThickness=3,Visible=false,CanvasSize=UDim2.fromOffset(0,0)},window)
+    local visual_reactive_open=false; local visual_controller_open=false
     local visual_section="Ball"; local visual_character_open=false; local visual_ball_details=false; local visual_trail_details=false
     local visual_wings_open=false; local visual_aura_open=false; local visual_impacts_open=false
     local visual_lightning_open=false; local visual_rim_open=false
@@ -4579,6 +4705,13 @@ do
                         if engine.registry.active.custom_model then engine.registry:disable("custom_model"); local ok,err=engine.registry:enable("custom_model",engine.settings); assert(ok,err) end
                     end)
                 end
+                module_toggle("reactive_outfit")
+                action(visual_reactive_open and "Reactive outfit controls  −" or "Reactive outfit controls  +",function() visual_reactive_open=not visual_reactive_open; rebuild() end)
+                if visual_reactive_open then
+                    for _,entry in ipairs({{"reactive_motion","React to movement"},{"reactive_possession","React to possession"},{"reactive_shots","React to shot feedback"},{"reactive_clothes","Tint clothing"},{"reactive_effects","Match active effects"}}) do local key=entry[1]; toggle_action(entry[2],function() return engine.settings[key] end,function(on) engine.settings[key]=on end) end
+                    field("reactive_idle_color","Idle color"); field("reactive_move_color","Moving color"); field("reactive_ball_color","Possession color"); field("reactive_perfect_color","Perfect feedback color"); field("reactive_miss_color","Other feedback color")
+                    field("reactive_speed","Movement color speed"); field("reactive_response","Transition speed"); field("reactive_flash","Feedback flash duration"); field("reactive_tint","Clothing tint strength")
+                end
                 module_toggle("outfit_tint"); field("jersey_color","Jersey tint"); field("shoe_color","Shoes / effect color")
                 for _,entry in ipairs({{"outfit_jersey","Tint jersey / shorts"},{"outfit_shoes","Tint shoes"},{"outfit_accessories","Tint accessories"}}) do local key=entry[1]; toggle_action(entry[2],function() return engine.settings[key] end,function(on) engine.settings[key]=on end) end
             elseif visual_section=="Effects" then
@@ -4688,6 +4821,9 @@ do
                 choice("theme_mode","Menu theme",{"Graphite","Slate","Light"})
                 toggle_action("Theme editor",function() return engine.settings.theme_custom end,function(on) engine.settings.theme_custom=on; ui.set_theme(engine.settings.theme_mode); ui.edit_theme(engine.settings); rebuild() end)
                 if engine.settings.theme_custom then field("ui_accent","Accent color"); field("ui_font_size","Text size"); field("ui_rounding","Corner radius"); field("ui_opacity","Menu opacity") end
+                module_toggle("controller_hud")
+                action(visual_controller_open and "Controller controls  −" or "Controller controls  +",function() visual_controller_open=not visual_controller_open; rebuild() end)
+                if visual_controller_open then field("controller_scale","Controller size"); field("controller_opacity","Controller background opacity"); field("controller_top","Distance from top") end
                 module_toggle("coverage_hud"); controls("coverage_hud")
                 toggle_action("Shooting HUD",function() return engine.settings.shot_hud end,function(on) engine.settings.shot_hud=on end)
                 toggle_action("Compact shooting HUD",function() return engine.settings.shot_hud_compact end,function(on) engine.settings.shot_hud_compact=on end)
