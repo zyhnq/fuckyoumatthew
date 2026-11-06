@@ -2345,7 +2345,7 @@ local function create_pivot_modules(ctx)
     end,conflicts={"dribble_macros","auto_ankle"}})
     if type(readfile)=="function" then pcall(function() Engine:read_dribble_library() end) end
 
-    Engine.build="2026.11.05.3"
+    Engine.build="2026.11.05.4"
     local s=Engine.settings
     local defaults={ball_finish="Custom",court_preset="Custom",lighting_preset="Warm gym",lighting_intensity=.65,shoe_color="#B79AFF",jersey_color="#FFFFFF",shoe_trail=true,landing_particles=true,effect_strength=.5,indicator_style="Ring",indicator_color="#B79AFF",indicator_radius=2.6,indicator_opacity=.7,green_style="Badge",green_color="#89DEAC",green_duration=.7,outfit_jersey=true,outfit_shoes=true,outfit_accessories=false}
     for key,value in pairs(defaults) do s[key]=value end
@@ -3823,7 +3823,7 @@ do
     local rail_line=frame(shell,20,97,660,1,theme.line)
     local top_line=frame(shell,20,54,660,1,theme.line)
     local logo=label(shell,"Pivot",20,12,100,28,19,theme.text); logo.Font=Enum.Font.SourceSansBold; logo.TextXAlignment=Enum.TextXAlignment.Left
-    local build_label=label(shell,"BUILD 2026.11.05.3",242,17,150,18,10,theme.muted); build_label.Name="PivotBuild"; build_label.Font=Enum.Font.RobotoMono; build_label.TextWrapped=false
+    local build_label=label(shell,"BUILD 2026.11.05.4",242,17,150,18,10,theme.muted); build_label.Name="PivotBuild"; build_label.Font=Enum.Font.RobotoMono; build_label.TextWrapped=false
     local heading=label(shell,"Practical Basketball",94,14,240,26,11,theme.muted); heading.Font=Enum.Font.SourceSansSemibold
     close.BackgroundColor3=theme.rail; close.TextColor3=theme.muted; close.TextSize=14; corner(close,4)
     local search=make("TextBox",{Text="",PlaceholderText="Find a control...",PlaceholderColor3=theme.muted,Position=UDim2.fromOffset(484,10),Size=UDim2.fromOffset(166,23),
@@ -3858,11 +3858,11 @@ do
                     local d=definitions[child.Text]; local box=children[index+1]
                     if d and box and box:IsA("TextBox") then
                         local multi=d[3]=="macro"
-                        local row=frame(page,0,0,0,multi and 108 or 52); row.Size=UDim2.new(1,-6,0,multi and 108 or 52); row.LayoutOrder=child.LayoutOrder; corner(row,4)
-                        child.Parent=row; child.Text=d[1]; child.TextSize=14; child.Font=Enum.Font.SourceSans; child.TextColor3=theme.text; child.Position=UDim2.fromOffset(12,6); child.Size=UDim2.new(1,-128,0,20)
-                        local helper=label(row,d[2],12,27,220,16,10,theme.muted); helper.Size=UDim2.new(1,-128,0,16)
+                        local row=frame(page,0,0,0,multi and 116 or 64); row.Size=UDim2.new(1,-6,0,multi and 116 or 64); row.LayoutOrder=child.LayoutOrder; corner(row,8)
+                        child.Parent=row; child.Text=d[1]; child.TextSize=14; child.Font=Enum.Font.SourceSans; child.TextColor3=theme.text; child.Position=UDim2.fromOffset(16,10); child.Size=UDim2.new(1,-128,0,20)
+                        local helper=label(row,d[2],16,35,220,16,10,theme.muted); helper.Size=UDim2.new(1,-128,0,16)
                         box.Parent=row; box.TextSize=14; box.BackgroundColor3=theme.input; box.TextColor3=theme.text; box.Font=Enum.Font.RobotoMono; corner(box,3)
-                        box.Position=multi and UDim2.fromOffset(12,51) or UDim2.new(1,-104,0,12); box.Size=multi and UDim2.new(1,-24,0,44) or UDim2.fromOffset(92,28); box.MultiLine=multi
+                        box.Position=multi and UDim2.fromOffset(12,51) or UDim2.new(1,-112,0,18); box.Size=multi and UDim2.new(1,-24,0,44) or UDim2.fromOffset(96,30); box.MultiLine=multi
                         local outline=border(box)
                         if multi then child.Size=UDim2.new(1,-24,0,20); helper.Size=UDim2.new(1,-24,0,16) end
                         style_input(box)
@@ -3886,12 +3886,13 @@ do
     group({"SAVE SELECTED SLOT","LOAD SELECTED SLOT"})
     local home=pages.Diagnostics
     home:FindFirstChildWhichIsA("UIListLayout"):Destroy()
-    local account=frame(home,0,0,0,84); account.Size=UDim2.new(1,-6,0,84); corner(account,7)
+    local account=frame(home,0,0,0,84); account.Size=UDim2.new(1,-6,0,108); corner(account,7)
     local name=player.DisplayName or player.Name
-    local kicker=label(account,"Account",16,10,420,16,10,theme.muted)
-    local display_name=label(account,name,16,28,450,25,18); display_name.Font=Enum.Font.SourceSansBold
-    local greeting=label(account,"@"..player.Name,16,55,430,17,11,theme.muted)
-    local badge=frame(account,0,0,1,1); badge.Visible=false
+    local kicker=label(account,"SIGNED IN",80,18,420,16,10,theme.muted)
+    local display_name=label(account,name,80,39,450,25,22); display_name.Font=Enum.Font.SourceSansBold
+    local greeting=label(account,"@"..player.Name,80,69,430,17,11,theme.muted)
+    local badge=frame(account,18,27,46,46,theme.selected); corner(badge,14)
+    local account_initial=label(badge,tostring(name):sub(1,1):upper(),0,0,46,46,22,theme.accent); account_initial.TextXAlignment=Enum.TextXAlignment.Center; account_initial.Font=Enum.Font.SourceSansBold
     local session_label=label(account,"",0,0,1,1); session_label.Visible=false
     local stats=frame(home,0,94,0,54); stats.Size=UDim2.new(1,-6,0,54); corner(stats,7)
     local stat_values={}
@@ -3930,6 +3931,8 @@ do
     local result_page=make("ScrollingFrame",{Position=UDim2.fromOffset(84,52),Size=UDim2.new(1,-96,1,-120),BackgroundTransparency=1,BorderSizePixel=0,ScrollBarThickness=2,
         CanvasSize=UDim2.new(),AutomaticCanvasSize=Enum.AutomaticSize.Y,Visible=false},shell)
     make("UIListLayout",{Padding=UDim.new(0,6),SortOrder=Enum.SortOrder.LayoutOrder},result_page)
+    local page_descriptions={Diagnostics="Your session and quick controls",["Shot Lab"]="Shot controls and timing tools",Modules="Browse and configure your modules",["Visual+"]="Characters, court and effects",Combos="Build and manage input sequences",Profiles="Saved profiles and key bindings"}
+    local page_description=label(shell,page_descriptions.Diagnostics,208,51,450,20,11,theme.muted)
     local show
     local result_buttons={}
     for _,entry in ipairs(rows) do
@@ -3947,12 +3950,13 @@ do
     end
     show=function(name)
         reset_hovers()
-        selected=name; result_page.Visible=false; if PivotUI and PivotUI.hide_extra then PivotUI.hide_extra() end
+        selected=name; result_page.Visible=false; if PivotUI and PivotUI.hide_extra then PivotUI.hide_extra() end; page_description.Text=page_descriptions[name] or ""
         for key,page in pairs(pages) do page.Visible=key==name end
         heading.Text=({Diagnostics="Dashboard",["Shot Lab"]="Main",Profiles="Profiles"})[name] or name
         for key,item in pairs(rail_items) do
             local active=key==name; item.button.BackgroundColor3=active and theme.selected or theme.rail
             icon_color(item.icon,active and theme.accent or theme.muted); item.label.TextColor3=active and theme.accent or theme.muted
+            item.label.Font=active and Enum.Font.SourceSansSemibold or Enum.Font.SourceSans
             if item.indicator then item.indicator.Visible=active end
         end
     end
@@ -3975,7 +3979,7 @@ do
         local query=search.Text:lower(); if PivotUI and PivotUI.hide_extra then PivotUI.hide_extra() end
         if query=="" then show(selected); return end
         for _,page in pairs(pages) do page.Visible=false end
-        result_page.Visible=true; heading.Text="Search"
+        result_page.Visible=true; heading.Text="Search"; page_description.Text="Find a module or control"
         local count=0
         for _,item in ipairs(result_buttons) do
             local match=(item.entry.name.." "..item.entry.description.." "..item.entry.page):lower():find(query,1,true)~=nil
@@ -3994,22 +3998,22 @@ do
     hover_button(close,{rounding=4}); hover_button(cancel,{rounding=4}); style_input(search)
     local scale=shell:FindFirstChildWhichIsA("UIScale")
     local brand_subtitle=label(shell,"Practical Basketball",18,43,130,18,10,theme.muted)
-    local nav_caption=label(shell,"WORKSPACE",18,83,130,18,10,theme.muted)
-    local function content_width() return shell.Size.X.Offset-(shell.Size.X.Offset>=760 and 190 or 40) end
+    local nav_caption=label(shell,"NAVIGATION",22,94,140,18,10,theme.muted)
+    local function content_width() return shell.Size.X.Offset-(shell.Size.X.Offset>=760 and 228 or 40) end
     local function layout_nav()
         local w=shell.Size.X.Offset
         local desktop=w>=760
         local stacked=w<560
-        local left=desktop and 174 or 20
-        local top=desktop and 84 or stacked and 152 or 112
-        rail.Visible=desktop; rail.Size=UDim2.new(0,154,1,0)
-        rail_line.Position=desktop and UDim2.fromOffset(154,0) or UDim2.fromOffset(20,stacked and 137 or 97)
+        local left=desktop and 208 or 20
+        local top=desktop and 108 or stacked and 152 or 112
+        rail.Visible=desktop; rail.Size=UDim2.new(0,184,1,0)
+        rail_line.Position=desktop and UDim2.fromOffset(184,0) or UDim2.fromOffset(20,stacked and 137 or 97)
         rail_line.Size=desktop and UDim2.new(0,1,1,0) or UDim2.new(1,-40,0,1)
-        top_line.Position=UDim2.fromOffset(left,desktop and 64 or 54); top_line.Size=UDim2.new(1,-left-20,0,1)
-        brand_subtitle.Visible=desktop; nav_caption.Visible=desktop
+        top_line.Position=UDim2.fromOffset(left,desktop and 87 or 54); top_line.Size=UDim2.new(1,-left-20,0,1)
+        brand_subtitle.Visible=desktop; nav_caption.Visible=desktop; page_description.Visible=desktop; page_description.Position=UDim2.fromOffset(left+2,55); page_description.Size=UDim2.new(1,-left-30,0,20)
         logo.Position=UDim2.fromOffset(18,desktop and 15 or 12)
-        heading.Position=UDim2.fromOffset(desktop and 178 or 120,desktop and 22 or 14)
-        heading.Font=Enum.Font.SourceSansBold; heading.TextSize=desktop and 24 or 16; heading.TextColor3=theme.text
+        heading.Position=UDim2.fromOffset(desktop and 210 or 120,desktop and 20 or 14)
+        heading.Font=Enum.Font.SourceSansBold; heading.TextSize=desktop and 26 or 16; heading.TextColor3=theme.text
         if desktop then
             search.Position=UDim2.new(1,-292,0,19); search.Size=UDim2.fromOffset(194,30)
             search_symbol.Position=UDim2.new(1,-287,0,24)
@@ -4017,8 +4021,8 @@ do
         else search.Size=UDim2.fromOffset(166,23) end
         local minimize_button=shell:FindFirstChild("Minimize")
         if minimize_button then minimize_button.Position=desktop and UDim2.new(1,-78,0,19) or UDim2.new(1,-64,0,10); minimize_button.Size=desktop and UDim2.fromOffset(28,30) or UDim2.fromOffset(23,23) end
-        build_label.Position=desktop and UDim2.new(0,18,1,-34) or UDim2.fromOffset(104,17)
-        build_label.Size=UDim2.fromOffset(132,18); build_label.Visible=desktop
+        build_label.Position=desktop and UDim2.new(0,22,1,-29) or UDim2.fromOffset(104,17)
+        build_label.Size=UDim2.fromOffset(158,18); build_label.Visible=desktop
         for _,page in pairs(pages) do page.Position=UDim2.fromOffset(left,top); page.Size=UDim2.new(1,-left-14,1,-top-62) end
         result_page.Position=UDim2.fromOffset(left,top); result_page.Size=UDim2.new(1,-left-14,1,-top-62)
         footer.Position=UDim2.new(0,left,1,-49); footer.Size=UDim2.new(1,-left-20,0,1)
@@ -4027,8 +4031,8 @@ do
             local item=rail_items[key]
             if item then
                 local width=(w-40)/(stacked and 3 or 6)
-                item.button.Position=desktop and UDim2.fromOffset(12,112+(i-1)*46) or UDim2.fromOffset(20+((i-1)%(stacked and 3 or 6))*width,62+(stacked and math.floor((i-1)/3)*38 or 0))
-                item.button.Size=desktop and UDim2.fromOffset(130,38) or UDim2.fromOffset(width-4,30)
+                item.button.Position=desktop and UDim2.fromOffset(14,126+(i-1)*48) or UDim2.fromOffset(20+((i-1)%(stacked and 3 or 6))*width,62+(stacked and math.floor((i-1)/3)*38 or 0))
+                item.button.Size=desktop and UDim2.fromOffset(156,40) or UDim2.fromOffset(width-4,30)
                 local compact=w<700
                 item.icon.Visible=not compact
                 item.label.Position=UDim2.fromOffset(compact and 0 or 33,0); item.label.Size=UDim2.new(1,compact and 0 or -35,1,0)
@@ -4051,7 +4055,7 @@ do
     local function fit()
         local camera=workspace.CurrentCamera; if not camera then return end
         local v=camera.ViewportSize
-        local w=math.max(340,math.min(940,v.X-24)); local h=math.max(430,math.min(680,v.Y-32))
+        local w=math.max(340,math.min(1080,v.X-24)); local h=math.max(430,math.min(740,v.Y-32))
         scale.Scale=math.min(1,(v.X-12)/w,(v.Y-12)/h); shell.Size=UDim2.fromOffset(w,h)
         rail_line.Size=UDim2.new(1,-40,0,1); top_line.Size=UDim2.new(1,-40,0,1)
         layout_nav()
@@ -4070,9 +4074,9 @@ do
         status.Position=UDim2.new(0,20,1,-43); status.Size=UDim2.new(1,-145,0,34)
         cancel.Position=UDim2.new(1,-116,1,-39); cancel.Size=UDim2.fromOffset(96,28)
         local compact=w<560
-        kicker.Size=UDim2.new(1,-28,0,16)
-        display_name.Size=UDim2.new(1,-30,0,25); display_name.TextSize=20; greeting.Size=UDim2.new(1,-30,0,17)
-        account.Size=UDim2.new(1,-6,0,84)
+        kicker.Size=UDim2.new(1,-100,0,16)
+        display_name.Size=UDim2.new(1,-100,0,25); display_name.TextSize=24; greeting.Size=UDim2.new(1,-100,0,17)
+        account.Size=UDim2.new(1,-6,0,108)
         copy_place.Position=compact and UDim2.fromOffset(12,108) or UDim2.new(1,-126,0,18)
         copy_server.Position=compact and UDim2.new(.5,3,0,108) or UDim2.new(1,-126,0,55)
         copy_place.Size=compact and UDim2.new(.5,-15,0,28) or UDim2.fromOffset(112,28); copy_server.Size=copy_place.Size
@@ -4083,7 +4087,26 @@ do
         storage.Size=compact and UDim2.new(1,0,0,60) or UDim2.new(.5,-4,1,0)
         report_card.Position=compact and UDim2.fromOffset(0,66) or UDim2.new(.5,4,0,0)
         report_card.Size=storage.Size
-        home.CanvasSize=UDim2.fromOffset(0,compact and 510 or 404)
+        stats.Position=UDim2.fromOffset(0,120)
+        server.Position=UDim2.fromOffset(0,186)
+        runtime.Position=UDim2.fromOffset(0,compact and 346 or 306)
+        bottom.Position=UDim2.fromOffset(0,compact and 410 or 370)
+        home.CanvasSize=UDim2.fromOffset(0,compact and 548 or 444)
+        profile_circle.Visible=w>=760; rail_name.Visible=w>=760
+        profile_circle.Position=UDim2.new(0,22,1,-94); profile_circle.Size=UDim2.fromOffset(30,30)
+        rail_name.Position=UDim2.new(0,62,1,-90); rail_name.Size=UDim2.fromOffset(105,22); rail_name.TextXAlignment=Enum.TextXAlignment.Left
+        if content_width()>=650 then
+            server.Position=UDim2.fromOffset(0,186); server.Size=UDim2.new(.6,-10,0,172)
+            copy_place.Position=UDim2.fromOffset(14,124); copy_place.Size=UDim2.new(.5,-20,0,30)
+            copy_server.Position=UDim2.new(.5,0,0,124); copy_server.Size=UDim2.new(.5,-14,0,30)
+            place_text.Size=UDim2.new(1,-28,0,17); server_text.Size=UDim2.new(1,-28,0,16)
+            runtime.Position=UDim2.new(.6,2,0,186); runtime.Size=UDim2.new(.4,-8,0,80)
+            bottom.Position=UDim2.new(.6,2,0,278); bottom.Size=UDim2.new(.4,-8,0,80)
+            storage.Size=UDim2.new(1,0,1,0)
+            report_card.Parent=home; report_card.Position=UDim2.fromOffset(0,370); report_card.Size=UDim2.new(1,-6,0,58)
+        else
+            runtime.Size=UDim2.new(1,-6,0,52); report_card.Parent=bottom
+        end
         layout_nav()
         local p=shell.Position; local hw=w*scale.Scale/2; local hh=h*scale.Scale/2
         shell.Position=UDim2.fromOffset(math.max(hw+6,math.min(v.X-hw-6,p.X.Scale*v.X+p.X.Offset)),math.max(hh+6,math.min(v.Y-hh-6,p.Y.Scale*v.Y+p.Y.Offset)))
@@ -4210,21 +4233,21 @@ do
     end
     local function action(value,callback)
         local object=own(ui.button(container,value,function() local ok,err=pcall(callback); if not ok then report(tostring(err)) end end))
-        object.Position=UDim2.fromOffset(0,y); object.Size=UDim2.new(1,-6,0,30); y=y+36; return object
+        object.Position=UDim2.fromOffset(0,y); object.Size=UDim2.new(1,-6,0,36); y=y+44; object.TextXAlignment=Enum.TextXAlignment.Left; make("UIPadding",{PaddingLeft=UDim.new(0,14),PaddingRight=UDim.new(0,12)},object); return object
     end
     local rebuild,color_expanded
     local function field(key,caption)
         local color_sync
-        local row=own(make("Frame",{Position=UDim2.fromOffset(0,y),Size=UDim2.new(1,-6,0,36),BackgroundColor3=theme.panel,BorderSizePixel=0},container))
+        local row=own(make("Frame",{Position=UDim2.fromOffset(0,y),Size=UDim2.new(1,-6,0,44),BackgroundColor3=theme.panel,BorderSizePixel=0},container))
         make("UICorner",{CornerRadius=UDim.new(0,6)},row)
-        local label=ui.label(row,caption,10,8,220,20,11,theme.muted); label.Size=UDim2.new(.6,-14,0,20)
-        local box=make("TextBox",{Name="Module_"..key,Text=tostring(engine.settings[key]),ClearTextOnFocus=false,Font=Enum.Font.RobotoMono,TextSize=14,TextColor3=theme.text,BackgroundColor3=theme.input,BorderSizePixel=0,Position=UDim2.new(.6,0,0,4),Size=UDim2.new(.4,-6,0,28)},row)
-        fields[key]=box; y=y+42
+        local label=ui.label(row,caption,14,12,220,20,11,theme.muted); label.Size=UDim2.new(.6,-14,0,20)
+        local box=make("TextBox",{Name="Module_"..key,Text=tostring(engine.settings[key]),ClearTextOnFocus=false,Font=Enum.Font.RobotoMono,TextSize=14,TextColor3=theme.text,BackgroundColor3=theme.input,BorderSizePixel=0,Position=UDim2.new(.6,0,0,8),Size=UDim2.new(.4,-6,0,28)},row)
+        fields[key]=box; y=y+52
         ui.input_style(box)
         local range=engine.ranges[key]
         if range then
-            row.Size=UDim2.new(1,-6,0,50); y=y+14
-            local slider=make("TextButton",{Name="Slider_"..key,Text="",AutoButtonColor=false,Position=UDim2.fromOffset(10,37),Size=UDim2.new(1,-20,0,6),BackgroundColor3=theme.line,BorderSizePixel=0},row)
+            row.Size=UDim2.new(1,-6,0,64); y=y+20
+            local slider=make("TextButton",{Name="Slider_"..key,Text="",AutoButtonColor=false,Position=UDim2.fromOffset(14,48),Size=UDim2.new(1,-28,0,5),BackgroundColor3=theme.line,BorderSizePixel=0},row)
             make("UICorner",{CornerRadius=UDim.new(0,3)},slider)
             ui.hover(slider,{rounding=3,growth=1})
             local fill=make("Frame",{BackgroundColor3=theme.accent,BorderSizePixel=0,Size=UDim2.new((engine.settings[key]-range[1])/(range[2]-range[1]),0,1,0)},slider)
@@ -4337,11 +4360,11 @@ do
         end
     end
     local function toggle_action(caption,read,write)
-        local row=own(make("Frame",{Position=UDim2.fromOffset(0,y),Size=UDim2.new(1,-6,0,36),BackgroundColor3=theme.panel,BorderSizePixel=0},container))
+        local row=own(make("Frame",{Position=UDim2.fromOffset(0,y),Size=UDim2.new(1,-6,0,44),BackgroundColor3=theme.panel,BorderSizePixel=0},container))
         make("UICorner",{CornerRadius=UDim.new(0,6)},row)
-        local title=ui.label(row,caption,12,0,300,36,12,theme.text); title.Size=UDim2.new(1,-68,0,36); title.Font=Enum.Font.SourceSansSemibold
+        local title=ui.label(row,caption,14,0,300,44,12,theme.text); title.Size=UDim2.new(1,-74,0,44); title.Font=Enum.Font.SourceSansSemibold
         local button=switch(row,function() local ok,err=pcall(write,not read()); if not ok then report(tostring(err)) end; update_buttons() end)
-        button.Position=UDim2.new(1,-48,0,5); auxiliary[#auxiliary+1]={button=button,read=read}; y=y+42
+        button.Position=UDim2.new(1,-54,0,9); auxiliary[#auxiliary+1]={button=button,read=read}; y=y+52
         paint_switch(button,read()); return button
     end
     local function choice(key,caption,values)
@@ -4432,7 +4455,9 @@ do
             local nav=own(make("Frame",{Name="VisualSections",Position=UDim2.fromOffset(0,y),Size=UDim2.new(1,-6,0,nav_height),BackgroundTransparency=1},container)); y=y+nav_height+10
             for i,name in ipairs(categories) do
                 local b=ui.button(nav,name,function() visual_section=name; page.CanvasPosition=Vector2.new(0,0); rebuild() end)
-                b.Name="VisualSection_"..name; b.Position=UDim2.new(((i-1)%columns)/columns,0,0,math.floor((i-1)/columns)*38); b.Size=UDim2.new(1/columns,-5,0,34); b.BackgroundColor3=visual_section==name and theme.selected or theme.panel
+                b.Name="VisualSection_"..name; b.Position=UDim2.new(((i-1)%columns)/columns,0,0,math.floor((i-1)/columns)*38); b.Size=UDim2.new(1/columns,-5,0,34); b.BackgroundColor3=visual_section==name and theme.selected or theme.base
+                local outline=b:FindFirstChildWhichIsA("UIStroke"); if outline then outline.Transparency=1 end
+                if visual_section==name then make("Frame",{Name="ActiveSection",Position=UDim2.new(0,12,1,-2),Size=UDim2.new(1,-24,0,2),BackgroundColor3=theme.accent,BorderSizePixel=0},b) end
             end
             local function module_toggle(id)
                 local definition=engine.registry.definitions[id]
@@ -4678,10 +4703,10 @@ do
                 make("UICorner",{CornerRadius=UDim.new(0,9)},card)
                 make("UIStroke",{Color=theme.line,Transparency=.35,Thickness=1,ApplyStrokeMode=Enum.ApplyStrokeMode.Border},card)
                 local header=ui.button(card,group..(collapsed[group] and "  +" or "  −"),function() collapsed[group]=not collapsed[group]; rebuild() end)
-                header.Size=UDim2.new(1,-20,0,32); header.Position=UDim2.fromOffset(10,0); header.BackgroundTransparency=1; header.TextXAlignment=Enum.TextXAlignment.Left
-                local divider=make("Frame",{Position=UDim2.fromOffset(0,32),Size=UDim2.new(1,0,0,1),BackgroundColor3=theme.line,BorderSizePixel=0},card)
+                header.Size=UDim2.new(1,-28,0,44); header.Position=UDim2.fromOffset(14,0); header.Font=Enum.Font.SourceSansSemibold; header.TextSize=18; header.BackgroundTransparency=1; header.TextXAlignment=Enum.TextXAlignment.Left
+                local divider=make("Frame",{Position=UDim2.fromOffset(14,44),Size=UDim2.new(1,-28,0,1),BackgroundColor3=theme.line,BorderSizePixel=0},card)
                 divider.Visible=not collapsed[group]
-                container=card; y=38
+                container=card; y=52
                 if not collapsed[group] and group=="Character" then
                     skin_source_control()
                     if engine:skin_source()=="Preset character" then
@@ -4739,21 +4764,22 @@ do
             for _,definition in ipairs(display_definitions) do
                 if definition.category==group then
                     local id=definition.id
-                    local row=own(make("Frame",{Name="ModuleRow_"..id,Position=UDim2.fromOffset(0,y),Size=UDim2.new(1,0,0,36),BackgroundColor3=theme.panel,BackgroundTransparency=1,BorderSizePixel=0},container))
+                    local row=own(make("Frame",{Name="ModuleRow_"..id,Position=UDim2.fromOffset(0,y),Size=UDim2.new(1,0,0,60),BackgroundColor3=theme.panel,BackgroundTransparency=1,BorderSizePixel=0},container))
                     make("UICorner",{CornerRadius=UDim.new(0,5)},row)
                     make("Frame",{Name="StateMark",Position=UDim2.fromOffset(3,9),Size=UDim2.fromOffset(2,18),BackgroundColor3=theme.accent,BorderSizePixel=0,Visible=false},row)
-                    local title=ui.label(row,definition.title,12,0,300,36,12,theme.text); title.Font=Enum.Font.SourceSansSemibold; title.Size=UDim2.new(1,-89,0,36)
+                    local title=ui.label(row,definition.title,14,7,300,24,14,theme.text); title.Font=Enum.Font.SourceSansSemibold; title.Size=UDim2.new(1,-100,0,24)
+                    local summary=ui.label(row,definition.description,14,32,300,18,11,theme.muted); summary.Size=UDim2.new(1,-100,0,18); summary.TextWrapped=false; summary.TextTruncate=Enum.TextTruncate.AtEnd
 
                     local detail=ui.button(row,expanded==id and "−" or "+",function() if expanded==id then expanded=nil else expanded=id end; rebuild() end)
-                    detail.Name="Details"; detail.Position=UDim2.new(1,-76,0,6); detail.Size=UDim2.fromOffset(24,24); detail.BackgroundTransparency=1
+                    detail.Name="Details"; detail.Position=UDim2.new(1,-88,0,18); detail.Size=UDim2.fromOffset(24,24); detail.BackgroundTransparency=1
                     buttons[id]=switch(row,function()
                         if engine.registry.active[id] then engine.registry:disable(id) else local ok,err=engine.registry:enable(id,engine.settings); if not ok then report(tostring(err)) end end
                         update_buttons()
                     end)
-                    buttons[id].Position=UDim2.new(1,-48,0,5)
+                    buttons[id].Position=UDim2.new(1,-54,0,17)
                     connect(row.MouseEnter,function() row.BackgroundColor3=theme.panel; row.BackgroundTransparency=.25 end)
                     connect(row.MouseLeave,function() row.BackgroundColor3=engine.registry.active[id] and theme.selected or theme.panel; row.BackgroundTransparency=engine.registry.active[id] and .4 or 1 end)
-                    y=y+38
+                    y=y+64
                     if expanded==id then
                         text(definition.description,12,theme.muted,id=="dribble_library" and 40 or 60).TextWrapped=true
                         for _,entry in ipairs(options[id] or {}) do field(entry[1],entry[2]) end
