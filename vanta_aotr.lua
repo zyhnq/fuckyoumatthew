@@ -52,7 +52,7 @@ function Core.engine(ctx)
         elseif key=="reloadKey" then assert(type(value)=="string" and #value==1 and value:match("^[A-Z]$"),"Use one letter A–Z")
         else error("Unknown setting: "..tostring(key)) end
         self.config[key]=value
-        if key=="farm" then self.target=nil; nextAttack=0; paused=false; if not value then release(); status("Idle","Auto farm off") end end
+        if key=="farm" then self.target=nil; nextAttack=0; paused=false; if value then self.lastError=nil else release(); status("Idle","Auto farm off") end end
         if key=="noclip" and not value and ctx.restore_collision then ctx.restore_collision() end
     end
     function self:stop()
@@ -66,9 +66,10 @@ function Core.engine(ctx)
             if self.target.humanoid.Health<=0 then self.eliminations=self.eliminations+1 end
             self.target=nil
         end
-        if ctx.paused() then
+        local pause_reason=ctx.paused()
+        if pause_reason then
             if not paused then release(); paused=true end
-            status("Paused","Paused while the menu is open, typing, or the window is unfocused"); return
+            status("Paused",type(pause_reason)=="string" and pause_reason or "Menu open, typing, or window unfocused"); return
         end
         paused=false
         local retry=ctx.retry_button and ctx.retry_button()
@@ -83,6 +84,7 @@ function Core.engine(ctx)
         end
         if not self.config.farm then status("Idle","Enable Auto farm to start"); return end
         if not character or not root or not hum or hum.Health<=0 then release(); self.target=nil; status("Waiting","Waiting for a living character"); return end
+        if root.Anchored or root.AssemblyRootPart and root.AssemblyRootPart.Anchored then release(); status("Blocked","Character is anchored · wait for the mission/cutscene to start"); return end
         if not gear then release(); self.target=nil; status("Lobby","Enter a mission and equip your ODM gear"); return end
         local titans=ctx.titans()
         if not titans then release(); self.target=nil; status("Waiting","Waiting for the mission titan container"); return end
@@ -109,7 +111,7 @@ function Core.engine(ctx)
 end
 if VANTA_AOTR_TEST then return Core end
 
--- Vanta AOTR 1.0 | mission bindings validated against supplied capture.
+-- Vanta AOTR 1.1 | mission startup and automatic diagnostic reporting.
 local Players=game:GetService("Players")
 local Run=game:GetService("RunService")
 local Input=game:GetService("UserInputService")
@@ -177,10 +179,18 @@ local function move(character,root,goal,look,settings)
     end
 end
 local function character()
-    local char=player.Character; local root=char and (char:FindFirstChild("HumanoidRootPart") or char.PrimaryPart)
+    local folder=workspace:FindFirstChild("Characters")
+    local char=player.Character or folder and folder:FindFirstChild(player.Name); local root=char and (char:FindFirstChild("HumanoidRootPart") or char.PrimaryPart)
     local hum=char and char:FindFirstChildOfClass("Humanoid")
     -- In the supplied capture Main.W is a Weld, not a weapon Value object.
     return char,root,hum,Core.path(char,{"Main","W"})~=nil
+end
+local function pause_reason()
+    if menu_open then return "Menu open · RightShift resumes the farm" end
+    if Input:GetFocusedTextBox() then return "Typing in a text field" end
+    if type(isrbxactive)=="function" then local ok,active=pcall(isrbxactive); if ok and type(active)=="boolean" then focused=active end end
+    if not focused then return "Roblox window is unfocused" end
+    return false
 end
 local function retry_button()
     local button=Core.path(parent,{"Interface","Rewards","Main","Info","Main","Buttons","Retry"})
@@ -200,7 +210,7 @@ local function broken_blade(char)
     return false
 end
 local engine=Core.engine({now=os.clock,character=character,titans=function() return workspace:FindFirstChild("Titans") end,
-    paused=function() return menu_open or not focused or Input:GetFocusedTextBox()~=nil end,
+    paused=pause_reason,
     move=move,halt=halt,restore_collision=restore_collision,release=release_input,key=key_press,broken_blade=broken_blade,retry_button=retry_button,
     click_button=function(b) click_at(b.AbsolutePosition.X+b.AbsoluteSize.X/2,b.AbsolutePosition.Y+b.AbsoluteSize.Y/2) end,
     attack=function()
@@ -238,7 +248,7 @@ local group_title=label(group,"Farm  −",14,0,500,44,18); group_title.Font=Enum
 make("Frame",{Position=UDim2.fromOffset(14,44),Size=UDim2.new(1,-28,0,1),BackgroundColor3=theme.line,BorderSizePixel=0,ZIndex=24},group)
 local footer=make("Frame",{BackgroundColor3=theme.line,BorderSizePixel=0,ZIndex=21},window)
 local status=label(window,"Ready",202,630,440,32,12,theme.muted); status.Name="Status"
-local build=label(window,"BUILD 2026.11.06.17",0,0,140,18,10,theme.muted); build.Font=Enum.Font.RobotoMono
+local build=label(window,"BUILD 2026.11.06.18",0,0,140,18,10,theme.muted); build.Font=Enum.Font.RobotoMono
 local live=label(canvas,"",136,10,700,32,13); live.Name="LiveStatus"
 local open=button(canvas,"Vanta AOTR",function() menu_open=not menu_open; window.Visible=menu_open end); open.Position=UDim2.fromOffset(20,10); open.Size=UDim2.fromOffset(104,32)
 local rows,nav,refreshers={},{},{}; local section="Farm"
@@ -255,6 +265,7 @@ end
 local function refresh() for _,fn in ipairs(refreshers) do fn() end end
 local function apply(key,value)
     local ok,err=pcall(function() engine:set(key,value) end)
+    if ok and key=="farm" and value==true then menu_open=false; window.Visible=false end
     if not ok then engine.message=tostring(err) end; refresh()
 end
 local function row(category,caption,height,description)
@@ -285,7 +296,7 @@ local function field(category,caption,key,lo,hi,precision)
     connect(Input.InputChanged,function(event) if dragging and (event==dragging or event.UserInputType==Enum.UserInputType.MouseMovement) then change(event.Position) end end)
     connect(Input.InputEnded,function(event) if event==dragging or event.UserInputType==Enum.UserInputType.MouseButton1 then dragging=nil end end)
 end
-toggle("Farm","Auto farm","farm","Close the menu with RightShift to begin movement")
+toggle("Farm","Auto farm","farm","Starts immediately and closes this menu")
 toggle("Farm","Keep collisions off while farming","noclip","Original collision settings restore when farming stops")
 toggle("Farm","Follow marked boss weakpoint","bossWeakpoint")
 field("Farm","Travel speed / studs per second","speed",30,220)
@@ -303,19 +314,31 @@ local stats=label(statistics,"",12,36,600,70,12,theme.muted); stats.Size=UDim2.n
 local keyrow=row("Settings","Reload key",52)
 local keybox=make("TextBox",{Name="ReloadKey",Position=UDim2.new(1,-102,0,8),Size=UDim2.fromOffset(86,26),Text="R",ClearTextOnFocus=false,BackgroundColor3=theme.input,TextColor3=theme.text,TextSize=13,Font=Enum.Font.RobotoMono,BorderSizePixel=0,ZIndex=26},keyrow); round(keybox,5)
 connect(keybox.FocusLost,function() apply("reloadKey",keybox.Text:upper()); keybox.Text=engine.config.reloadKey end)
+local function runtime_report()
+    local char,root,hum,gear=character()
+    local titan_container=workspace:FindFirstChild("Titans")
+    local bodies={}
+    if root then for _,obj in ipairs(root:GetChildren()) do
+        if obj:IsA("BodyVelocity") or obj:IsA("BodyPosition") or obj:IsA("LinearVelocity") then
+            local body={name=obj.Name,class=obj.ClassName}
+            for _,key in ipairs({"Velocity","MaxForce","VectorVelocity","Enabled"}) do local ok,value=pcall(function() return obj[key] end); if ok and value~=nil then body[key]=tostring(value) end end
+            bodies[#bodies+1]=body
+        end
+    end end
+    return {version="1.1",placeId=game.PlaceId,gameId=game.GameId,time=os.clock(),phase=engine.phase,message=engine.message,error=engine.lastError,
+        gear=gear,root=root~=nil,health=hum and hum.Health,anchored=root and root.Anchored,position=root and tostring(root.Position),velocity=root and tostring(root.AssemblyLinearVelocity),
+        pauseReason=pause_reason(),movement=bodies,target=engine.target and engine.target.model.Name,targetDistance=engine.target and root and (engine.target.part.Position-root.Position).Magnitude,
+        attackInputs=engine.swings,titans=titan_container and #titan_container:GetChildren() or 0,bladeParts=#blades,input=virtual~=nil,config=engine.config}
+end
 local diagnostic=row("Settings","Mission diagnostics",60)
 local inspect=button(diagnostic,"Save",function()
     local ok,err=pcall(function()
         assert(type(writefile)=="function","Executor file access unavailable")
-        local char,root,hum,gear=character()
-        local titan_container=workspace:FindFirstChild("Titans")
-        local data={version="1.0",placeId=game.PlaceId,gameId=game.GameId,phase=engine.phase,error=engine.lastError,gear=gear,root=root~=nil,health=hum and hum.Health,
-            titans=titan_container and #titan_container:GetChildren() or 0,bladeParts=#blades,input=virtual~=nil,config=engine.config}
-        writefile("vanta_aotr_runtime.json",game:GetService("HttpService"):JSONEncode(data))
+        writefile("vanta_aotr_runtime.json",game:GetService("HttpService"):JSONEncode(runtime_report()))
     end)
     engine.message=ok and "Saved vanta_aotr_runtime.json" or tostring(err)
 end); inspect.Size=UDim2.fromOffset(86,26); inspect.Position=UDim2.new(1,-102,0,10)
-local control={Version="1.0",Engine=engine}
+local control={Version="1.1",Engine=engine}
 local highlights={}
 function control:Unload()
     if not alive then return end; alive=false; engine:close(); release_input(); halt()
@@ -349,7 +372,7 @@ connect(Input.InputBegan,function(event,processed)
 end)
 connect(Input.WindowFocusReleased,function() focused=false; release_input(); halt() end)
 if Input.WindowFocused then connect(Input.WindowFocused,function() focused=true end) end
-local esp_elapsed,ui_elapsed=1,1
+local esp_elapsed,ui_elapsed=1,1; local next_report=0
 local function fit()
     local cam=workspace.CurrentCamera; if not cam then return end
     local v=cam.ViewportSize; local w=math.max(340,math.min(980,v.X-24)); local h=math.max(430,math.min(680,v.Y-32))
@@ -384,13 +407,18 @@ connect(Run.Heartbeat,function(dt)
     if not alive then return end
     if input_release_at and os.clock()>=input_release_at then release_input() end
     engine:tick(dt); ui_elapsed=ui_elapsed+dt; esp_elapsed=esp_elapsed+dt
+    if type(writefile)=="function" and (engine.config.farm or engine.phase=="Error") and os.clock()>=next_report then
+        next_report=os.clock()+2
+        pcall(function() writefile("vanta_aotr_runtime.json",game:GetService("HttpService"):JSONEncode(runtime_report())) end)
+    end
     if ui_elapsed>=.1 then ui_elapsed=0; fit(); status.Text=engine.phase.." · "..engine.message; live.Text=status.Text
         stats.Text="Attack inputs: "..engine.swings.."   Observed defeats: "..engine.eliminations.."\nReload requests: "..engine.reloads.."   Retry requests: "..engine.retries.."\nInput backend: "..(virtual and "Virtual input" or "Unavailable"); refresh()
     end
     if esp_elapsed>=.5 then esp_elapsed=0; update_esp() end
 end)
 Run:BindToRenderStep("VantaAOTR.Camera",Enum.RenderPriority.Last.Value+1,function()
-    if not alive or not engine.config.farm or not engine.config.aim or menu_open or not focused or Input:GetFocusedTextBox() then return end
+    if not alive or not engine.config.farm or not engine.config.aim or pause_reason() then return end
+    if engine.phase~="Approaching" and engine.phase~="Farming" then return end
     local target=engine.target; local camera=workspace.CurrentCamera
     if target and target.part.Parent and target.humanoid.Health>0 and camera and (target.part.Position-camera.CFrame.Position).Magnitude>.05 then
         camera.CFrame=CFrame.lookAt(camera.CFrame.Position,target.part.Position)
@@ -399,5 +427,5 @@ end)
 local unload=make("BindableEvent",{Name="Unload"},gui); connect(unload.Event,function() control:Unload() end)
 connect(gui.Destroying,function() control:Unload() end)
 refresh(); layout_rows(); fit()
-print("Vanta AOTR 1.0 loaded · enable Auto farm in a mission · RightShift menu · F8 stop · Delete unload")
+print("Vanta AOTR 1.1 loaded · Auto farm closes menu and starts · F8 stop · Delete unload")
 return control
