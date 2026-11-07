@@ -1,4 +1,4 @@
--- Vanta Launcher 1.4 | choose a game; only its matching module is downloaded.
+-- Vanta Launcher 1.5 | choose a game; only its matching module is downloaded.
 local Players=game:GetService("Players")
 local Input=game:GetService("UserInputService")
 local player=assert(Players.LocalPlayer,"Run Vanta Launcher on the client")
@@ -11,7 +11,8 @@ end
 local base="https://raw.githubusercontent.com/zyhnq/fuckyoumatthew/main/"
 local games={
     {id="basketball",name="Practical Basketball",module="Vanta Basketball",file="pivot_hub.lua",universe=7529591378,place=80681221431821,description="Shooting, modules, outfits & court visuals",color=Color3.fromRGB(182,66,235)},
-    {id="urban",name="Urban Reload",module="Vanta Urban",file="vanta_urban.lua",universe=10769552054,place=84448037861644,description="Aim settings, player ESP & visibility controls",color=Color3.fromRGB(182,66,235)}
+    {id="urban",name="Urban Reload",module="Vanta Urban",file="vanta_urban.lua",universe=10769552054,place=84448037861644,description="Aim settings, player ESP & visibility controls",color=Color3.fromRGB(182,66,235)},
+    {id="aotr",name="Attack on Titan Revolution",module="Vanta AOTR",file="vanta_aotr.lua",universe=4658598196,place=13379208636,description="Mission farm, blade reload, titan outlines & retry",color=Color3.fromRGB(182,66,235)}
 }
 local function matches(entry) return game.GameId==entry.universe or game.PlaceId==entry.place end
 local detected="Unsupported game"
@@ -21,8 +22,8 @@ local function connect(event,fn) local link=event:Connect(fn); links[#links+1]=l
 local function make(class,props,p) local obj=Instance.new(class); for key,value in pairs(props) do obj[key]=value end; obj.Parent=p; return obj end
 local function round(obj,r) make("UICorner",{CornerRadius=UDim.new(0,r)},obj) end
 local gui=make("ScreenGui",{Name="PivotLauncher",ResetOnSpawn=false,IgnoreGuiInset=true,DisplayOrder=150,ZIndexBehavior=Enum.ZIndexBehavior.Sibling},parent)
-local panel=make("Frame",{Name="Window",AnchorPoint=Vector2.new(.5,.5),Position=UDim2.fromScale(.5,.5),Size=UDim2.new(1,-32,0,384),BackgroundColor3=Color3.fromRGB(9,8,12),BorderSizePixel=0},gui)
-make("UISizeConstraint",{MaxSize=Vector2.new(480,384),MinSize=Vector2.new(280,360)},panel); round(panel,14)
+local panel=make("Frame",{Name="Window",AnchorPoint=Vector2.new(.5,.5),Position=UDim2.fromScale(.5,.5),Size=UDim2.new(1,-32,0,486),BackgroundColor3=Color3.fromRGB(9,8,12),BorderSizePixel=0},gui)
+make("UISizeConstraint",{MaxSize=Vector2.new(480,486),MinSize=Vector2.new(280,460)},panel); round(panel,14)
 make("UIStroke",{Color=Color3.fromRGB(48,55,70),Thickness=1},panel)
 local function label(p,name,value,x,y,w,h,size,color)
     return make("TextLabel",{Name=name,Text=value,Position=UDim2.fromOffset(x,y),Size=UDim2.new(1,w,0,h),BackgroundTransparency=1,Font=Enum.Font.SourceSans,TextSize=size,TextColor3=color or Color3.fromRGB(233,239,249),TextXAlignment=Enum.TextXAlignment.Left,TextTruncate=Enum.TextTruncate.AtEnd},p)
@@ -30,9 +31,9 @@ end
 label(panel,"Title","VANTA",22,17,-80,34,29).Font=Enum.Font.SourceSansBold
 label(panel,"Subtitle","Choose your game",23,54,-46,22,16,Color3.fromRGB(152,165,186))
 label(panel,"Detected","Detected: "..detected,23,84,-46,22,13,Color3.fromRGB(159,189,244))
-local status=label(panel,"Status","Select a game to load its script.",23,333,-46,30,13,Color3.fromRGB(152,165,186))
+local status=label(panel,"Status","Select a game to load its script.",23,435,-46,30,13,Color3.fromRGB(152,165,186))
 local close=make("TextButton",{Name="Close",Text="×",Position=UDim2.new(1,-50,0,20),Size=UDim2.fromOffset(28,28),BackgroundColor3=Color3.fromRGB(27,32,43),TextColor3=Color3.fromRGB(184,197,218),Font=Enum.Font.SourceSans,TextSize=23,BorderSizePixel=0},panel); round(close,6)
-local control={Version="1.4"}
+local control={Version="1.5"}
 function control:Unload()
     if not alive then return end
     alive=false
@@ -46,7 +47,7 @@ local function load_game(entry)
     task.spawn(function()
         -- Fetch/compile first; network or syntax failures keep the chooser open.
         local ok,result=pcall(function()
-            local source=game:HttpGet(base..entry.file.."?v=20261106.16")
+            local source=game:HttpGet(base..entry.file.."?v=20261106.17")
             assert(type(source)=="string" and #source>100,"Empty script response")
             local run,err=loadstring(source,"@Vanta/"..entry.file)
             assert(run,err)
