@@ -38,9 +38,50 @@ function Core.pick(candidates,current,radius,bias,visible,sticky)
     return prior
 end
 -- Adapter schemas verified against the saved Urban AK capture.
+function Core.table_writer(api)
+    api=api or {}
+    local put=api.raw_set or rawset
+    local function protection(object,state)
+        if type(api.set_readonly)=="function" then return pcall(api.set_readonly,object,state) end
+        local fn=state and api.make_readonly or api.make_writable
+        if type(fn)~="function" then return false,"Executor cannot restore table protection" end
+        return pcall(fn,object)
+    end
+    return function(object,key,value)
+        local known,readonly=false,false
+        if type(api.is_readonly)=="function" then
+            local ok,result=pcall(api.is_readonly,object)
+            if ok and type(result)=="boolean" then known=true; readonly=result end
+        end
+        local ok,err
+        if not readonly then
+            ok,err=pcall(put,object,key,value)
+            if ok and rawget(object,key)==value then return true end
+            if ok then return false,"Executor write did not update the field" end
+        end
+        local message=tostring(err or "Read-only table")
+        local lower=message:lower()
+        local frozen=readonly or lower:find("readonly",1,true) or lower:find("read-only",1,true) or lower:find("frozen",1,true)
+        if not frozen then return false,message end
+        if type(api.set_readonly)~="function" and not (type(api.make_writable)=="function" and type(api.make_readonly)=="function") then
+            return false,"Read-only weapon table; executor unlock/restore APIs unavailable"
+        end
+        local unlocked,unlock_error=protection(object,false)
+        if not unlocked then return false,"Table unlock failed: "..tostring(unlock_error) end
+        local wrote,write_error=pcall(put,object,key,value)
+        -- A read-only write failure proves the previous protected state when
+        -- the optional isreadonly getter is unavailable or inconsistent.
+        local restored,restore_error=protection(object,readonly or not known or frozen and true or false)
+        if not restored then return false,"Table protection restore failed: "..tostring(restore_error) end
+        if not wrote then return false,tostring(write_error) end
+        if rawget(object,key)~=value then return false,"Executor write did not update the field" end
+        return true
+    end
+end
 function Core.recoil_adapter(discover,options)
     options=options or {}
-    local self={enabled=false,records={},next_scan=0,reason="Off",count=0,configs=0,clients=0,mode="None"}
+    local self={enabled=false,records={},next_scan=0,reason="Off",count=0,configs=0,clients=0,mode="None",lastError=nil}
+    local write=options.write or function(object,key,value) local ok,err=pcall(rawset,object,key,value); return ok,err end
     local function finite(n) return type(n)=="number" and n==n and math.abs(n)<math.huge end
     local function add(object,fields,kind)
         if self.records[object] or self.count>=128 then return end
@@ -73,7 +114,10 @@ function Core.recoil_adapter(discover,options)
     end
     local function restore(object,record)
         for _,field in ipairs(record.fields) do
-            if rawget(object,field.key)==field.zero and not field.transient then pcall(rawset,object,field.key,field.original) end
+            if rawget(object,field.key)==field.zero and not field.transient then
+                local ok,err=write(object,field.key,field.original)
+                if not ok then self.lastError=tostring(err):sub(1,200) end
+            end
         end
     end
     function self:scan()
@@ -96,25 +140,28 @@ function Core.recoil_adapter(discover,options)
             for _,field in ipairs(record.fields) do
                 local value=rawget(object,field.key); local kind=options.kind and options.kind(value) or type(value)
                 local supported=field.value_kind and kind==field.value_kind or not field.value_kind and finite(value)
-                if supported and value~=field.zero then local ok=pcall(rawset,object,field.key,field.zero); if not ok then writable=false; break end end
+                if supported and value~=field.zero then
+                    local ok,err=write(object,field.key,field.zero)
+                    if not ok then self.lastError=tostring(err):gsub("^.-:%d+:%s*",""):sub(1,200); writable=false; break end
+                end
             end
             if not writable then
                 restore(object,record); self.records[object]=nil; self.count=self.count-1
                 if record.kind=="weapon" then self.configs=self.configs-1 elseif record.kind=="client" then self.clients=self.clients-1 end
             end
         end
-        if self.count==0 and self.reason=="Active" then self.reason="No writable recoil state found" end
+        if self.count==0 and self.reason=="Active" then self.reason=self.lastError and ("Write blocked: "..self.lastError) or "No writable recoil state found" end
     end
     function self:disable()
         for object,record in pairs(self.records) do restore(object,record) end
         self.enabled=false; self.records={}; self.count=0; self.configs=0; self.clients=0; self.mode="None"; self.next_scan=0; self.reason="Off"
     end
-    function self:enable(now) self.enabled=true; self.next_scan=0; self:step(now or 0) end
+    function self:enable(now) self.enabled=true; self.lastError=nil; self.next_scan=0; self:step(now or 0) end
     return self
 end
 if DEEPHAT_REFINED_TEST then return Core end
 
--- Vanta Urban 3.7 | standalone client script, native UI, no Drawing dependency.
+-- Vanta Urban 3.8 | standalone client script, native UI, no Drawing dependency.
 local Players=game:GetService("Players")
 local Run=game:GetService("RunService")
 local Input=game:GetService("UserInputService")
@@ -161,7 +208,7 @@ local content=make("ScrollingFrame",{Position=UDim2.fromOffset(198,128),Size=UDi
 local badge=make("TextButton",{Name="MenuButton",Text="Vanta",Position=UDim2.fromOffset(20,44),Size=UDim2.fromOffset(104,32),BackgroundColor3=theme.panel,TextColor3=theme.text,Font=Enum.Font.GothamMedium,TextSize=16,BorderSizePixel=0,AutoButtonColor=false,ZIndex=20},canvas); corner(badge,7)
 local live_status=text(canvas,"",136,44,460,32,14,theme.text)
 live_status.Name="LiveStatus"; live_status.TextStrokeTransparency=.3
-local control={Config=cfg,Version="3.7"}; local bindings={}; local y=0
+local control={Config=cfg,Version="3.8"}; local bindings={}; local y=0
 local recoil_module
 local function recoil_state_key(state)
     if not recoil_module or not recoil_module.Parent then
@@ -178,16 +225,18 @@ local function recoil_state_key(state)
     return "RecoilKick"
 end
 local recoil=Core.recoil_adapter(type(getgc)=="function" and function() return getgc(true) end or nil,{
-    state_key=recoil_state_key,kind=typeof or type,zero2=Vector2.new(0,0),zero3=Vector3.zero or Vector3.new(0,0,0)
+    state_key=recoil_state_key,kind=typeof or type,zero2=Vector2.new(0,0),zero3=Vector3.zero or Vector3.new(0,0,0),
+    write=Core.table_writer({is_readonly=isreadonly or is_readonly or table.isfrozen,set_readonly=setreadonly or set_readonly,
+        make_writable=makewritable or makewriteable or makereadwrite,make_readonly=makereadonly})
 })
-local recoil_label
+local recoil_label; local logged_recoil_error
 local panel_scale=make("UIScale",{Scale=1},panel)
 local saved_position=nil; local minimized=false
 make("Frame",{Position=UDim2.fromOffset(0,74),Size=UDim2.new(1,0,0,1),BackgroundColor3=theme.line,BorderSizePixel=0,ZIndex=21},panel)
 local sidebar=make("Frame",{Position=UDim2.fromOffset(0,75),Size=UDim2.new(0,172,1,-75),BackgroundColor3=Color3.fromRGB(13,10,18),BorderSizePixel=0,ZIndex=20},panel)
 local sidebar_line=make("Frame",{Position=UDim2.fromOffset(176,75),Size=UDim2.new(0,1,1,-75),BackgroundColor3=theme.line,BorderSizePixel=0,ZIndex=21},panel)
 local section_title=text(panel,"Aim",202,88,400,30,21); section_title.Font=Enum.Font.GothamBold
-local build_label=text(panel,"BUILD 2026.11.06.15",0,0,140,18,10,theme.muted); build_label.Font=Enum.Font.RobotoMono
+local build_label=text(panel,"BUILD 2026.11.06.16",0,0,140,18,10,theme.muted); build_label.Font=Enum.Font.RobotoMono
 local search=make("TextBox",{Name="VantaSearch",Text="",PlaceholderText="Find a control...",ClearTextOnFocus=false,Position=UDim2.new(1,-280,0,23),Size=UDim2.fromOffset(192,27),BackgroundColor3=theme.input,TextColor3=theme.text,PlaceholderColor3=theme.muted,Font=Enum.Font.Gotham,TextSize=13,BorderSizePixel=0,ZIndex=24},panel); corner(search,7)
 make("UIPadding",{PaddingLeft=UDim.new(0,12),PaddingRight=UDim.new(0,8)},search)
 local group=make("Frame",{Name="VantaUrbanGroup",Size=UDim2.new(1,-6,0,52),BackgroundColor3=theme.panel,BorderSizePixel=0,ZIndex=22},content); corner(group,9)
@@ -658,10 +707,21 @@ Run:BindToRenderStep("VantaUrban.Recoil",Enum.RenderPriority.Camera.Value-1,func
     local ok,err=pcall(function() recoil:step(os.clock()) end)
     if not ok then recoil:disable(); cfg.noRecoil=false; recoil.reason="Client state update failed"; warn("Vanta Urban recoil: "..tostring(err)) end
     if recoil_label then recoil_label.Text=recoil.reason..(recoil.count>0 and " · "..recoil.mode.." · "..recoil.count.." states" or "") end
+    if recoil.lastError and recoil.lastError~=logged_recoil_error then
+        logged_recoil_error=recoil.lastError
+        warn("Vanta Urban recoil write: "..recoil.lastError)
+        if type(writefile)=="function" then pcall(function()
+            local http=game:GetService("HttpService")
+            writefile("vanta_recoil_write_error.json",http:JSONEncode({version="3.8",placeId=game.PlaceId,
+                error=recoil.lastError,reason=recoil.reason,states=recoil.count,weaponConfigs=recoil.configs,clientStates=recoil.clients,
+                apis={isreadonly=type(isreadonly or is_readonly)=="function",setreadonly=type(setreadonly or set_readonly)=="function",
+                    makewritable=type(makewritable or makewriteable or makereadwrite)=="function",makereadonly=type(makereadonly)=="function"}}))
+        end) end
+    end
 end)
 local stop_event=make("BindableEvent",{Name="Unload"},gui); connect(stop_event.Event,function() control:Unload() end)
 connect(gui.Destroying,function() control:Unload() end)
-function control:GetStatus() local count=0; for _ in pairs(roster) do count=count+1 end; return {alive=alive,paused=error_paused,target=locked and locked.Name,players=count,menu=menu_open,reason=last_reason,diagnostics=diagnostics,placeId=game.PlaceId,recoil={enabled=recoil.enabled,states=recoil.count,reason=recoil.reason,mode=recoil.mode,weaponConfigs=recoil.configs,clientStates=recoil.clients}} end
+function control:GetStatus() local count=0; for _ in pairs(roster) do count=count+1 end; return {alive=alive,paused=error_paused,target=locked and locked.Name,players=count,menu=menu_open,reason=last_reason,diagnostics=diagnostics,placeId=game.PlaceId,recoil={enabled=recoil.enabled,states=recoil.count,reason=recoil.reason,mode=recoil.mode,weaponConfigs=recoil.configs,clientStates=recoil.clients,writeError=recoil.lastError}} end
 refresh_controls(); menu(true)
-print("Vanta Urban 3.7 loaded · Hold E · RightShift menu · F8 stop · Delete unload")
+print("Vanta Urban 3.8 loaded · Hold E · RightShift menu · F8 stop · Delete unload")
 return control

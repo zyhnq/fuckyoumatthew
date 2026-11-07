@@ -1,5 +1,5 @@
 -- Compatibility loader for saved links. Urban Reload now loads Vanta Urban.
-local source=game:HttpGet("https://raw.githubusercontent.com/zyhnq/fuckyoumatthew/main/vanta_urban.lua?v=20261106.15")
+local source=game:HttpGet("https://raw.githubusercontent.com/zyhnq/fuckyoumatthew/main/vanta_urban.lua?v=20261106.16")
 local run,err=loadstring(source,"@Vanta/vanta_urban.lua")
 assert(run,err)
 return run()
