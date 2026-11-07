@@ -37,9 +37,51 @@ function Core.pick(candidates,current,radius,bias,visible,sticky)
     end
     return prior
 end
+-- Numeric client recoil states only: never run or replace another script.
+function Core.recoil_adapter(discover)
+    local self={enabled=false,records={},next_scan=0,reason="Off",count=0}
+    local function finite(n) return type(n)=="number" and n==n and math.abs(n)<math.huge end
+    function self:scan()
+        if type(discover)~="function" then self.reason="Client table access unavailable"; return end
+        local ok,objects=pcall(discover)
+        if not ok or type(objects)~="table" then self.reason="Client state scan unavailable"; return end
+        for _,object in pairs(objects) do
+            if type(object)=="table" and not self.records[object] and self.count<128 then
+                local pitch,yaw=rawget(object,"RecoilPitch"),rawget(object,"RecoilYaw")
+                if finite(pitch) and finite(yaw) then
+                    -- Keep backups as arrays so a later GC scan cannot mistake
+                    -- our own backup records for game recoil state.
+                    self.records[object]={pitch,yaw}; self.count=self.count+1
+                end
+            end
+        end
+        self.reason=self.count>0 and "Active" or "Waiting for supported weapon state"
+    end
+    function self:step(now)
+        if not self.enabled then return end
+        if now>=self.next_scan then self.next_scan=now+2; self:scan() end
+        for object in pairs(self.records) do
+            local writable=true
+            for _,key in ipairs({"RecoilPitch","RecoilYaw"}) do
+                local value=rawget(object,key)
+                if finite(value) and value~=0 then local ok=pcall(rawset,object,key,0); if not ok then writable=false; break end end
+            end
+            if not writable then self.records[object]=nil; self.count=self.count-1 end
+        end
+        if self.count==0 and self.reason=="Active" then self.reason="No writable recoil state found" end
+    end
+    function self:disable()
+        for object,values in pairs(self.records) do
+            for index,key in ipairs({"RecoilPitch","RecoilYaw"}) do if rawget(object,key)==0 then pcall(rawset,object,key,values[index]) end end
+        end
+        self.enabled=false; self.records={}; self.count=0; self.next_scan=0; self.reason="Off"
+    end
+    function self:enable(now) self.enabled=true; self.next_scan=0; self:step(now or 0) end
+    return self
+end
 if DEEPHAT_REFINED_TEST then return Core end
 
--- Vanta Urban 3.5 | standalone client script, native UI, no Drawing dependency.
+-- Vanta Urban 3.6 | standalone client script, native UI, no Drawing dependency.
 local Players=game:GetService("Players")
 local Run=game:GetService("RunService")
 local Input=game:GetService("UserInputService")
@@ -50,7 +92,7 @@ if previous then local stop=previous:FindFirstChild("Unload"); assert(stop,"Clos
 -- Stop the old supplied script's camera callbacks if it is still active.
 Run:UnbindFromRenderStep("DeepHatRefined.Render"); Run:UnbindFromRenderStep("DeepHat_Aim"); Run:UnbindFromRenderStep("DeepHat_ESP")
 local cfg={enabled=true,espEnabled=true,teamCheck=true,ignoreTeams=false,checkLOS=true,espVisibleOnly=false,
-    hardLock=true,stickyTarget=true,centerFov=true,
+    hardLock=true,stickyTarget=true,centerFov=true,noRecoil=false,vehicleTargets=true,
     aimKey="E",aimMouseButton=false,response=10,fov=200,maxDistance=600,predictionEnabled=true,prediction=0,usePing=false,
     targetParts={"Head","UpperTorso","Torso","HumanoidRootPart"},espColor=Color3.fromRGB(235,111,129),espThickness=1.5,showFov=true,names=true,maxVisuals=24,switchBias=.25}
 -- Urban Reload's crew relationships are not verified by this generic Teams filter.
@@ -86,14 +128,16 @@ local content=make("ScrollingFrame",{Position=UDim2.fromOffset(198,128),Size=UDi
 local badge=make("TextButton",{Name="MenuButton",Text="Vanta",Position=UDim2.fromOffset(20,44),Size=UDim2.fromOffset(104,32),BackgroundColor3=theme.panel,TextColor3=theme.text,Font=Enum.Font.GothamMedium,TextSize=16,BorderSizePixel=0,AutoButtonColor=false,ZIndex=20},canvas); corner(badge,7)
 local live_status=text(canvas,"",136,44,460,32,14,theme.text)
 live_status.Name="LiveStatus"; live_status.TextStrokeTransparency=.3
-local control={Config=cfg,Version="3.5"}; local bindings={}; local y=0
+local control={Config=cfg,Version="3.6"}; local bindings={}; local y=0
+local recoil=Core.recoil_adapter(type(getgc)=="function" and function() return getgc(true) end or nil)
+local recoil_label
 local panel_scale=make("UIScale",{Scale=1},panel)
 local saved_position=nil; local minimized=false
 make("Frame",{Position=UDim2.fromOffset(0,74),Size=UDim2.new(1,0,0,1),BackgroundColor3=theme.line,BorderSizePixel=0,ZIndex=21},panel)
 local sidebar=make("Frame",{Position=UDim2.fromOffset(0,75),Size=UDim2.new(0,172,1,-75),BackgroundColor3=Color3.fromRGB(13,10,18),BorderSizePixel=0,ZIndex=20},panel)
 local sidebar_line=make("Frame",{Position=UDim2.fromOffset(176,75),Size=UDim2.new(0,1,1,-75),BackgroundColor3=theme.line,BorderSizePixel=0,ZIndex=21},panel)
 local section_title=text(panel,"Aim",202,88,400,30,21); section_title.Font=Enum.Font.GothamBold
-local build_label=text(panel,"BUILD 2026.11.06.13",0,0,140,18,10,theme.muted); build_label.Font=Enum.Font.RobotoMono
+local build_label=text(panel,"BUILD 2026.11.06.14",0,0,140,18,10,theme.muted); build_label.Font=Enum.Font.RobotoMono
 local search=make("TextBox",{Name="VantaSearch",Text="",PlaceholderText="Find a control...",ClearTextOnFocus=false,Position=UDim2.new(1,-280,0,23),Size=UDim2.fromOffset(192,27),BackgroundColor3=theme.input,TextColor3=theme.text,PlaceholderColor3=theme.muted,Font=Enum.Font.Gotham,TextSize=13,BorderSizePixel=0,ZIndex=24},panel); corner(search,7)
 make("UIPadding",{PaddingLeft=UDim.new(0,12),PaddingRight=UDim.new(0,8)},search)
 local group=make("Frame",{Name="VantaUrbanGroup",Size=UDim2.new(1,-6,0,52),BackgroundColor3=theme.panel,BorderSizePixel=0,ZIndex=22},content); corner(group,9)
@@ -155,7 +199,7 @@ local function actor_character(who)
     local found=workspace:FindFirstChild(who.Name)
     if not found or not found:IsA("Model") then
         found=nil
-        for _,name in ipairs({"Characters","PlayerCharacters","Players","Live","Alive","Entities"}) do
+        for _,name in ipairs({"Characters","PlayerCharacters","Players","Live","Alive","Entities","Vehicles","Cars"}) do
             local folder=workspace:FindFirstChild(name)
             if folder then
                 local candidate=folder:FindFirstChild(who.Name,true)
@@ -193,9 +237,46 @@ local function actor(who)
     return char,hum,base,target_part(char)
 end
 local params=RaycastParams.new(); params.FilterType=Enum.RaycastFilterType.Exclude; params.IgnoreWater=true
+local vehicle_cache=setmetatable({},{__mode="k"})
+local function vehicle_for(character)
+    if not character then return nil end
+    local hum=humanoid(character); local seat=hum and hum.SeatPart
+    if not seat or not seat.Parent then vehicle_cache[character]=nil; return nil end
+    local assembly=seat.AssemblyRootPart or seat
+    local raw_assembly=assembly
+    local cached=vehicle_cache[character]
+    if cached and cached.seat==seat and cached.raw_assembly==raw_assembly and os.clock()<cached.expires and cached.model and cached.model.Parent then return cached.model end
+    local characters={character}
+    local mine=actor_character(player); if mine and mine~=character then characters[#characters+1]=mine end
+    for who in pairs(roster) do local other=actor_character(who); if other and other~=character and other~=mine then characters[#characters+1]=other end end
+    local function belongs_to_character(part)
+        for _,model in ipairs(characters) do if part==model or part:IsDescendantOf(model) then return true end end
+        return false
+    end
+    if belongs_to_character(assembly) then assembly=seat end
+    -- Find the smallest model that contains this seat's connected assembly.
+    -- Never exclude a shared Vehicles folder or the entire Workspace.
+    local connected={seat,assembly}
+    local ok,parts=pcall(function() return seat:GetConnectedParts(true) end)
+    if ok and type(parts)=="table" then for i=1,math.min(256,#parts) do if not belongs_to_character(parts[i]) then connected[#connected+1]=parts[i] end end end
+    local candidate=seat.Parent; local model
+    while candidate and candidate~=workspace do
+        if candidate:IsA("Model") and candidate~=character and candidate.Name~="Characters" and candidate.Name~="Players" and candidate.Name~="Vehicles" and candidate.Name~="Cars" then
+            local contains=true
+            for _,part in ipairs(connected) do if part~=candidate and not part:IsDescendantOf(candidate) then contains=false; break end end
+            -- Do not treat an ancestor that holds multiple vehicles/characters as a car.
+            if contains then model=candidate; break end
+        end
+        candidate=candidate.Parent
+    end
+    vehicle_cache[character]={seat=seat,raw_assembly=raw_assembly,model=model,expires=os.clock()+1}
+    return model
+end
 local function clear_line(camera,point,char,force)
     if not cfg.checkLOS and not force then return true end
     local ignore={}; local mine=actor_character(player); if mine then ignore[1]=mine end
+    local own_vehicle=vehicle_for(mine); if own_vehicle then ignore[#ignore+1]=own_vehicle end
+    if cfg.vehicleTargets then local target_vehicle=vehicle_for(char); if target_vehicle and target_vehicle~=own_vehicle then ignore[#ignore+1]=target_vehicle end end
     params.FilterDescendantsInstances=ignore
     local delta=point-camera.CFrame.Position; if delta.Magnitude<.01 then return false end
     local hit=workspace:Raycast(camera.CFrame.Position,delta,params)
@@ -263,21 +344,25 @@ function control:Set(key,value)
         assert(type(value)=="table" and #value>=1 and #value<=4,"Use 1–4 target parts")
         for _,name in ipairs(value) do assert(name=="Head" or name=="UpperTorso" or name=="Torso" or name=="HumanoidRootPart","Unsupported target part") end
     else error("Unknown or non-editable setting: "..tostring(key)) end
-    cfg[key]=value; error_paused=false; reset_lock(); elapsed=1; refresh_controls(); return true
+    cfg[key]=value
+    if key=="noRecoil" then if value then recoil:enable(os.clock()) else recoil:disable() end end
+    error_paused=false; reset_lock(); elapsed=1; refresh_controls(); return true
 end
 function control:Stop()
-    cfg.enabled=false; cfg.espEnabled=false; reset_lock(); circle.Visible=false; hide_visuals(); refresh_controls(); set_status("Stopped · enable controls to resume")
+    cfg.enabled=false; cfg.espEnabled=false; cfg.noRecoil=false; recoil:disable(); reset_lock(); circle.Visible=false; hide_visuals(); refresh_controls(); set_status("Stopped · enable controls to resume")
 end
 local binding_name="VantaUrban.Render"
 function control:Unload()
     if not alive then return end; alive=false; reset_lock()
     Run:UnbindFromRenderStep(binding_name)
+    Run:UnbindFromRenderStep("VantaUrban.Recoil"); recoil:disable()
     for _,link in ipairs(connections) do link:Disconnect() end; connections={}
     for _,entry in pairs(roster) do dispose_visual(entry) end; roster={}
     gui:Destroy()
 end
 local function toggle(caption,key,get,set)
     local r=row(caption); local b
+    if key=="noRecoil" then r:FindFirstChild("Caption").Size=UDim2.new(1,-110,0,28); recoil_label=text(r,"Off",10,29,400,18,11,theme.muted); recoil_label.Size=UDim2.new(1,-84,0,18); recoil_label.Name="RecoilStatus" end
     local function read() if get then return get() end; return cfg[key] end
     b=button(r,"",function() local value=not read(); if set then set(value); elapsed=1; refresh_controls() else control:Set(key,value) end end)
     b.Position=UDim2.new(1,-64,0,12); b.Size=UDim2.fromOffset(44,24); b.TextTransparency=1; b.BackgroundTransparency=1
@@ -309,6 +394,7 @@ local function field(caption,key,format)
 
 end
 toggle("Aim assist","enabled"); toggle("Player ESP","espEnabled")
+toggle("No recoil","noRecoil"); toggle("Target vehicle occupants","vehicleTargets")
 toggle("Hard lock / no smoothing","hardLock"); toggle("Keep target while held","stickyTarget"); toggle("Center FOV on crosshair","centerFov")
 toggle("Team filter","teamCheck",function() return cfg.teamCheck and not cfg.ignoreTeams end,function(value) cfg.teamCheck=value; cfg.ignoreTeams=false; reset_lock() end)
 toggle("Line of sight","checkLOS"); toggle("Show FOV","showFov")
@@ -381,7 +467,7 @@ local function snapshot(camera,mouse)
     for who,entry in pairs(roster) do
         diagnostics.players=diagnostics.players+1
         local char,hum,base,part,reason=actor(who)
-        diagnostics.actors[who.Name]={reason=reason or "eligible",character=char and char:GetFullName()}
+        diagnostics.actors[who.Name]={reason=reason or "eligible",character=char and char:GetFullName(),seated=hum and hum.SeatPart~=nil or false}
         entry.character=char; entry.humanoid=hum; entry.base=base; entry.target=part; entry.distance=nil
         if base then
             local distance=(base.Position-origin).Magnitude
@@ -516,11 +602,16 @@ Run:BindToRenderStep(binding_name,Enum.RenderPriority.Last.Value+1,function(dt)
         local camera=workspace.CurrentCamera
         if camera then draw_esp(camera) end
     end)
-    if not ok then error_paused=true; reset_lock(); hide_visuals(); circle.Visible=false; set_status("Paused: "..tostring(err)); warn("Vanta Urban paused: "..tostring(err)) end
+    if not ok then error_paused=true; cfg.noRecoil=false; recoil:disable(); reset_lock(); hide_visuals(); circle.Visible=false; set_status("Paused: "..tostring(err)); warn("Vanta Urban paused: "..tostring(err)) end
+end)
+Run:BindToRenderStep("VantaUrban.Recoil",Enum.RenderPriority.Camera.Value-1,function()
+    local ok,err=pcall(function() recoil:step(os.clock()) end)
+    if not ok then recoil:disable(); cfg.noRecoil=false; recoil.reason="Client state update failed"; warn("Vanta Urban recoil: "..tostring(err)) end
+    if recoil_label then recoil_label.Text=recoil.reason..(recoil.count>0 and " · "..recoil.count.." states" or "") end
 end)
 local stop_event=make("BindableEvent",{Name="Unload"},gui); connect(stop_event.Event,function() control:Unload() end)
 connect(gui.Destroying,function() control:Unload() end)
-function control:GetStatus() local count=0; for _ in pairs(roster) do count=count+1 end; return {alive=alive,paused=error_paused,target=locked and locked.Name,players=count,menu=menu_open,reason=last_reason,diagnostics=diagnostics,placeId=game.PlaceId} end
+function control:GetStatus() local count=0; for _ in pairs(roster) do count=count+1 end; return {alive=alive,paused=error_paused,target=locked and locked.Name,players=count,menu=menu_open,reason=last_reason,diagnostics=diagnostics,placeId=game.PlaceId,recoil={enabled=recoil.enabled,states=recoil.count,reason=recoil.reason}} end
 refresh_controls(); menu(true)
-print("Vanta Urban 3.5 loaded · Hold E · RightShift menu · F8 stop · Delete unload")
+print("Vanta Urban 3.6 loaded · Hold E · RightShift menu · F8 stop · Delete unload")
 return control

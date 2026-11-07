@@ -1,4 +1,4 @@
--- Vanta Launcher 1.1 | choose a game; only its matching module is downloaded.
+-- Vanta Launcher 1.2 | choose a game; only its matching module is downloaded.
 local Players=game:GetService("Players")
 local Input=game:GetService("UserInputService")
 local player=assert(Players.LocalPlayer,"Run Vanta Launcher on the client")
@@ -32,7 +32,7 @@ label(panel,"Subtitle","Choose your game",23,54,-46,22,16,Color3.fromRGB(152,165
 label(panel,"Detected","Detected: "..detected,23,84,-46,22,13,Color3.fromRGB(159,189,244))
 local status=label(panel,"Status","Select a game to load its script.",23,333,-46,30,13,Color3.fromRGB(152,165,186))
 local close=make("TextButton",{Name="Close",Text="×",Position=UDim2.new(1,-50,0,20),Size=UDim2.fromOffset(28,28),BackgroundColor3=Color3.fromRGB(27,32,43),TextColor3=Color3.fromRGB(184,197,218),Font=Enum.Font.SourceSans,TextSize=23,BorderSizePixel=0},panel); round(close,6)
-local control={Version="1.1"}
+local control={Version="1.2"}
 function control:Unload()
     if not alive then return end
     alive=false
@@ -46,7 +46,7 @@ local function load_game(entry)
     task.spawn(function()
         -- Fetch/compile first; network or syntax failures keep the chooser open.
         local ok,result=pcall(function()
-            local source=game:HttpGet(base..entry.file.."?v=20261106.13")
+            local source=game:HttpGet(base..entry.file.."?v=20261106.14")
             assert(type(source)=="string" and #source>100,"Empty script response")
             local run,err=loadstring(source,"@Vanta/"..entry.file)
             assert(run,err)
