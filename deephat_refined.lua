@@ -9,7 +9,7 @@ function Core.teammate(config,local_team,other_team,local_neutral,other_neutral,
     return local_attribute~=nil and local_attribute~=0 and local_attribute~="" and local_attribute==other_attribute
 end
 function Core.lead(config,ping) return math.max(0,math.min(.25,config.predictionEnabled and config.prediction+(config.usePing and math.min(.15,math.max(0,ping or 0)) or 0) or 0)) end
-function Core.bounds(points,width,height)
+function Core.bounds(points,width,height,precise)
     local x0,y0,x1,y1=math.huge,math.huge,-math.huge,-math.huge
     for _,p in ipairs(points) do
         if not p or p.Z<=.05 or p.X~=p.X or p.Y~=p.Y then return nil end
@@ -17,6 +17,7 @@ function Core.bounds(points,width,height)
     end
     x0=math.max(0,x0); y0=math.max(0,y0); x1=math.min(width,x1); y1=math.min(height,y1)
     if x1-x0<2 or y1-y0<2 then return nil end
+    if precise then return x0,y0,x1-x0,y1-y0 end
     return math.floor(x0),math.floor(y0),math.ceil(x1-x0),math.ceil(y1-y0)
 end
 function Core.pick(candidates,current,radius,bias,visible,sticky)
@@ -38,7 +39,7 @@ function Core.pick(candidates,current,radius,bias,visible,sticky)
 end
 if DEEPHAT_REFINED_TEST then return Core end
 
--- DeepHat Refined 3.2 | standalone client script, native UI, no Drawing dependency.
+-- DeepHat Refined 3.3 | standalone client script, native UI, no Drawing dependency.
 local Players=game:GetService("Players")
 local Run=game:GetService("RunService")
 local Input=game:GetService("UserInputService")
@@ -60,6 +61,7 @@ local ranges={response={1,35},fov={30,500},maxDistance={50,3000},prediction={0,.
 local alive=true; local focused=true; local menu_open=true; local error_paused=false; local waiting_key=false
 local connections={}; local roster={}; local locked=nil; local selected=nil; local ping=0; local elapsed=1; local ping_elapsed=1
 local was_active=false
+local esp_entries={}
 local theme={base=Color3.fromRGB(17,19,25),panel=Color3.fromRGB(25,29,38),input=Color3.fromRGB(20,23,31),line=Color3.fromRGB(47,53,67),text=Color3.fromRGB(233,239,249),muted=Color3.fromRGB(144,158,181),accent=Color3.fromRGB(159,189,244)}
 local function make(class,props,p) local o=Instance.new(class); for key,value in pairs(props) do o[key]=value end; o.Parent=p; return o end
 local function corner(o,r) return make("UICorner",{CornerRadius=UDim.new(0,r)},o) end
@@ -75,7 +77,7 @@ local function text(p,value,x,y,w,h,size,color)
     return make("TextLabel",{Text=value,Position=UDim2.fromOffset(x,y),Size=UDim2.fromOffset(w,h),BackgroundTransparency=1,Font=Enum.Font.SourceSans,TextSize=size or 15,TextColor3=color or theme.text,TextXAlignment=Enum.TextXAlignment.Left,TextTruncate=Enum.TextTruncate.AtEnd,ZIndex=21},p)
 end
 text(panel,"DeepHat",18,12,200,28,24).Font=Enum.Font.SourceSansBold
-text(panel,"AIM & VISUALS  /  3.2",18,41,260,18,12,theme.muted)
+text(panel,"AIM & VISUALS  /  3.3",18,41,260,18,12,theme.muted)
 local status=text(panel,"Hold E to aim",16,474,332,26,13,theme.muted)
 status.Position=UDim2.new(0,16,1,-42); status.Size=UDim2.new(1,-32,0,26)
 local diagnostic_label=text(panel,"Scanning players…",16,444,332,24,12,theme.muted)
@@ -84,7 +86,7 @@ local content=make("ScrollingFrame",{Position=UDim2.fromOffset(14,72),Size=UDim2
 local badge=make("TextButton",{Name="MenuButton",Text="DeepHat",Position=UDim2.fromOffset(20,44),Size=UDim2.fromOffset(104,32),BackgroundColor3=theme.panel,TextColor3=theme.text,Font=Enum.Font.SourceSansSemibold,TextSize=16,BorderSizePixel=0,AutoButtonColor=false,ZIndex=20},canvas); corner(badge,7)
 local live_status=text(canvas,"",136,44,460,32,14,theme.text)
 live_status.Name="LiveStatus"; live_status.TextStrokeTransparency=.3
-local control={Config=cfg,Version="3.2"}; local bindings={}; local y=0
+local control={Config=cfg,Version="3.3"}; local bindings={}; local y=0
 local diagnostics={}; local character_cache={}; local last_reason="Ready"
 local function set_status(value) if status.Text~=value then status.Text=value end; live_status.Text=value end
 local function actor_character(who)
@@ -270,13 +272,13 @@ connect(Players.PlayerRemoving,function(who) character_cache[who]=nil; local ent
 for _,who in ipairs(Players:GetPlayers()) do add_player(who) end
 local function snapshot(camera,mouse)
     local list={}; local mine=root(actor_character(player)); local origin=mine and mine.Position or camera.CFrame.Position
-    diagnostics={players=0,eligible=0,onScreen=0,inFov=0,blocked=0,boxes=0,reasons={},actors={}}
+    diagnostics={players=0,eligible=0,onScreen=0,inFov=0,blocked=0,boxes=diagnostics.boxes or 0,reasons={},actors={}}
     local function excluded(reason) diagnostics.reasons[reason]=(diagnostics.reasons[reason] or 0)+1 end
     for who,entry in pairs(roster) do
         diagnostics.players=diagnostics.players+1
         local char,hum,base,part,reason=actor(who)
         diagnostics.actors[who.Name]={reason=reason or "eligible",character=char and char:GetFullName()}
-        entry.character=char; entry.base=base; entry.target=part; entry.distance=nil
+        entry.character=char; entry.humanoid=hum; entry.base=base; entry.target=part; entry.distance=nil
         if base then
             local distance=(base.Position-origin).Magnitude
             if distance<=cfg.maxDistance then
@@ -294,28 +296,41 @@ local function snapshot(camera,mouse)
     end
     return list
 end
-local function draw_esp(camera,list)
+local function refresh_esp(camera)
+    esp_entries={}
     if not cfg.espEnabled or not focused then return end
     local ordered={}; for _,entry in pairs(roster) do if entry.distance then ordered[#ordered+1]=entry end end
     table.sort(ordered,function(a,b) return a.distance<b.distance end)
-    local shown=0
     for _,entry in ipairs(ordered) do
-        if shown>=cfg.maxVisuals then break end
+        if #esp_entries>=cfg.maxVisuals then break end
         local visible=not cfg.espVisibleOnly or clear_line(camera,(entry.target or entry.base).Position,entry.character,true)
         if visible then
             local ok,frame,size=pcall(entry.character.GetBoundingBox,entry.character)
             if ok then
+                entry.boundsOffset=entry.base.CFrame:ToObjectSpace(frame); entry.boundsSize=size
+                esp_entries[#esp_entries+1]=entry
+            end
+        end
+    end
+end
+local function draw_esp(camera)
+    if not cfg.espEnabled or not focused then hide_visuals(); diagnostics.boxes=0; return end
+    local shown=0
+    for _,entry in ipairs(esp_entries) do
+        local visual=entry.visual
+        if visual then visual.box.Visible=false end
+        if roster[entry.player]==entry and entry.base and entry.base.Parent and entry.character and entry.character.Parent and entry.humanoid and entry.humanoid.Health>0 then
+            local frame=entry.base.CFrame*entry.boundsOffset; local size=entry.boundsSize
                 local points={}; for _,x in ipairs({-1,1}) do for _,y in ipairs({-1,1}) do for _,z in ipairs({-1,1}) do
                     points[#points+1]=project(camera,(frame*CFrame.new(size.X*x/2,size.Y*y/2,size.Z*z/2)).Position)
                 end end end
-                local x,y,w,h=Core.bounds(points,canvas.AbsoluteSize.X,canvas.AbsoluteSize.Y)
+                local x,y,w,h=Core.bounds(points,canvas.AbsoluteSize.X,canvas.AbsoluteSize.Y,true)
                 if x then
                     local visual=entry.visual or create_visual(entry); local signature=x..":"..y..":"..w..":"..h
                     if visual.signature~=signature then visual.signature=signature; visual.box.Position=UDim2.fromOffset(x,y); visual.box.Size=UDim2.fromOffset(w,h); visual.label.Position=UDim2.fromOffset(w/2,math.max(-20,-y)) end
                     visual.box.Visible=true; visual.stroke.Thickness=cfg.espThickness; visual.stroke.Color=entry.player==locked and theme.accent or cfg.espColor
                     visual.label.Visible=cfg.names; visual.label.Text=(entry.player.DisplayName or entry.player.Name).." · "..math.floor(entry.distance+.5).." studs"; shown=shown+1
                 end
-            end
         end
     end
     diagnostics.boxes=shown
@@ -338,7 +353,7 @@ local function render(dt)
             if not visible then diagnostics.blocked=diagnostics.blocked+1 end
             return visible
         end,cfg.stickyTarget); locked=selected and selected.player or nil end
-        draw_esp(camera,list)
+        refresh_esp(camera)
         circle_stroke.Color=locked and Color3.fromRGB(142,224,182) or theme.accent
         local top_reason=""; local most=0
         for why,count in pairs(diagnostics.reasons) do if count>most then most=count; top_reason=" · "..why..": "..count end end
@@ -372,12 +387,16 @@ local function render(dt)
 end
 Run:BindToRenderStep(binding_name,Enum.RenderPriority.Last.Value+1,function(dt)
     if error_paused then return end
-    local ok,err=pcall(render,dt)
+    local ok,err=pcall(function()
+        render(dt)
+        local camera=workspace.CurrentCamera
+        if camera then draw_esp(camera) end
+    end)
     if not ok then error_paused=true; reset_lock(); hide_visuals(); circle.Visible=false; set_status("Paused: "..tostring(err)); warn("DeepHat Refined paused: "..tostring(err)) end
 end)
 local stop_event=make("BindableEvent",{Name="Unload"},gui); connect(stop_event.Event,function() control:Unload() end)
 connect(gui.Destroying,function() control:Unload() end)
 function control:GetStatus() local count=0; for _ in pairs(roster) do count=count+1 end; return {alive=alive,paused=error_paused,target=locked and locked.Name,players=count,menu=menu_open,reason=last_reason,diagnostics=diagnostics,placeId=game.PlaceId} end
 refresh_controls(); menu(true)
-print("DeepHat Refined 3.2 loaded · Hold E · RightShift menu · F8 stop · Delete unload")
+print("DeepHat Refined 3.3 loaded · Hold E · RightShift menu · F8 stop · Delete unload")
 return control
