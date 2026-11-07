@@ -1,7 +1,7 @@
 -- Vanta Launcher 1.1 | choose a game; only its matching module is downloaded.
 local Players=game:GetService("Players")
 local Input=game:GetService("UserInputService")
-local player=assert(Players.LocalPlayer,"Run Pivot Launcher on the client")
+local player=assert(Players.LocalPlayer,"Run Vanta Launcher on the client")
 local parent=player:WaitForChild("PlayerGui")
 local prior=parent:FindFirstChild("PivotLauncher")
 if prior then
@@ -11,7 +11,7 @@ end
 local base="https://raw.githubusercontent.com/zyhnq/fuckyoumatthew/main/"
 local games={
     {id="basketball",name="Practical Basketball",module="Vanta Basketball",file="pivot_hub.lua",universe=7529591378,place=80681221431821,description="Shooting, modules, outfits & court visuals",color=Color3.fromRGB(182,66,235)},
-    {id="urban",name="Urban Reload",module="Vanta Urban",file="deephat_refined.lua",universe=10769552054,place=84448037861644,description="Aim settings, player ESP & visibility controls",color=Color3.fromRGB(182,66,235)}
+    {id="urban",name="Urban Reload",module="Vanta Urban",file="vanta_urban.lua",universe=10769552054,place=84448037861644,description="Aim settings, player ESP & visibility controls",color=Color3.fromRGB(182,66,235)}
 }
 local function matches(entry) return game.GameId==entry.universe or game.PlaceId==entry.place end
 local detected="Unsupported game"
@@ -46,9 +46,9 @@ local function load_game(entry)
     task.spawn(function()
         -- Fetch/compile first; network or syntax failures keep the chooser open.
         local ok,result=pcall(function()
-            local source=game:HttpGet(base..entry.file)
+            local source=game:HttpGet(base..entry.file.."?v=20261106.13")
             assert(type(source)=="string" and #source>100,"Empty script response")
-            local run,err=loadstring(source,"@Pivot/"..entry.file)
+            local run,err=loadstring(source,"@Vanta/"..entry.file)
             assert(run,err)
             if not alive then return nil end
             return run()
@@ -56,7 +56,7 @@ local function load_game(entry)
         if not alive then return end
         loading=false
         if ok then control:Unload()
-        else status.Text="Load failed — click to retry."; warn("Pivot Launcher: "..tostring(result)) end
+        else status.Text="Load failed — click to retry."; warn("Vanta Launcher: "..tostring(result)) end
     end)
 end
 for i,entry in ipairs(games) do
