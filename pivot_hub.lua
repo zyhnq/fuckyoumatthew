@@ -2513,7 +2513,7 @@ local function create_pivot_modules(ctx)
     end,conflicts={"dribble_macros","auto_ankle"}})
     if type(readfile)=="function" then pcall(function() Engine:read_dribble_library() end) end
 
-    Engine.build="2026.11.06.10"
+    Engine.build="2026.11.06.11"
     local s=Engine.settings
     local defaults={ball_finish="Custom",court_preset="Custom",lighting_preset="Warm gym",lighting_intensity=.65,shoe_color="#B79AFF",jersey_color="#FFFFFF",shoe_trail=true,landing_particles=true,effect_strength=.5,indicator_style="Ring",indicator_color="#B79AFF",indicator_radius=2.6,indicator_opacity=.7,green_style="Badge",green_color="#89DEAC",green_duration=.7,outfit_jersey=true,outfit_shoes=true,outfit_accessories=false}
     for key,value in pairs(defaults) do s[key]=value end
@@ -3565,6 +3565,145 @@ local function create_pivot_modules(ctx)
     Engine.cosmetic_choices.rebound_estimate={{"rebound_mode","Marker target",{"Catch height","Floor"}}}
     Engine.cosmetic_fields.rebound_estimate={{"rebound_color","Marker color"},{"rebound_distance","Ball tracking range"},{"rebound_horizon","Prediction horizon"},{"rebound_size","Marker radius"},{"rebound_reach","Catch height above floor"},{"rebound_run_speed","Estimated run speed"}}
 
+    for key,value in pairs({heatmap_metric="Perfect rate",heatmap_type="All",heatmap_cell_size=5,heatmap_opacity=.55,heatmap_range=110,heatmap_min_shots=1,heatmap_labels=false,heatmap_legend=true}) do Engine.settings[key]=value end
+    for key,value in pairs({heatmap_cell_size={2,10},heatmap_opacity={.15,1},heatmap_range={30,200},heatmap_min_shots={1,10}}) do Engine.ranges[key]=value end
+    Engine.heatmap_records={}; Engine.heatmap_revision=0; Engine.heatmap_pending={}; Engine.heatmap_status="No shots recorded yet"
+    local heatmap_types={Standing=true,Moving=true,Layups=true,Dunks=true}
+    local heatmap_colors={perfect=Color3.fromRGB(132,222,164),good=Color3.fromRGB(242,205,115),early=Color3.fromRGB(119,181,246),late=Color3.fromRGB(235,126,171)}
+    local function heatmap_result(code) return code==5 and "perfect" or code==4 and "good" or code<=3 and "early" or "late" end
+    local function anchor_key(x,y,z) return string.format("%d:%d:%d",math.floor(x+.5),math.floor(y+.5),math.floor(z+.5)) end
+    function Engine:validate_heatmap(data)
+        assert(type(data)=="table" and data.version==1 and data.game==tostring(game.GameId or game.PlaceId or 0) and data.user==tostring(ctx.player.UserId or 0),"Heatmap belongs to a different game or player")
+        assert(type(data.shots)=="table","Invalid heatmap shots")
+        local count=0; for key in pairs(data.shots) do assert(type(key)=="number" and key%1==0 and key>=1,"Heatmap shots must be an array"); count=count+1 end
+        assert(count<=600,"Heatmap supports the latest 600 confirmed shots")
+        local result={}
+        for i=1,count do
+            local item=data.shots[i]; assert(type(item)=="table","Heatmap shots must be contiguous")
+            assert(type(item.space)=="string" and #item.space<=80 and heatmap_types[item.shot_type],"Invalid heatmap court or shot type")
+            local code=Core.bounded(item.code,1,8); assert(code and code%1==0,"Invalid heatmap timing code")
+            local copy={code=code,shot_type=item.shot_type,space=item.space}
+            for _,key in ipairs({"x","y","z","ax","ay","az"}) do copy[key]=assert(Core.bounded(item[key],-1000000,1000000),"Invalid heatmap coordinate") end
+            result[i]=copy
+        end
+        return result
+    end
+    function Engine:save_heatmap()
+        assert(type(writefile)=="function","File saving unavailable; heatmap remains in this session")
+        local data={version=1,game=tostring(game.GameId or game.PlaceId or 0),user=tostring(ctx.player.UserId or 0),shots=self.heatmap_records}
+        self:validate_heatmap(data)
+        local raw=game:GetService("HttpService"):JSONEncode(data); writefile("pivot_shot_heatmap.json",raw)
+        if type(readfile)=="function" then assert(readfile("pivot_shot_heatmap.json")==raw,"Heatmap file verification failed") end
+        self.heatmap_status="Saved "..#self.heatmap_records.." confirmed shots"; return #self.heatmap_records
+    end
+    function Engine:load_heatmap()
+        assert(type(readfile)=="function","File loading unavailable")
+        local raw=readfile("pivot_shot_heatmap.json"); assert(type(raw)=="string" and #raw<=262144,"Heatmap file exceeds 256 KB")
+        local shots=self:validate_heatmap(game:GetService("HttpService"):JSONDecode(raw))
+        self.heatmap_records=shots; self.heatmap_pending={}; self.heatmap_revision=self.heatmap_revision+1
+        self.heatmap_status="Loaded "..#shots.." confirmed shots"; return #shots
+    end
+    function Engine:clear_heatmap()
+        self.heatmap_records={}; self.heatmap_pending={}; self.heatmap_revision=self.heatmap_revision+1
+        self.heatmap_status="Heatmap cleared"
+        if type(writefile)=="function" then local ok=pcall(function() self:save_heatmap() end); if not ok then self.heatmap_status="Cleared this session; saved file could not update" end end
+    end
+    local function heatmap_floor(position)
+        local params=RaycastParams.new(); params.FilterType=Enum.RaycastFilterType.Exclude; params.IgnoreWater=true
+        local excluded={}; local mine=rig(); if mine then excluded[#excluded+1]=mine end
+        for _,name in ipairs({"Characters","Basketballs","Hoops","PivotLocalCosmetics","PivotShotHeatmap","PivotReboundEstimate"}) do local object=workspace:FindFirstChild(name); if object then excluded[#excluded+1]=object end end
+        for _,item in ipairs(candidates("rims")) do excluded[#excluded+1]=item.object end
+        params.FilterDescendantsInstances=excluded
+        local hit=workspace:Raycast(position+Vector3.new(0,1,0),Vector3.new(0,-100,0),params)
+        return hit and hit.Normal.Y>.7 and hit.Position or nil
+    end
+    function Engine:heatmap_event(event)
+        if not registry.active.shot_heatmap then return end
+        local id=event.shot; if type(id)~="number" then return end
+        if event.kind=="release" then
+            local mine=root(); if not mine then return end
+            local rim=nearest_rim(mine.Position); if not rim then self.heatmap_status="No basket found for this shot"; return end
+            local floor=heatmap_floor(mine.Position); if not floor then self.heatmap_status="No court floor found for this shot"; return end
+            local count=0; for _ in pairs(self.heatmap_pending) do count=count+1 end; if count>=32 then self.heatmap_pending={} end
+            self.heatmap_pending[id]={x=mine.Position.X,y=floor.Y,z=mine.Position.Z,ax=rim.Position.X,ay=rim.Position.Y,az=rim.Position.Z,space=tostring(workspace:GetAttribute("Gamemode") or "World"):sub(1,80),shot_type=event.shot_type or Core.shot_type(event.name,event.details),time=os.clock()}
+        elseif event.kind=="feedback" then
+            local shot=self.heatmap_pending[id]; self.heatmap_pending[id]=nil
+            local code=Core.bounded(event.code,1,8)
+            if not shot or not code or code%1~=0 or os.clock()-shot.time>9 then return end
+            shot.time=nil; shot.code=code; if not heatmap_types[shot.shot_type] then shot.shot_type="Standing" end
+            self.heatmap_records[#self.heatmap_records+1]=shot; if #self.heatmap_records>600 then table.remove(self.heatmap_records,1) end
+            self.heatmap_revision=self.heatmap_revision+1; self.heatmap_status=#self.heatmap_records.." confirmed shots · save to keep"
+        elseif event.kind=="unconfirmed" or event.kind=="skip" then self.heatmap_pending[id]=nil end
+    end
+    function Engine:heatmap_cells(size,filter)
+        local cells={}
+        for _,shot in ipairs(self.heatmap_records) do if filter=="All" or filter==shot.shot_type then
+            local x,z=math.floor(shot.x/size),math.floor(shot.z/size); local floor=math.floor(shot.y*2+.5)/2
+            local anchor=anchor_key(shot.ax,shot.ay,shot.az)
+            local key=shot.space.."/"..anchor.."/"..x..":"..floor..":"..z
+            local cell=cells[key]
+            if not cell then cell={key=key,x=(x+.5)*size,y=shot.y,z=(z+.5)*size,anchor=anchor,space=shot.space,total=0,perfect=0,good=0,early=0,late=0}; cells[key]=cell end
+            cell.y=math.max(cell.y,shot.y)
+            cell.total=cell.total+1; cell[heatmap_result(shot.code)]=cell[heatmap_result(shot.code)]+1; cell.last=heatmap_result(shot.code)
+        end end
+        return cells
+    end
+    add("shot_heatmap","Shot heatmap","Shooting","Court heatmap of confirmed release timing, recorded while enabled with Auto Green; not a made-shot map",{start=function(scope)
+        local folder=new_local(scope,"Folder",workspace); folder.Name="PivotShotHeatmap"
+        local legend=new_local(scope,"Frame",ctx.gui); legend.Name="PivotHeatmapLegend"; legend.AnchorPoint=Vector2.new(0,1); legend.Position=UDim2.new(0,16,1,-18); legend.Size=UDim2.fromOffset(248,84); legend.BackgroundColor3=Color3.fromRGB(17,19,26); legend.BackgroundTransparency=.08; legend.BorderSizePixel=0
+        local corner=new_local(scope,"UICorner",legend); corner.CornerRadius=UDim.new(0,8)
+        local function text(y,height,size)
+            local label=new_local(scope,"TextLabel",legend); label.Position=UDim2.fromOffset(12,y); label.Size=UDim2.new(1,-24,0,height); label.BackgroundTransparency=1; label.TextColor3=Color3.fromRGB(220,225,238); label.TextSize=size; label.Font=Enum.Font.SourceSansSemibold; label.TextXAlignment=Enum.TextXAlignment.Left; return label
+        end
+        local title=text(6,19,13); local status=text(25,17,12); local key=text(43,34,12); key.TextWrapped=true
+        scope:defer(function() Engine.heatmap_pending={}; if #Engine.heatmap_records>0 then pcall(function() Engine:save_heatmap() end) end end)
+        return {folder=folder,legend=legend,title=title,status=status,key=key,slots={},cells={},revision=-1}
+    end,step=function(scope,state,settings)
+        for id,item in pairs(Engine.heatmap_pending) do if os.clock()-item.time>9 then Engine.heatmap_pending[id]=nil end end
+        if state.revision~=Engine.heatmap_revision or state.size~=settings.heatmap_cell_size or state.filter~=settings.heatmap_type then
+            state.cells=Engine:heatmap_cells(settings.heatmap_cell_size,settings.heatmap_type); state.revision=Engine.heatmap_revision; state.size=settings.heatmap_cell_size; state.filter=settings.heatmap_type
+            state.total=0; for _,cell in pairs(state.cells) do state.total=state.total+cell.total end
+        end
+        local mine=root(); local anchors={}; for _,item in ipairs(candidates("rims")) do local p=item.object.Position; anchors[anchor_key(p.X,p.Y,p.Z)]=true end
+        local space=tostring(workspace:GetAttribute("Gamemode") or "World"):sub(1,80); local visible={}
+        if mine then for _,cell in pairs(state.cells) do
+            if cell.space==space and anchors[cell.anchor] and cell.total>=settings.heatmap_min_shots and math.abs(cell.y-(mine.Position.Y-3))<8 then
+                local d=Vector3.new(cell.x-mine.Position.X,0,cell.z-mine.Position.Z).Magnitude
+                if d<=settings.heatmap_range then cell.distance=d; visible[#visible+1]=cell end
+            end
+        end end
+        table.sort(visible,function(a,b) return a.distance==b.distance and a.key<b.key or a.distance<b.distance end)
+        local count=math.min(64,#visible); local diameter=settings.heatmap_cell_size*.78
+        for i=1,count do
+            local cell=visible[i]; local slot=state.slots[i]
+            if not slot then
+                local part=new_local(scope,"Part",state.folder); part.Name="HeatmapCell"; part.Anchored=true; part.CanCollide=false; part.CanTouch=false; part.CanQuery=false; part.CastShadow=false; part.Shape=Enum.PartType.Cylinder; part.Material=Enum.Material.SmoothPlastic
+                local board=new_local(scope,"BillboardGui",ctx.gui); board.Adornee=part; board.Size=UDim2.fromOffset(125,38); board.StudsOffsetWorldSpace=Vector3.new(0,.7,0); board.AlwaysOnTop=false
+                local label=new_local(scope,"TextLabel",board); label.Size=UDim2.fromScale(1,1); label.BackgroundTransparency=1; label.TextSize=15; label.Font=Enum.Font.SourceSansSemibold; label.TextColor3=Color3.fromRGB(239,242,250); label.TextStrokeTransparency=.4
+                slot={part=part,board=board,label=label}; state.slots[i]=slot
+            end
+            local signature=cell.key.."/"..state.revision.."/"..state.size.."/"..state.filter.."/"..settings.heatmap_metric.."/"..settings.heatmap_opacity.."/"..tostring(settings.heatmap_labels)
+            if slot.signature~=signature then
+            slot.signature=signature
+            local ratio=cell.perfect/cell.total; local color
+            if settings.heatmap_metric=="Last release" then color=heatmap_colors[cell.last]
+            else local red,green=heatmap_colors.late,heatmap_colors.perfect; color=Color3.new(red.R+(green.R-red.R)*ratio,red.G+(green.G-red.G)*ratio,red.B+(green.B-red.B)*ratio) end
+            slot.part.Size=Vector3.new(.035,diameter,diameter); slot.part.CFrame=CFrame.new(cell.x,cell.y+.045,cell.z)*CFrame.Angles(0,0,math.pi/2); slot.part.Color=color; slot.part.Transparency=1-settings.heatmap_opacity
+            slot.board.Enabled=settings.heatmap_labels
+            slot.label.Text=settings.heatmap_metric=="Last release" and string.format("%d shots · %s",cell.total,cell.last:sub(1,1):upper()..cell.last:sub(2)) or string.format("%d shots · %d%% Perfect",cell.total,math.floor(ratio*100+.5))
+            end
+        end
+        for i=count+1,#state.slots do state.slots[i].part.Transparency=1; state.slots[i].board.Enabled=false; state.slots[i].signature=nil end
+        state.visible_count=count; state.legend.Visible=settings.heatmap_legend
+        state.title.Text="SHOT HEATMAP · "..settings.heatmap_type
+        state.status.Text=(state.total or 0).." confirmed · "..count.." areas"..(registry.active.meter_release and "" or " · Auto Green off")
+        state.key.Text=settings.heatmap_metric=="Last release" and "Green Perfect · Gold Good\nBlue Early · Pink Late" or "Pink 0% → Green 100% Perfect"
+    end,interval=.25})
+    Engine.cosmetic_choices.shot_heatmap={{"heatmap_metric","Heatmap color",{"Perfect rate","Last release"}},{"heatmap_type","Shot type",{"All","Standing","Moving","Layups","Dunks"}}}
+    Engine.cosmetic_fields.shot_heatmap={{"heatmap_cell_size","Area size / studs"},{"heatmap_opacity","Map opacity"},{"heatmap_range","Display range"},{"heatmap_min_shots","Minimum shots per area"}}
+    Engine.cosmetic_toggles.shot_heatmap={{"heatmap_labels","Show area counts"},{"heatmap_legend","Show heatmap legend"}}
+    if type(readfile)=="function" then pcall(function() Engine:load_heatmap() end) end
+
     Engine.cosmetic_loadouts={version=1,loadouts={}}
     Engine.settings.cosmetic_loadout_name="My look"
     local look_modules={crosshair=true,ball_trail=true,player_trail=true,ball_appearance=true,court_appearance=true,self_outline=true,sky=true,custom_model=true,coverage_hud=true,player_indicator=true,shoe_effects=true,outfit_tint=true,lighting_preset=true,green_effect=true,wings=true,character_aura=true,ball_impacts=true,wing_trails=true,rim_effects=true,lightning_aura=true,meter_style=true,hide_meters=true}
@@ -3666,6 +3805,10 @@ local function create_pivot_modules(ctx)
     function Engine:record_shot(event)
         if self.visual_feedback then self:visual_feedback(event) end
         if self.reactive_feedback then self:reactive_feedback(event) end
+        if self.heatmap_event then
+            local ok,err=pcall(self.heatmap_event,self,event)
+            if not ok then self.heatmap_error=tostring(err); self.heatmap_status="Shot location unavailable; timing stats still recorded" end
+        end
         local stats=self.shot_stats; local kind=event.kind
         local shot_type=event.shot_type or event.shot and stats.types_by_shot[event.shot] or Core.shot_type(event.name,event.details)
         if not stats.by_type[shot_type] then shot_type="Standing" end
@@ -4407,7 +4550,7 @@ do
     local rail_line=frame(shell,20,97,660,1,theme.line)
     local top_line=frame(shell,20,54,660,1,theme.line)
     local logo=label(shell,"Pivot",20,12,100,28,19,theme.text); logo.Font=Enum.Font.SourceSansBold; logo.TextXAlignment=Enum.TextXAlignment.Left
-    local build_label=label(shell,"BUILD 2026.11.06.10",242,17,150,18,10,theme.muted); build_label.Name="PivotBuild"; build_label.Font=Enum.Font.RobotoMono; build_label.TextWrapped=false
+    local build_label=label(shell,"BUILD 2026.11.06.11",242,17,150,18,10,theme.muted); build_label.Name="PivotBuild"; build_label.Font=Enum.Font.RobotoMono; build_label.TextWrapped=false
     local heading=label(shell,"Practical Basketball",94,14,240,26,11,theme.muted); heading.Font=Enum.Font.SourceSansSemibold
     close.BackgroundColor3=theme.rail; close.TextColor3=theme.muted; close.TextSize=14; corner(close,4)
     local search=make("TextBox",{Text="",PlaceholderText="Find a control...",PlaceholderColor3=theme.muted,Position=UDim2.fromOffset(484,10),Size=UDim2.fromOffset(166,23),
@@ -4812,10 +4955,10 @@ do
     local container=page
     local collapsed={}
     local expanded,choosing,section_button,record_tools,court_alignment
-    local dribble_editor_open=false; local character_open=false; local library_open=false; local module_selection_label; local shot_profile_label
+    local dribble_editor_open=false; local character_open=false; local library_open=false; local module_selection_label; local shot_profile_label; local heatmap_status_label
     local auxiliary={}; local capture_switch; local character_status; local library_status
     local function clear()
-        for _,object in ipairs(rows) do object:Destroy() end; rows={}; fields={}; auxiliary={}; character_status=nil; library_status=nil; module_selection_label=nil; shot_profile_label=nil; visual_status_label=nil; y=46
+        for _,object in ipairs(rows) do object:Destroy() end; rows={}; fields={}; auxiliary={}; character_status=nil; library_status=nil; module_selection_label=nil; shot_profile_label=nil; heatmap_status_label=nil; visual_status_label=nil; y=46
     end
     local function own(object) rows[#rows+1]=object; return object end
     local function text(value,size,color,height)
@@ -4930,6 +5073,7 @@ do
     end
     local buttons={}
     local function update_buttons()
+        if heatmap_status_label and heatmap_status_label.Parent then heatmap_status_label.Text=engine.heatmap_status end
         if shot_profile_label and shot_profile_label.Parent then local summary=engine:shot_profile_summary(); if shot_profile_label.Text~=summary then shot_profile_label.Text=summary end end
         if visual_status_label and visual_status_label.Parent then
             local count=0; for id in pairs(engine.registry.active) do local definition=engine.registry.definitions[id]; if definition.category=="Cosmetics" or definition.category=="Character" or definition.category=="Visual+" then count=count+1 end end
@@ -5307,7 +5451,7 @@ do
             local columns=category=="All" and (ui.content_width and ui.content_width() or window.Size.X.Offset)>=620 and 2 or 1
             local heights={46,46}
             local display_definitions={}; local priority={}
-            for _,id in ipairs({"shot_quality","open_teammates","rebound_estimate","possession_safeguards","dribble_library"}) do
+            for _,id in ipairs({"shot_heatmap","shot_quality","open_teammates","rebound_estimate","possession_safeguards","dribble_library"}) do
                 local definition=engine.registry.definitions[id]; if definition then display_definitions[#display_definitions+1]=definition; priority[id]=true end
             end
             for _,definition in ipairs(engine.definitions) do if not priority[definition.id] then display_definitions[#display_definitions+1]=definition end end
@@ -5440,6 +5584,11 @@ do
                                 local remove=ui.button(row,"×",function() engine:remove_dribble_combo(index); rebuild() end); remove.Position=UDim2.new(1,-34,0,3); remove.Size=UDim2.fromOffset(28,30)
                             end
 
+                        elseif id=="shot_heatmap" then
+                            heatmap_status_label=text(engine.heatmap_status,12,theme.muted,38)
+                            action("Save heatmap",function() local count=engine:save_heatmap(); report("Saved "..count.." heatmap shots") end)
+                            action("Load heatmap",function() local count=engine:load_heatmap(); report("Loaded "..count.." heatmap shots") end)
+                            action("Clear heatmap",function() engine:clear_heatmap(); report(engine.heatmap_status) end)
                         elseif id=="meter_release" then
                             text(engine.release_storage_status,12,theme.muted,38)
                             toggle_action("Auto correct",function() return engine.settings.auto_calibrate end,function(on) engine.settings.auto_calibrate=on end)
