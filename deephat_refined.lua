@@ -39,7 +39,7 @@ function Core.pick(candidates,current,radius,bias,visible,sticky)
 end
 if DEEPHAT_REFINED_TEST then return Core end
 
--- DeepHat Refined 3.3 | standalone client script, native UI, no Drawing dependency.
+-- Vanta Urban 3.4 | standalone client script, native UI, no Drawing dependency.
 local Players=game:GetService("Players")
 local Run=game:GetService("RunService")
 local Input=game:GetService("UserInputService")
@@ -62,7 +62,7 @@ local alive=true; local focused=true; local menu_open=true; local error_paused=f
 local connections={}; local roster={}; local locked=nil; local selected=nil; local ping=0; local elapsed=1; local ping_elapsed=1
 local was_active=false
 local esp_entries={}
-local theme={base=Color3.fromRGB(17,19,25),panel=Color3.fromRGB(25,29,38),input=Color3.fromRGB(20,23,31),line=Color3.fromRGB(47,53,67),text=Color3.fromRGB(233,239,249),muted=Color3.fromRGB(144,158,181),accent=Color3.fromRGB(159,189,244)}
+local theme={base=Color3.fromRGB(9,8,12),panel=Color3.fromRGB(16,13,22),input=Color3.fromRGB(19,15,26),line=Color3.fromRGB(37,29,46),text=Color3.fromRGB(240,236,246),muted=Color3.fromRGB(153,143,169),accent=Color3.fromRGB(182,66,235)}
 local function make(class,props,p) local o=Instance.new(class); for key,value in pairs(props) do o[key]=value end; o.Parent=p; return o end
 local function corner(o,r) return make("UICorner",{CornerRadius=UDim.new(0,r)},o) end
 local function connect(signal,fn) local link=signal:Connect(fn); connections[#connections+1]=link; return link end
@@ -71,22 +71,54 @@ pcall(function() gui.ScreenInsets=Enum.ScreenInsets.None end)
 local canvas=make("Frame",{Name="Canvas",Size=UDim2.fromScale(1,1),BackgroundTransparency=1,BorderSizePixel=0},gui)
 local circle=make("Frame",{Name="AimFOV",AnchorPoint=Vector2.new(.5,.5),BackgroundTransparency=1,Size=UDim2.fromOffset(cfg.fov*2,cfg.fov*2),Visible=false},canvas); corner(circle,10000)
 local circle_stroke=make("UIStroke",{Color=theme.accent,Thickness=1,Transparency=.45,ApplyStrokeMode=Enum.ApplyStrokeMode.Border},circle)
-local panel=make("Frame",{Name="Settings",Position=UDim2.fromOffset(20,92),Size=UDim2.fromOffset(364,516),BackgroundColor3=theme.base,BorderSizePixel=0,ZIndex=20,Active=true},canvas); corner(panel,12)
+local panel=make("Frame",{Name="Settings",Position=UDim2.fromOffset(20,92),Size=UDim2.fromOffset(800,600),BackgroundColor3=theme.base,BorderSizePixel=0,ZIndex=20,Active=true},canvas); corner(panel,7)
 make("UIStroke",{Color=theme.line,Thickness=1},panel)
 local function text(p,value,x,y,w,h,size,color)
-    return make("TextLabel",{Text=value,Position=UDim2.fromOffset(x,y),Size=UDim2.fromOffset(w,h),BackgroundTransparency=1,Font=Enum.Font.SourceSans,TextSize=size or 15,TextColor3=color or theme.text,TextXAlignment=Enum.TextXAlignment.Left,TextTruncate=Enum.TextTruncate.AtEnd,ZIndex=21},p)
+    return make("TextLabel",{Text=value,Position=UDim2.fromOffset(x,y),Size=UDim2.fromOffset(w,h),BackgroundTransparency=1,Font=Enum.Font.Gotham,TextSize=size or 15,TextColor3=color or theme.text,TextXAlignment=Enum.TextXAlignment.Left,TextTruncate=Enum.TextTruncate.AtEnd,ZIndex=21},p)
 end
-text(panel,"DeepHat",18,12,200,28,24).Font=Enum.Font.SourceSansBold
-text(panel,"AIM & VISUALS  /  3.3",18,41,260,18,12,theme.muted)
+text(panel,"VANTA",24,13,180,29,23).Font=Enum.Font.GothamBold
+text(panel,"●  URBAN RELOAD",25,44,260,18,11,theme.accent)
 local status=text(panel,"Hold E to aim",16,474,332,26,13,theme.muted)
-status.Position=UDim2.new(0,16,1,-42); status.Size=UDim2.new(1,-32,0,26)
+status.Position=UDim2.new(0,198,1,-40); status.Size=UDim2.new(1,-218,0,26)
 local diagnostic_label=text(panel,"Scanning players…",16,444,332,24,12,theme.muted)
-diagnostic_label.Name="Diagnostics"; diagnostic_label.Position=UDim2.new(0,16,1,-72); diagnostic_label.Size=UDim2.new(1,-32,0,24)
-local content=make("ScrollingFrame",{Position=UDim2.fromOffset(14,72),Size=UDim2.new(1,-28,1,-150),BackgroundTransparency=1,BorderSizePixel=0,ScrollBarThickness=3,ScrollBarImageColor3=theme.accent,CanvasSize=UDim2.fromOffset(0,0),ZIndex=21},panel)
-local badge=make("TextButton",{Name="MenuButton",Text="DeepHat",Position=UDim2.fromOffset(20,44),Size=UDim2.fromOffset(104,32),BackgroundColor3=theme.panel,TextColor3=theme.text,Font=Enum.Font.SourceSansSemibold,TextSize=16,BorderSizePixel=0,AutoButtonColor=false,ZIndex=20},canvas); corner(badge,7)
+diagnostic_label.Name="Diagnostics"; diagnostic_label.Position=UDim2.new(0,198,1,-68); diagnostic_label.Size=UDim2.new(1,-218,0,24)
+local content=make("ScrollingFrame",{Position=UDim2.fromOffset(198,128),Size=UDim2.new(1,-218,1,-208),BackgroundTransparency=1,BorderSizePixel=0,ScrollBarThickness=3,ScrollBarImageColor3=theme.accent,CanvasSize=UDim2.fromOffset(0,0),ZIndex=21},panel)
+local badge=make("TextButton",{Name="MenuButton",Text="Vanta",Position=UDim2.fromOffset(20,44),Size=UDim2.fromOffset(104,32),BackgroundColor3=theme.panel,TextColor3=theme.text,Font=Enum.Font.GothamMedium,TextSize=16,BorderSizePixel=0,AutoButtonColor=false,ZIndex=20},canvas); corner(badge,7)
 local live_status=text(canvas,"",136,44,460,32,14,theme.text)
 live_status.Name="LiveStatus"; live_status.TextStrokeTransparency=.3
-local control={Config=cfg,Version="3.3"}; local bindings={}; local y=0
+local control={Config=cfg,Version="3.4"}; local bindings={}; local y=0
+local panel_scale=make("UIScale",{Scale=1},panel)
+make("Frame",{Position=UDim2.fromOffset(0,74),Size=UDim2.new(1,0,0,1),BackgroundColor3=theme.line,BorderSizePixel=0,ZIndex=21},panel)
+local sidebar=make("Frame",{Position=UDim2.fromOffset(0,75),Size=UDim2.new(0,172,1,-75),BackgroundColor3=Color3.fromRGB(13,10,18),BorderSizePixel=0,ZIndex=20},panel)
+make("Frame",{Position=UDim2.fromOffset(172,75),Size=UDim2.new(0,1,1,-75),BackgroundColor3=theme.line,BorderSizePixel=0,ZIndex=21},panel)
+local section_title=text(panel,"Aim",198,87,400,28,21); section_title.Font=Enum.Font.GothamBold
+text(sidebar,"URBAN  /  3.4",16,0,145,24,10,theme.muted).Position=UDim2.new(0,16,1,-40)
+local ui_rows={}; local nav_buttons={}; local current_section="Aim"
+local section_map={["Player ESP"]="ESP",["Show FOV"]="ESP",["ESP names & distances"]="ESP",["ESP visible only"]="ESP",["Prediction"]="Prediction",["Use ping in lead"]="Prediction",["Prediction lead / seconds"]="Prediction",["Hold key"]="Settings",["RightShift menu · F8 stop"]="Settings"}
+local function show_section(name)
+    current_section=name; section_title.Text=name; local offset=0
+    for _,entry in ipairs(ui_rows) do
+        entry.frame.Visible=entry.section==name
+        if entry.frame.Visible then entry.frame.Position=UDim2.fromOffset(0,offset); offset=offset+entry.height end
+    end
+    content.CanvasSize=UDim2.fromOffset(0,offset+4); content.CanvasPosition=Vector2.new(0,0)
+    for key,item in pairs(nav_buttons) do
+        local on=key==name; item.button.BackgroundColor3=on and Color3.fromRGB(39,20,53) or Color3.fromRGB(13,10,18)
+        item.label.TextColor3=on and theme.accent or theme.muted; item.marker.Visible=on
+    end
+end
+for i,name in ipairs({"Aim","ESP","Prediction","Settings"}) do
+    local b=make("TextButton",{Name="VantaTab_"..name,Text="",AutoButtonColor=false,Position=UDim2.fromOffset(10,16+(i-1)*52),Size=UDim2.fromOffset(152,44),BackgroundColor3=theme.panel,BorderSizePixel=0,ZIndex=22},sidebar); corner(b,5)
+    local ring=make("Frame",{Position=UDim2.fromOffset(10,11),Size=UDim2.fromOffset(22,22),BackgroundTransparency=1,ZIndex=23},b); corner(ring,12); make("UIStroke",{Color=theme.muted,Thickness=1},ring)
+    local letter=text(ring,name:sub(1,1),0,0,22,22,11,theme.muted); letter.TextXAlignment=Enum.TextXAlignment.Center; letter.ZIndex=24
+    local caption=text(b,name,42,0,105,44,13,theme.muted); caption.ZIndex=24
+    local marker=make("Frame",{Position=UDim2.fromOffset(-5,11),Size=UDim2.fromOffset(3,22),BackgroundColor3=theme.accent,BorderSizePixel=0,ZIndex=24},b)
+    nav_buttons[name]={button=b,label=caption,marker=marker}
+    connect(b.Activated,function() show_section(name) end)
+    connect(b.MouseEnter,function() b.BackgroundColor3=Color3.fromRGB(39,20,53) end)
+    connect(b.MouseLeave,function() show_section(current_section) end)
+end
+
 local diagnostics={}; local character_cache={}; local last_reason="Ready"
 local function set_status(value) if status.Text~=value then status.Text=value end; live_status.Text=value end
 local function actor_character(who)
@@ -184,11 +216,13 @@ local function aiming()
     return false
 end
 local function row(caption)
-    local frame=make("Frame",{Position=UDim2.fromOffset(0,y),Size=UDim2.new(1,-6,0,38),BackgroundColor3=theme.panel,BorderSizePixel=0,ZIndex=22},content); corner(frame,6)
-    local label=text(frame,caption,12,0,224,38,15); label.Name="Caption"; label.Size=UDim2.new(1,-90,0,38); y=y+44; return frame
+    local frame=make("Frame",{Position=UDim2.fromOffset(0,y),Size=UDim2.new(1,-6,0,52),BackgroundTransparency=1,BackgroundColor3=theme.panel,BorderSizePixel=0,ZIndex=22},content)
+    local label=text(frame,caption,10,0,224,46,15); label.Name="Caption"; label.Size=UDim2.new(1,-110,0,46); label.ZIndex=24
+    make("Frame",{Position=UDim2.new(0,10,1,-1),Size=UDim2.new(1,-20,0,1),BackgroundColor3=theme.line,BorderSizePixel=0,ZIndex=23},frame)
+    ui_rows[#ui_rows+1]={frame=frame,section=section_map[caption] or "Aim",height=52}; y=y+52; return frame
 end
 local function button(p,value,callback)
-    local b=make("TextButton",{Text=value,AutoButtonColor=false,BackgroundColor3=theme.input,TextColor3=theme.text,Font=Enum.Font.SourceSansSemibold,TextSize=14,BorderSizePixel=0,ZIndex=23},p); corner(b,5)
+    local b=make("TextButton",{Text=value,AutoButtonColor=false,BackgroundColor3=theme.input,TextColor3=theme.text,Font=Enum.Font.GothamMedium,TextSize=14,BorderSizePixel=0,ZIndex=23},p); corner(b,5)
     connect(b.Activated,callback); connect(b.MouseEnter,function() b.BackgroundColor3=theme.line end); connect(b.MouseLeave,function() b.BackgroundColor3=theme.input end); return b
 end
 local function refresh_controls()
@@ -219,13 +253,33 @@ local function toggle(caption,key,get,set)
     local r=row(caption); local b
     local function read() if get then return get() end; return cfg[key] end
     b=button(r,"",function() local value=not read(); if set then set(value); elapsed=1; refresh_controls() else control:Set(key,value) end end)
-    b.Position=UDim2.new(1,-65,0,7); b.Size=UDim2.fromOffset(54,24)
-    bindings[#bindings+1]=function() local on=read(); b.Text=on and "ON" or "OFF"; b.TextColor3=on and theme.accent or theme.muted end
+    b.Position=UDim2.new(1,-64,0,12); b.Size=UDim2.fromOffset(44,24); b.TextTransparency=1; b.BackgroundTransparency=1
+    local track=make("Frame",{Name="Track",Size=UDim2.fromOffset(44,22),BackgroundColor3=theme.line,BorderSizePixel=0,ZIndex=24},b); corner(track,12)
+    local knob=make("Frame",{Name="Knob",Position=UDim2.fromOffset(3,3),Size=UDim2.fromOffset(16,16),BackgroundColor3=theme.text,BorderSizePixel=0,ZIndex=25},track); corner(knob,10)
+    bindings[#bindings+1]=function() local on=read(); b.Text=on and "ON" or "OFF"; b.TextColor3=on and theme.accent or theme.muted; track.BackgroundColor3=on and theme.accent or theme.line; knob.Position=UDim2.fromOffset(on and 25 or 3,3) end
 end
 local function field(caption,key,format)
     local r=row(caption); r:FindFirstChild("Caption").Size=UDim2.new(1,-112,0,38); local box=make("TextBox",{Text="",ClearTextOnFocus=false,Position=UDim2.new(1,-91,0,6),Size=UDim2.fromOffset(80,26),BackgroundColor3=theme.input,TextColor3=theme.text,BorderSizePixel=0,TextSize=14,Font=Enum.Font.RobotoMono,ZIndex=23},r); corner(box,5)
     bindings[#bindings+1]=function() box.Text=format and string.format(format,cfg[key]) or tostring(cfg[key]) end
     connect(box.FocusLost,function() local ok,err=pcall(function() control:Set(key,box.Text) end); if not ok then set_status(tostring(err)); refresh_controls() end end)
+    r.Size=UDim2.new(1,-6,0,82); ui_rows[#ui_rows].height=82; y=y+30
+    local slider=make("TextButton",{Name="VantaSlider_"..key,Text="",AutoButtonColor=false,Position=UDim2.fromOffset(12,52),Size=UDim2.new(1,-26,0,18),BackgroundTransparency=1,ZIndex=24},r)
+    local track=make("Frame",{Position=UDim2.fromOffset(0,7),Size=UDim2.new(1,0,0,4),BackgroundColor3=theme.line,BorderSizePixel=0,ZIndex=24},slider); corner(track,2)
+    local fill=make("Frame",{Size=UDim2.fromScale(0,1),BackgroundColor3=theme.accent,BorderSizePixel=0,ZIndex=25},track); corner(fill,2)
+    local dot=make("Frame",{Size=UDim2.fromOffset(12,12),AnchorPoint=Vector2.new(.5,.5),BackgroundColor3=theme.text,BorderSizePixel=0,ZIndex=26},track); corner(dot,7)
+    bindings[#bindings+1]=function() local range=ranges[key]; local amount=(cfg[key]-range[1])/(range[2]-range[1]); fill.Size=UDim2.fromScale(amount,1); dot.Position=UDim2.new(amount,0,.5,0) end
+    local dragging
+    local function move(position)
+        if slider.AbsoluteSize.X<=0 then return end
+        local range=ranges[key]; local amount=math.max(0,math.min(1,(position.X-slider.AbsolutePosition.X)/slider.AbsoluteSize.X))
+        local value=range[1]+(range[2]-range[1])*amount
+        if key~="prediction" then value=math.floor(value+.5) else value=math.floor(value*1000+.5)/1000 end
+        control:Set(key,value)
+    end
+    connect(slider.InputBegan,function(event) if event.UserInputType==Enum.UserInputType.MouseButton1 or event.UserInputType==Enum.UserInputType.Touch then dragging=event; move(event.Position) end end)
+    connect(Input.InputChanged,function(event) if dragging and (event==dragging or event.UserInputType==Enum.UserInputType.MouseMovement) then move(event.Position) end end)
+    connect(Input.InputEnded,function(event) if event==dragging or event.UserInputType==Enum.UserInputType.MouseButton1 then dragging=nil end end)
+
 end
 toggle("Aim assist","enabled"); toggle("Player ESP","espEnabled")
 toggle("Hard lock / no smoothing","hardLock"); toggle("Keep target while held","stickyTarget"); toggle("Center FOV on crosshair","centerFov")
@@ -247,7 +301,7 @@ field("FOV radius / pixels","fov"); field("Response / higher is faster","respons
 toggle("ESP names & distances","names"); toggle("ESP visible only","espVisibleOnly")
 local actions=row("RightShift menu · F8 stop")
 local stop_button=button(actions,"Stop",function() control:Stop() end); stop_button.Position=UDim2.new(1,-65,0,7); stop_button.Size=UDim2.fromOffset(54,24)
-content.CanvasSize=UDim2.fromOffset(0,y+4)
+show_section("Aim")
 local close=button(panel,"×",function() control:Unload() end); close.Position=UDim2.new(1,-42,0,14); close.Size=UDim2.fromOffset(26,26)
 local function menu(value) menu_open=value; panel.Visible=value; reset_lock(); set_status("Hold "..(cfg.aimMouseButton and "RMB" or cfg.aimKey).." · RightShift menu · F8 stop") end
 connect(badge.Activated,function() menu(not menu_open) end)
@@ -339,7 +393,7 @@ local function render(dt)
     if not alive then return end
     local camera=workspace.CurrentCamera; if not camera then reset_lock(); hide_visuals(); circle.Visible=false; return end
     if waiting_key and os.clock()>waiting_key then waiting_key=false; set_status("Binding timed out") end
-    local v=camera.ViewportSize; panel.Size=UDim2.fromOffset(math.max(280,math.min(364,v.X-24)),math.max(260,math.min(516,v.Y-104)))
+    local v=camera.ViewportSize; local w=math.max(640,math.min(800,v.X-24)); local h=math.max(440,math.min(600,v.Y-104)); panel.Size=UDim2.fromOffset(w,h); panel_scale.Scale=math.min(1,(v.X-24)/w,(v.Y-104)/h); panel.Position=UDim2.fromOffset(12,92)
     live_status.Size=UDim2.fromOffset(math.max(120,v.X-148),32)
     local mouse=mouse_point(camera); circle.Position=UDim2.fromOffset(mouse.X,mouse.Y); circle.Size=UDim2.fromOffset(cfg.fov*2,cfg.fov*2); circle.Visible=cfg.enabled and cfg.showFov and focused and not menu_open and not Input:GetFocusedTextBox() and not error_paused
     elapsed=elapsed+dt; ping_elapsed=ping_elapsed+dt; local active=aiming()
@@ -398,5 +452,5 @@ local stop_event=make("BindableEvent",{Name="Unload"},gui); connect(stop_event.E
 connect(gui.Destroying,function() control:Unload() end)
 function control:GetStatus() local count=0; for _ in pairs(roster) do count=count+1 end; return {alive=alive,paused=error_paused,target=locked and locked.Name,players=count,menu=menu_open,reason=last_reason,diagnostics=diagnostics,placeId=game.PlaceId} end
 refresh_controls(); menu(true)
-print("DeepHat Refined 3.3 loaded · Hold E · RightShift menu · F8 stop · Delete unload")
+print("Vanta Urban 3.4 loaded · Hold E · RightShift menu · F8 stop · Delete unload")
 return control
