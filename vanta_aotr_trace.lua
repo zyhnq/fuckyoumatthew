@@ -3,7 +3,8 @@ local player=assert(game:GetService("Players").LocalPlayer,"Run on the client")
 assert(game.GameId==4658598196 or game.PlaceId==13379208636,"Join AOT Revolution first")
 assert(type(writefile)=="function","Executor writefile support required")
 local http=game:GetService("HttpService")
-local report={version=1,placeId=game.PlaceId,samples={},modules={},sources={},errors={}}
+local report={version=2,placeId=game.PlaceId,samples={},modules={},sources={},errors={}}
+local function save() writefile("vanta_aotr_trace.json",http:JSONEncode(report)) end
 local function full(value) local ok,path=pcall(function() return value:GetFullName() end); return ok and path or nil end
 local function value(v)
     if type(v)=="number" then if v==v and math.abs(v)<math.huge then return v end; return tostring(v) end
@@ -42,29 +43,38 @@ local function sample()
     end
     report.samples[#report.samples+1]=s
 end
-local candidates={}
+local candidates={}; local seen={}
+local function candidate(module)
+    if seen[module] then return end; seen[module]=true
+    local path=full(module)
+    if not path or path:lower():find("cutscene",1,true) then return end
+    local name=module.Name:lower(); local score=0
+    if name:find("hitbox",1,true) or name:find("attack",1,true) or name:find("combat",1,true) or name:find("slash",1,true) then score=100
+    elseif name:find("network",1,true) or name:find("socket",1,true) or name:find("remote",1,true) or name:find("input",1,true) then score=95
+    elseif name=="blades" then score=90 elseif name=="odmg" then score=85 elseif name:find("cache",1,true) then score=70 end
+    if path:find("Host.Modules",1,true) or score>=95 then
+        report.modules[#report.modules+1]=path
+        if score>0 then candidates[#candidates+1]={object=module,path=path,score=score} end
+    end
+end
 if type(getloadedmodules)=="function" then
     local ok,modules=pcall(getloadedmodules)
     if ok and type(modules)=="table" then for _,module in pairs(modules) do
-        local path=full(module)
-        if path and not path:lower():find("cutscene",1,true) and path:find("Host.Modules",1,true) then
-            report.modules[#report.modules+1]=path
-            local name=module.Name:lower(); local score=0
-            if name:find("hitbox",1,true) or name:find("attack",1,true) or name:find("combat",1,true) then score=100
-            elseif name:find("network",1,true) or name:find("socket",1,true) or name:find("remote",1,true) or name:find("input",1,true) then score=95
-            elseif name=="blades" then score=90 elseif name=="odmg" then score=85 elseif name:find("cache",1,true) then score=70 end
-            if score>0 then candidates[#candidates+1]={object=module,path=path,score=score} end
-        end
+        candidate(module)
     end else report.errors[#report.errors+1]=tostring(modules) end
 end
-print("Vanta AOTR trace started. Enable Auto farm and close its menu during this 12-second capture.")
-for i=1,13 do sample(); if i<13 then task.wait(1) end end
+local char=player.Character
+if not char then local folder=workspace:FindFirstChild("Characters"); char=folder and folder:FindFirstChild(player.Name) end
+if char then for _,module in ipairs(char:GetDescendants()) do if module:IsA("ModuleScript") then candidate(module) end end end
+print("Vanta AOTR trace v2 started. Keep Roblox focused, enable Auto farm, close the menu, and try a normal manual slash during this 12-second capture.")
+for i=1,13 do sample(); save(); if i<13 then task.wait(1) end end
 table.sort(candidates,function(a,b) return a.score>b.score end)
-for i=1,math.min(10,#candidates) do
+for i=1,math.min(16,#candidates) do
     local item=candidates[i]; local ok,source=pcall(function() return item.object.Source end)
     if (not ok or type(source)~="string" or source=="") and type(decompile)=="function" then ok,source=pcall(decompile,item.object) end
     if ok and type(source)=="string" then report.sources[#report.sources+1]={path=item.path,source=source:sub(1,180000),truncated=#source>180000}
     else report.sources[#report.sources+1]={path=item.path,error=tostring(source):sub(1,200)} end
+    save()
 end
-writefile("vanta_aotr_trace.json",http:JSONEncode(report))
+report.finished=true; save()
 print("Saved vanta_aotr_trace.json")
