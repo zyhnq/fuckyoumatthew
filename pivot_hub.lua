@@ -806,7 +806,7 @@ local function create_pivot_modules(ctx)
         if state.pulse and os.clock()>=state.release_at then hold(scope,state.pulse,false); state.pulse=nil end
     end
     Engine.settings.guard_contest=true
-    function Core.guard_choose(list,origin,previous)
+    function Core.guard_choose(list,origin,previous,hold_previous)
         local best,distance,retained,has_handler
         for _,item in ipairs(list) do if item.has_ball then has_handler=true; break end end
         for _,item in ipairs(list) do if not has_handler or item.has_ball then
@@ -814,8 +814,46 @@ local function create_pivot_modules(ctx)
             if not distance or d<distance then best=item; distance=d end
             if item.key==previous then retained=item end
         end end
-        if retained and (retained.position-origin).Magnitude<=distance+3 then return retained end
+        if retained and (not has_handler and hold_previous or (retained.position-origin).Magnitude<=distance+3) then return retained end
         return best
+    end
+    function Core.guard_observe(tracker,position,reported,now)
+        local flat=function(v) return Vector3.new(v.X,0,v.Z) end
+        local old=tracker.sample; local velocity=tracker.velocity or Vector3.zero
+        local physical=reported and flat(reported) or Vector3.zero
+        if physical.Magnitude>40 then physical=physical.Unit*40 end
+        if not old or now-old.time>.5 then velocity=physical; tracker.sample={position=position,time=now}
+        elseif now-old.time>=.008 and ((position-old.position).Magnitude>.025 or now-old.time>=.075) then
+            local observed=flat(position-old.position)/(now-old.time)
+            if observed.Magnitude>65 then
+                velocity=Vector3.zero; tracker.reversed_until=now+.18
+            else
+                local reversed=velocity.Magnitude>4 and observed.Magnitude>4 and velocity:Dot(observed)<0
+                if reversed then tracker.reversed_until=now+.18 end
+                -- Replicated physical velocity can still point along the previous dribble.
+                velocity=physical.Magnitude>.1 and observed.Magnitude>.1 and physical:Dot(observed)>0 and observed*.8+physical*.2 or observed
+                if velocity.Magnitude>40 then velocity=velocity.Unit*40 end
+            end
+            tracker.sample={position=position,time=now}
+        end
+        tracker.velocity=velocity
+        return velocity,now<(tracker.reversed_until or 0)
+    end
+    function Core.guard_waypoint(origin,handler,basket,velocity,spacing,shooting,reversing,route,now,bounds)
+        local flat=function(v) return Vector3.new(v.X,0,v.Z) end
+        local radial=flat(basket-handler)
+        if radial.Magnitude<.1 then return Core.farm_clamp(handler,bounds),nil end
+        local lead=flat(velocity)*(reversing and .025 or .10)
+        local limit=reversing and .5 or 1.6
+        if lead.Magnitude>limit then lead=lead.Unit*limit end
+        local gap=shooting and math.max(2,spacing-.9) or math.min(spacing+1.5,spacing+math.max(0,flat(velocity):Dot(radial.Unit))*.045)
+        gap=math.min(gap,radial.Magnitude*.5)
+        local desired=Core.farm_clamp(handler+lead+radial.Unit*gap,bounds)
+        -- Once basket-side, shuffle directly: a body-avoidance detour makes the guard orbit the handler.
+        if flat(origin-handler):Dot(radial.Unit)>.5 then return desired,nil end
+        if reversing or route and now-(route.created or now)>.25 then route=nil end
+        local waypoint,_,next_route=Core.farm_route(origin,desired,{{key="handler",position=handler,velocity=velocity}},route,now,false,bounds)
+        return waypoint,next_route
     end
     function Core.guard_motion(delta,velocity,arrived,target_speed)
         delta=Vector3.new(delta.X,0,delta.Z); velocity=Vector3.new(velocity.X,0,velocity.Z)
@@ -847,7 +885,7 @@ local function create_pivot_modules(ctx)
     end
     local function guard_release(scope,state)
         local ok,err=pcall(guard_holds,scope,state,false,false); release_owned(scope)
-        state.steering=nil; state.keys=nil; state.arrived=nil; state.route=nil; state.pulse=nil; state.pending_contest=nil
+        state.steering=nil; state.keys=nil; state.arrived=nil; state.route=nil; state.pulse=nil; state.pending_contest=nil; state.tracking=nil
         if not ok then ctx.report("Guard release: "..tostring(err)) end
     end
     local function guard_candidate(model,part,own,mine,a,s,state)
@@ -855,7 +893,7 @@ local function create_pivot_modules(ctx)
         local hum=model:FindFirstChildOfClass("Humanoid"); if hum and hum.Health<=0 then return false end
         local team=a.Team or own:GetAttribute("Team")
         if s.team_check and team and team~=0 and team~="" and model:GetAttribute("Team")==team then return false end
-        if s.ball_handler_only and not (held_ball(model) or model:GetAttribute("Basketball")==true) then return false end
+        if s.ball_handler_only and not (held_ball(model) or model:GetAttribute("Basketball")==true) and not (model==state.model and os.clock()-(state.ball_seen or -10)<.35) then return false end
         local court=a.CourtNumber; local other=model:GetAttribute("CourtNumber")
         if court~=nil and other~=nil and tostring(court)~=tostring(other) then return false end
         if math.abs(part.Position.Y-mine.Position.Y)>16 or (part.Position-mine.Position).Magnitude>s.guard_range then return false end
@@ -892,7 +930,7 @@ local function create_pivot_modules(ctx)
                         list[#list+1]={key=model2,part=part2,position=part2.Position,has_ball=held_ball(model2)~=nil or model2:GetAttribute("Basketball")==true}
                     end
                 end end
-                local chosen=Core.guard_choose(list,mine.Position,state.model)
+                local chosen=Core.guard_choose(list,mine.Position,state.model,os.clock()-(state.ball_seen or -10)<.35)
                 if chosen then model=chosen.key; part=chosen.part end
                 ok=model~=nil
             else ok,model,part=pcall(selected_target,s) end
@@ -905,7 +943,10 @@ local function create_pivot_modules(ctx)
         if not state.model or not state.part or not state.part.Parent then guard_release(scope,state); return end
         local target=state.model; local position=state.part.Position
         if not guard_candidate(target,state.part,own,mine,a,s,state) then guard_release(scope,state); return end
-        local velocity=Core.farm_observe(state.history,"target",position,os.clock(),state.part.AssemblyLinearVelocity)
+        if held_ball(target) or target:GetAttribute("Basketball")==true then state.ball_seen=os.clock() end
+        state.tracking=state.tracking or {}
+        local velocity,reversing=Core.guard_observe(state.tracking,position,state.part.AssemblyLinearVelocity,os.clock())
+        if reversing then state.route=nil; state.steering=nil; state.arrived=nil end
         local mine_velocity=Core.farm_observe(state.history,"self",mine.Position,os.clock(),mine.AssemblyLinearVelocity)
         local shooting=target:GetAttribute("InAir")==true and (target:GetAttribute("ShotStartTime")~=nil or target:GetAttribute("Action")=="Shooting")
         local shot=target:GetAttribute("ShotStartTime")
@@ -915,10 +956,7 @@ local function create_pivot_modules(ctx)
             if state.actions and state.actions.Jump then state.actions.Jump:Fire() else pulse(scope,state,jump_key(s)) end
             state.last_contest=os.clock(); state.pending_contest=nil
         end
-        local desired=Core.farm_guard_goal(position,rim.Position,velocity,shooting)
-        local radial=Vector3.new(rim.Position.X-position.X,0,rim.Position.Z-position.Z)
-        if radial.Magnitude>.01 then desired=desired+radial.Unit*(s.guard_distance-3.5) end
-        local waypoint,_,route=Core.farm_route(mine.Position,desired,{{key=target,position=position,velocity=velocity}},state.route,os.clock(),false,state.bounds)
+        local waypoint,route=Core.guard_waypoint(mine.Position,position,rim.Position,velocity,s.guard_distance,shooting,reversing,state.route,os.clock(),state.bounds)
         state.route=route
         local delta=Vector3.new(waypoint.X-mine.Position.X,0,waypoint.Z-mine.Position.Z)
         local camera=camera_service(); local forward=Vector3.new(camera.CFrame.LookVector.X,0,camera.CFrame.LookVector.Z)
@@ -4586,7 +4624,7 @@ local function create_pivot_modules(ctx)
             farm_session=tostring(os.time())..":"..tostring(os.clock())
             farm_write(true)
             queue([[local ok,c=pcall(function() return game:GetService("HttpService"):JSONDecode(readfile("vanta_badge_farm.json")) end)
-if ok and c.enabled==true and c.session==]]..string.format("%q",farm_session)..[[ then loadstring(game:HttpGet("https://raw.githubusercontent.com/zyhnq/fuckyoumatthew/main/pivot_launcher.lua?v=20261108.02"))() end]])
+if ok and c.enabled==true and c.session==]]..string.format("%q",farm_session)..[[ then loadstring(game:HttpGet("https://raw.githubusercontent.com/zyhnq/fuckyoumatthew/main/pivot_launcher.lua?v=20261108.03"))() end]])
             Engine.farm_status="Starting"; return state
         end,
         step=function(scope,state,s,dt)
@@ -4720,7 +4758,7 @@ if ok and c.enabled==true and c.session==]]..string.format("%q",farm_session)..[
             if state.role~=role or state.possession_owner~=owner then
                 state.role=role; state.offense_route=nil; state.defense_route=nil; state.attack_pocket=nil
                 state.shot_ready_since=nil; state.nav_time=nil; state.escape_until=nil; state.steering=nil
-                state.possession_owner=owner
+                state.possession_owner=owner; state.defense_handler=nil; state.defense_tracking=nil
             end
             if possession then
                 state.defense_route=nil
@@ -4770,9 +4808,10 @@ if ok and c.enabled==true and c.session==]]..string.format("%q",farm_session)..[
                             state.actions.Jump:Fire()
                             Engine.farm_stats.contests=Engine.farm_stats.contests+1
                         end
-                        local goal=Core.farm_guard_goal(handler.position,basket.Position,handler.velocity,shooting)
-                        local target={key=handler.key,position=handler.position,velocity=handler.velocity}
-                        local waypoint,_,route=Core.farm_route(mine.Position,goal,{target},state.defense_route,os.clock(),false,state.bounds)
+                        if state.defense_handler~=handler.key then state.defense_handler=handler.key; state.defense_tracking={}; state.defense_route=nil end
+                        local tracked,reversing=Core.guard_observe(state.defense_tracking,handler.position,handler.part.AssemblyLinearVelocity,os.clock())
+                        if reversing then state.defense_route=nil; state.steering=nil end
+                        local waypoint,route=Core.guard_waypoint(mine.Position,handler.position,basket.Position,tracked,3.5,shooting,reversing,state.defense_route,os.clock(),state.bounds)
                         state.defense_route=route; farm_steer(scope,state,waypoint,true); status("Guarding between ball handler and basket")
                     else farm_release(scope,state); status("Waiting for defensive basket") end
                 elseif teammate then
@@ -5384,7 +5423,7 @@ do
     local rail_line=frame(shell,20,97,660,1,theme.line)
     local top_line=frame(shell,20,54,660,1,theme.line)
     local logo=label(shell,"VANTA",20,12,140,28,19,theme.text); logo.Font=Enum.Font.GothamBold; logo.TextXAlignment=Enum.TextXAlignment.Left
-    local build_label=label(shell,"BUILD 2026.11.08.02",242,17,150,18,10,theme.muted); build_label.Name="PivotBuild"; build_label.Font=Enum.Font.RobotoMono; build_label.TextWrapped=false
+    local build_label=label(shell,"BUILD 2026.11.08.03",242,17,150,18,10,theme.muted); build_label.Name="PivotBuild"; build_label.Font=Enum.Font.RobotoMono; build_label.TextWrapped=false
     local heading=label(shell,"Practical Basketball",94,14,240,26,11,theme.muted); heading.Font=Enum.Font.GothamMedium
     close.BackgroundColor3=theme.rail; close.TextColor3=theme.muted; close.TextSize=14; corner(close,4)
     local search=make("TextBox",{Text="",PlaceholderText="Find a control...",PlaceholderColor3=theme.muted,Position=UDim2.fromOffset(484,10),Size=UDim2.fromOffset(166,23),
