@@ -199,8 +199,14 @@ function Core.shot_type(name,details)
     if (tonumber(details.movement) or 0)>.15 or (tonumber(details.horizontal_speed) or 0)>2 or name:find("fade",1,true) or name:find("pullup",1,true) or name:find("stepback",1,true) or name:find("running",1,true) then return "Moving" end
     return "Standing"
 end
+function Core.clean_release_bounds(profile,resolution)
+    if profile.early and profile.late and profile.late-profile.early<math.max(.003,resolution or .004) then
+        profile.early=nil; profile.late=nil; return true
+    end
+    return false
+end
 function Core.animation_release(scope,deps)
-    local state={watched={},sent={},metadata=setmetatable({},{__mode="k"}),profiles=deps.profiles or {},pending={},closed=false,good_trials={},good_streak={},good_exhausted={}}
+    local state={watched={},sent={},metadata=setmetatable({},{__mode="k"}),profiles=deps.profiles or {},pending={},closed=false,good_trials={},good_streak={},good_exhausted={},metadata_identity=setmetatable({},{__mode="k"}),feedback_runs=setmetatable({},{__mode="k"}),unverified_inherited=setmetatable({},{__mode="k"}),frame_dt=1/60}
     local function telemetry(event) if deps.telemetry then pcall(deps.telemetry,event) end end
     local function target_ratio(p)
         local enabled=deps.good_correction and deps.good_correction() and (not deps.calibrate or deps.calibrate())
@@ -221,10 +227,16 @@ function Core.animation_release(scope,deps)
             local inherited=bucket and state.profiles[base]
             if inherited then
                 local copy={ratio=inherited.ratio,perfect=inherited.perfect,dunk=inherited.dunk,ceiling=inherited.ceiling}
-                state.profiles[key]=copy
+                state.profiles[key]=copy; state.unverified_inherited[copy]=true
             else state.profiles[key]={ratio=initial,dunk=attributes and attributes.Action=="Dunking"} end
         end
-        return state.profiles[key]
+        local p=state.profiles[key]
+        local duration=state.metadata[track]
+        local speed=type(track.Speed)=="number" and track.Speed>0 and track.Speed or 1
+        local resolution=duration and math.max(.003,math.min(.02,state.frame_dt*speed/duration*.5)) or .004
+        Core.clean_release_bounds(p,resolution)
+        if p.perfect and not p.last_perfect and not state.unverified_inherited[p] then p.last_perfect=p.ratio end
+        return p
     end
     function state:feedback(code)
         code=tonumber(code)
@@ -233,7 +245,7 @@ function Core.animation_release(scope,deps)
         telemetry({kind="feedback",code=code,shot=pending.shot,name=pending.name,shot_type=pending.shot_type,ratio=pending.ratio,locked=pending.profile.perfect})
         if deps.calibrate and not deps.calibrate() then
             self.good_trials[pending.profile]=nil; self.good_streak[pending.profile]=nil
-            if code==5 then pending.profile.ratio=pending.ratio; pending.profile.perfect=true; if deps.changed then deps.changed() end end
+            if code==5 then pending.profile.ratio=pending.ratio; pending.profile.last_perfect=pending.ratio; pending.profile.perfect=true; self.unverified_inherited[pending.profile]=nil; if deps.changed then deps.changed() end end
             return
         end
         local p=pending.profile; local early=code<=3; local late=code>=6
@@ -264,12 +276,23 @@ function Core.animation_release(scope,deps)
             else deps.report("Good release / established timing retained") end
             return
         end
+        if (early or late) and p.perfect and p.last_perfect and not self.unverified_inherited[p] and math.abs(pending.ratio-p.last_perfect)<=.02 then
+            local direction=early and "Early" or "Late"
+            local run=self.feedback_runs[p]
+            if not run or run.direction~=direction then run={direction=direction,count=0}; self.feedback_runs[p]=run end
+            run.count=run.count+1
+            if run.count<2 then
+                deps.report(direction.." once / keeping proven perfect timing")
+                telemetry({kind="stability",shot=pending.shot,name=pending.name,reason="Isolated "..direction.." · proven timing retained",ratio=p.ratio})
+                return
+            end
+        end
         if early then p.early=math.max(p.early or .25,pending.ratio)
         elseif late then p.late=math.min(p.late or .85,pending.ratio)
         else
             if code==5 then
                 p.ratio=pending.ratio
-                p.perfect=true; p.good_center=nil; p.good_attempt=0
+                p.perfect=true; p.last_perfect=pending.ratio; self.feedback_runs[p]=nil; self.unverified_inherited[p]=nil; p.good_center=nil; p.good_attempt=0
                 deps.report("Perfect release / keeping timing")
             elseif (deps.refine_good and deps.refine_good() or not deps.refine_good and p.dunk) and not p.perfect then
                 p.good_center=p.good_center or pending.ratio
@@ -289,7 +312,10 @@ function Core.animation_release(scope,deps)
         if p.early and p.late and p.early>=p.late then
             if early then p.late=nil else p.early=nil end
         end
-        if p.early and p.late then p.ratio=(p.early+p.late)/2
+        local resolution=pending.resolution or .004
+        if Core.clean_release_bounds(p,resolution) then
+            p.ratio=math.max(.25,math.min(p.ceiling or .85,(p.last_perfect or pending.ratio)+(early and 1 or -1)*math.max(.003,math.min(.01,resolution/2))))
+        elseif p.early and p.late then p.ratio=(p.early+p.late)/2
         else
             local step=(code==1 or code==8) and .06 or (code==2 or code==7) and .04 or .02
             p.ratio=math.max(.25,math.min(p.ceiling or .85,pending.ratio+(early and step or -step)))
@@ -299,6 +325,9 @@ function Core.animation_release(scope,deps)
         if deps.changed then deps.changed() end
     end
     local function release_time(track)
+        local animation=track.Animation
+        local identity=tostring(animation and animation.AnimationId or "").."/"..tostring(animation and animation.Name or track.Name)
+        if state.metadata_identity[track]~=identity then state.metadata_identity[track]=identity; state.metadata[track]=nil end
         if state.metadata[track]==nil then
             local ok,time=pcall(function() return track:GetTimeOfKeyframe("Release") end)
             local valid=ok and Core.bounded(time,.0001,30)
@@ -332,7 +361,7 @@ function Core.animation_release(scope,deps)
             local p=profile(track,name)
             if #state.pending>=8 then table.remove(state.pending,1) end
             local ratio,trial=target_ratio(p)
-            state.pending[#state.pending+1]={profile=p,ratio=ratio,trial=trial,shot=shot,name=name,shot_type=state.observed and state.observed.shot_type,time=os.clock()}
+            state.pending[#state.pending+1]={profile=p,ratio=ratio,trial=trial,shot=shot,name=name,shot_type=state.observed and state.observed.shot_type,time=os.clock(),resolution=math.max(.003,math.min(.02,state.frame_dt*math.max(.01,tonumber(track.Speed) or 1)/entry.release_time*.5))}
         end
         if state.observed and state.observed.id==shot then state.observed.sent=true end
         local event={kind="release",shot=shot,name=name,shot_type=state.observed and state.observed.shot_type,ratio=entry.release_time and target_ratio(profile(track,name)) or nil,position=track.TimePosition,speed=track.Speed}
@@ -351,6 +380,8 @@ function Core.animation_release(scope,deps)
         for _,track in ipairs(tracks) do disconnect(track) end
     end)
     function state:step(dt)
+        local frame=Core.bounded(dt,.001,.1)
+        if frame then self.frame_dt=self.frame_dt*.8+frame*.2 end
         local attributes=deps.attributes()
         local active=attributes and (attributes.Action=="Shooting" or attributes.Action=="Dunking") and attributes.ReleasedShot==false
         local id=active and Core.bounded(attributes.ShotStartTime,0,math.huge)
@@ -955,9 +986,11 @@ local function create_pivot_modules(ctx)
             assert(type(key)=="string" and #key<=300 and type(item)=="table","Invalid shot timing entry")
             local ratio=Core.bounded(item.ratio,.25,.85); assert(ratio,"Invalid saved release ratio")
             local copy={ratio=ratio}
-            for _,field in ipairs({"early","late","ceiling","good_center"}) do if item[field]~=nil then copy[field]=assert(Core.bounded(item[field],.25,.85),"Invalid timing bound") end end
+            for _,field in ipairs({"early","late","ceiling","good_center","last_perfect"}) do if item[field]~=nil then copy[field]=assert(Core.bounded(item[field],.25,.85),"Invalid timing bound") end end
             for _,field in ipairs({"perfect","dunk"}) do if item[field]~=nil then assert(type(item[field])=="boolean","Invalid timing flag"); copy[field]=item[field] end end
             if item.good_attempt~=nil then assert(type(item.good_attempt)=="number" and item.good_attempt%1==0 and item.good_attempt>=0 and item.good_attempt<=6,"Invalid refinement count"); copy.good_attempt=item.good_attempt end
+            Core.clean_release_bounds(copy,.004)
+            if copy.perfect and not copy.last_perfect then copy.last_perfect=copy.ratio end
             result[key]=copy
         end
         return result,count
@@ -4550,7 +4583,7 @@ do
     local rail_line=frame(shell,20,97,660,1,theme.line)
     local top_line=frame(shell,20,54,660,1,theme.line)
     local logo=label(shell,"VANTA",20,12,140,28,19,theme.text); logo.Font=Enum.Font.GothamBold; logo.TextXAlignment=Enum.TextXAlignment.Left
-    local build_label=label(shell,"BUILD 2026.11.06.12",242,17,150,18,10,theme.muted); build_label.Name="PivotBuild"; build_label.Font=Enum.Font.RobotoMono; build_label.TextWrapped=false
+    local build_label=label(shell,"BUILD 2026.11.07.01",242,17,150,18,10,theme.muted); build_label.Name="PivotBuild"; build_label.Font=Enum.Font.RobotoMono; build_label.TextWrapped=false
     local heading=label(shell,"Practical Basketball",94,14,240,26,11,theme.muted); heading.Font=Enum.Font.GothamMedium
     close.BackgroundColor3=theme.rail; close.TextColor3=theme.muted; close.TextSize=14; corner(close,4)
     local search=make("TextBox",{Text="",PlaceholderText="Find a control...",PlaceholderColor3=theme.muted,Position=UDim2.fromOffset(484,10),Size=UDim2.fromOffset(166,23),
