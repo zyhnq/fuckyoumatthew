@@ -773,7 +773,7 @@ local function create_pivot_modules(ctx)
         return best,distance
     end
     function Engine:select_defensive_rim()
-        local _,_,part=character(); self.defensive_rim=assert(nearest_rim(part.Position),"No map rim found")
+        local part=assert(root(),"Enter a court first"); self.defensive_rim=assert(nearest_rim(part.Position),"No map rim found")
         ctx.report("Selected nearest rim as defensive goal")
     end
     local function selected_target(s)
@@ -783,7 +783,7 @@ local function create_pivot_modules(ctx)
                 if who~=ctx.player then
                     local model=rig(who); local part=root(who)
                     local teammate=s.team_check and team and team~=0 and model and model:GetAttribute("Team")==team
-                    if model and part and not teammate and (not s.ball_handler_only or held_ball(model)) then
+                    if model and part and not teammate and (not s.ball_handler_only or held_ball(model) or model:GetAttribute("Basketball")==true) then
                         local d=(part.Position-mine.Position).Magnitude
                         if not distance or d<distance then best=model; best_part=part; distance=d end
                     end
@@ -805,31 +805,110 @@ local function create_pivot_modules(ctx)
     local function finish_pulse(scope,state)
         if state.pulse and os.clock()>=state.release_at then hold(scope,state.pulse,false); state.pulse=nil end
     end
-    add("guard","Guard selected player","Defense","WASD steering between your chosen target and chosen defensive rim",{start=function(scope,s)
-        character(); local model,part=selected_target(s); assert(Engine.defensive_rim and Engine.defensive_rim.Parent,"Select your defensive rim first")
-        scope:defer(function() release_owned(scope) end); return {model=model,part=part}
-    end,step=function(scope,state,s)
-        if s.guard_target=="" then
-            local ok,model,part=pcall(selected_target,s)
-            if not ok then release_owned(scope); return end
-            state.model=model; state.part=part
+    local function guard_holds(scope,state,guard,sprint)
+        local failure
+        for _,item in ipairs({{"guard",guard,"HoldG","G"},{"sprint",sprint,"Sprint","LeftShift"}}) do
+            if (state[item[1]]==true)~=item[2] then
+                local endpoint=state.actions and state.actions[item[3]]
+                local ok,err=pcall(function()
+                    if endpoint then
+                        if item[3]=="HoldG" then endpoint:Fire({HoldingG=item[2]}) else endpoint:Fire(item[2]) end
+                    else hold(scope,item[4],item[2]) end
+                end)
+                if ok then state[item[1]]=item[2] else failure=tostring(err) end
+            end
         end
-        local mine=assert(root(),"Local root unavailable"); assert(state.part.Parent and Engine.defensive_rim.Parent,"Target or rim removed")
-        local distance=(state.part.Position-mine.Position).Magnitude
-        local delta=Engine.defensive_rim.Position-state.part.Position; delta=Vector3.new(delta.X,0,delta.Z)
-        local desired=state.part.Position+(delta.Magnitude>.01 and delta.Unit*s.guard_distance or Vector3.zero)
-        local direction=desired-mine.Position; direction=Vector3.new(direction.X,0,direction.Z)
-        local camera=camera_service(); local forward=camera.CFrame.LookVector; forward=Vector3.new(forward.X,0,forward.Z)
-        local right=camera.CFrame.RightVector; right=Vector3.new(right.X,0,right.Z)
-        local team=rig():GetAttribute("Team")
-        local teammate=s.team_check and team and team~=0 and state.model:GetAttribute("Team")==team
-        local allowed=not teammate and (not s.ball_handler_only or held_ball(state.model)~=nil)
-        local enabled=allowed and distance<=s.guard_range and direction.Magnitude>1 and not input:GetFocusedTextBox() and not ctx.runner.current and forward.Magnitude>.01
-        local f=enabled and direction.Unit:Dot(forward.Unit) or 0; local r=enabled and direction.Unit:Dot(right.Unit) or 0
-        local threshold=.3/math.max(.5,s.guard_strength)
-        hold(scope,"W",f>threshold); hold(scope,"S",f< -threshold); hold(scope,"D",r>threshold); hold(scope,"A",r< -threshold)
-        hold(scope,"LeftShift",enabled and s.guard_sprint)
-    end,conflicts={"fly","spin"}})
+        if failure then error(failure) end
+    end
+    local function guard_release(scope,state)
+        local ok,err=pcall(guard_holds,scope,state,false,false); release_owned(scope)
+        state.steering=nil; state.keys=nil; state.arrived=nil; state.route=nil
+        if not ok then ctx.report("Guard release: "..tostring(err)) end
+    end
+    local function guard_candidate(model,part,own,mine,a,s,state)
+        if not model or not part or not part.Parent then return false end
+        local hum=model:FindFirstChildOfClass("Humanoid"); if hum and hum.Health<=0 then return false end
+        local team=a.Team or own:GetAttribute("Team")
+        if s.team_check and team and team~=0 and team~="" and model:GetAttribute("Team")==team then return false end
+        if s.ball_handler_only and not (held_ball(model) or model:GetAttribute("Basketball")==true) then return false end
+        local court=a.CourtNumber; local other=model:GetAttribute("CourtNumber")
+        if court~=nil and other~=nil and tostring(court)~=tostring(other) then return false end
+        if math.abs(part.Position.Y-mine.Position.Y)>16 or (part.Position-mine.Position).Magnitude>s.guard_range then return false end
+        return not state.bounds or Core.farm_relevant(part.Position,mine.Position,state.bounds,court,other,false)
+    end
+    add("guard","Guard selected player","Defense","Predicts cuts, holds guard and stays on the basket side with controlled movement",{start=function(scope,s)
+        assert(root(),"Enter a court before enabling Auto Guard"); local model,part=selected_target(s); assert(Engine.defensive_rim and Engine.defensive_rim.Parent,"Select your defensive rim first")
+        local state={model=model,part=part,history={},focused=true,next_target=0}
+        local _,actions=Engine:guard_context(state,root().Position); state.actions=actions
+        scope:defer(function() guard_release(scope,state) end)
+        local lost=input.WindowFocusReleased:Connect(function() state.focused=false; guard_release(scope,state) end)
+        scope:defer(function() lost:Disconnect() end)
+        if input.WindowFocused then local c=input.WindowFocused:Connect(function() state.focused=true end); scope:defer(function() c:Disconnect() end) end
+        return state
+    end,step=function(scope,state,s,dt)
+        local mine=root(); local own=rig(); local rim=Engine.defensive_rim
+        if not mine or not own or not rim or not rim.Parent then guard_release(scope,state); return end
+        if type(isrbxactive)=="function" then local ok,active=pcall(isrbxactive); if ok and type(active)=="boolean" then state.focused=active end end
+        local a,actions=Engine:guard_context(state,mine.Position)
+        if not state.actions and actions then
+            guard_release(scope,state); state.actions=actions
+        end
+        if not state.focused or input:GetFocusedTextBox() or ctx.runner.current or a.CanMove==false or a.OnCourt==false or a.Fouled==true then guard_release(scope,state); return end
+        if os.clock()>=state.next_target or not state.part or not state.part.Parent then
+            state.next_target=os.clock()+.15
+            local ok,model,part
+            if s.guard_target=="" then
+                local distance
+                for _,who in ipairs(players:GetPlayers()) do if who~=ctx.player then
+                    local model2,part2=rig(who),root(who)
+                    if guard_candidate(model2,part2,own,mine,a,s,state) then
+                        local d=(part2.Position-mine.Position).Magnitude
+                        if not distance or d<distance then model=model2; part=part2; distance=d end
+                    end
+                end end
+                ok=model~=nil
+            else ok,model,part=pcall(selected_target,s) end
+            if not ok then state.model=nil; state.part=nil; guard_release(scope,state); return end
+            if s.guard_target=="" and state.model and state.part and state.part.Parent then
+                local old=state.model
+                if guard_candidate(old,state.part,own,mine,a,s,state) and (state.part.Position-mine.Position).Magnitude<=(part.Position-mine.Position).Magnitude+3 then model=old; part=state.part end
+            end
+            if model~=state.model or part~=state.part then
+                guard_release(scope,state); state.history={}; state.model=model; state.part=part
+            end
+        end
+        if not state.model or not state.part or not state.part.Parent then guard_release(scope,state); return end
+        local target=state.model; local position=state.part.Position
+        if not guard_candidate(target,state.part,own,mine,a,s,state) then guard_release(scope,state); return end
+        local velocity=Core.farm_observe(state.history,"target",position,os.clock(),state.part.AssemblyLinearVelocity)
+        local mine_velocity=Core.farm_observe(state.history,"self",mine.Position,os.clock(),mine.AssemblyLinearVelocity)
+        local shooting=target:GetAttribute("InAir")==true and (target:GetAttribute("ShotStartTime")~=nil or target:GetAttribute("Action")=="Shooting")
+        local desired=Core.farm_guard_goal(position,rim.Position,velocity,shooting)
+        local radial=Vector3.new(rim.Position.X-position.X,0,rim.Position.Z-position.Z)
+        if radial.Magnitude>.01 then desired=desired+radial.Unit*(s.guard_distance-3.5) end
+        local waypoint,_,route=Core.farm_route(mine.Position,desired,{{key=target,position=position,velocity=velocity}},state.route,os.clock(),false,state.bounds)
+        state.route=route
+        local delta=Vector3.new(waypoint.X-mine.Position.X,0,waypoint.Z-mine.Position.Z)
+        local arrival=state.arrived and 1.7 or 1.05
+        state.arrived=delta.Magnitude<arrival
+        local camera=camera_service(); local forward=Vector3.new(camera.CFrame.LookVector.X,0,camera.CFrame.LookVector.Z)
+        local right=Vector3.new(camera.CFrame.RightVector.X,0,camera.CFrame.RightVector.Z)
+        if forward.Magnitude<.01 or right.Magnitude<.01 then guard_release(scope,state); return end
+        local direction=not state.arrived and delta.Magnitude>.01 and delta.Unit or Vector3.zero
+        direction=Core.farm_smooth(state.steering,direction,dt); state.steering=direction
+        local f=direction:Dot(forward.Unit); local r=direction:Dot(right.Unit)
+        local threshold=.3/math.max(.5,s.guard_strength); local keys={}
+        for _,entry in ipairs({{"W",f},{"S",-f},{"D",r},{"A",-r}}) do
+            if entry[2]>(state.keys and state.keys[entry[1]] and threshold*.75 or threshold) then keys[entry[1]]=true end
+        end
+        if state.bounds then keys=Core.farm_safe_keys(keys,mine.Position,forward.Unit,right.Unit,mine_velocity,state.bounds) end
+        state.keys=keys
+        for _,key in ipairs({"W","S","A","D"}) do hold(scope,key,keys[key]==true) end
+        local stamina=tonumber(a.Stamina or own:GetAttribute("Stamina"))
+        if stamina then if stamina<25 then state.fatigued=true elseif stamina>=40 then state.fatigued=false end end
+        local _,_,edge=Core.farm_clamp(mine.Position,state.bounds)
+        guard_holds(scope,state,true,s.guard_sprint and next(keys)~=nil and delta.Magnitude>7 and not state.fatigued and (not state.bounds or edge>5))
+    end,interval=1/60,conflicts={"fly","spin"}})
     add("block","Block selected shooter","Defense","Pulses your jump key after a new observed ShotStartTime and InAir state",{start=function(scope,s)
         character(); local model,part=selected_target(s); jump_key(s)
         assert(type(model:GetAttribute("ShotStartTime"))=="number","Target shot timestamp unavailable")
@@ -4080,7 +4159,7 @@ local function create_pivot_modules(ctx)
     local function farm_cap(v,limit) return v.Magnitude>limit and v.Unit*limit or v end
     function Core.farm_observe(history,key,position,now,reported)
         local old=history[key]; local velocity=Vector3.new(0,0,0)
-        if old and now-old.time>=.025 and now-old.time<=.5 then
+        if old and now-old.time>=.008 and now-old.time<=.5 then
             velocity=farm_flat(position-old.position)/(now-old.time)
             if velocity.Magnitude>65 then velocity=Vector3.new(0,0,0) end
         end
@@ -4387,6 +4466,13 @@ local function create_pivot_modules(ctx)
         end
         state.bounds=best; return best
     end
+    function Engine:guard_context(state,origin)
+        local ok,c=pcall(local_state)
+        local attrs=ok and c and c.data and c.data.Attributes or {}
+        farm_bounds(state,self.settings,origin,attrs.CourtNumber)
+        local good,_,keyboard=pcall(client_parts)
+        return attrs,good and keyboard and keyboard.Services and keyboard.Services.InputService or nil
+    end
     local function farm_boundary_report(state,origin)
         if os.clock()<(state.next_diagnostic or 0) then return end
         state.next_diagnostic=os.clock()+2
@@ -4469,7 +4555,7 @@ local function create_pivot_modules(ctx)
             farm_session=tostring(os.time())..":"..tostring(os.clock())
             farm_write(true)
             queue([[local ok,c=pcall(function() return game:GetService("HttpService"):JSONDecode(readfile("vanta_badge_farm.json")) end)
-if ok and c.enabled==true and c.session==]]..string.format("%q",farm_session)..[[ then loadstring(game:HttpGet("https://raw.githubusercontent.com/zyhnq/fuckyoumatthew/main/pivot_launcher.lua?v=20261107.09"))() end]])
+if ok and c.enabled==true and c.session==]]..string.format("%q",farm_session)..[[ then loadstring(game:HttpGet("https://raw.githubusercontent.com/zyhnq/fuckyoumatthew/main/pivot_launcher.lua?v=20261108.01"))() end]])
             Engine.farm_status="Starting"; return state
         end,
         step=function(scope,state,s,dt)
@@ -5267,7 +5353,7 @@ do
     local rail_line=frame(shell,20,97,660,1,theme.line)
     local top_line=frame(shell,20,54,660,1,theme.line)
     local logo=label(shell,"VANTA",20,12,140,28,19,theme.text); logo.Font=Enum.Font.GothamBold; logo.TextXAlignment=Enum.TextXAlignment.Left
-    local build_label=label(shell,"BUILD 2026.11.07.09",242,17,150,18,10,theme.muted); build_label.Name="PivotBuild"; build_label.Font=Enum.Font.RobotoMono; build_label.TextWrapped=false
+    local build_label=label(shell,"BUILD 2026.11.08.01",242,17,150,18,10,theme.muted); build_label.Name="PivotBuild"; build_label.Font=Enum.Font.RobotoMono; build_label.TextWrapped=false
     local heading=label(shell,"Practical Basketball",94,14,240,26,11,theme.muted); heading.Font=Enum.Font.GothamMedium
     close.BackgroundColor3=theme.rail; close.TextColor3=theme.muted; close.TextSize=14; corner(close,4)
     local search=make("TextBox",{Text="",PlaceholderText="Find a control...",PlaceholderColor3=theme.muted,Position=UDim2.fromOffset(484,10),Size=UDim2.fromOffset(166,23),
