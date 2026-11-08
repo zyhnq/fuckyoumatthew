@@ -526,22 +526,69 @@ local function create_pivot_modules(ctx)
     Engine.rig=rig
     local key_codes={LeftShift=0x10,Space=0x20}
     local held={}
-    local function emit(key,down)
-        if type(keypress)=="function" and type(keyrelease)=="function" then
+    local function emit(key,down,client_only)
+        if not client_only and type(keypress)=="function" and type(keyrelease)=="function" then
             local code=key_codes[key] or string.byte(key)
             if down then keypress(code) else keyrelease(code) end
         else game:GetService("VirtualInputManager"):SendKeyEvent(down,Enum.KeyCode[key],false,game) end
     end
     local function release_owned(owner)
-        for key,token in pairs(held) do if token==owner then local ok=pcall(emit,key,false); if ok then held[key]=nil end end end
+        for key,token in pairs(held) do if token==owner then local ok=pcall(emit,key,false,token.client_input); if ok then held[key]=nil end end end
     end
     local function hold(scope,key,down)
         if down then
             if held[key] and held[key]~=scope then return end
             if not held[key] and input:IsKeyDown(Enum.KeyCode[key]) then return end
-            if not held[key] then held[key]=scope; emit(key,true) end
-        elseif held[key]==scope then emit(key,false); held[key]=nil end
+            if not held[key] then held[key]=scope; emit(key,true,scope.client_input) end
+        elseif held[key]==scope then emit(key,false,scope.client_input); held[key]=nil end
     end
+    -- PlayerModule is the input source used by the captured PB Movement controller.
+    -- Supply its camera-relative move vector without sending keys to another app.
+    local move_bridge
+    local function automated_move(scope,keys)
+        if not move_bridge then
+            local ok,controls=pcall(function()
+                local scripts=ctx.player:FindFirstChild("PlayerScripts")
+                local module=scripts and scripts:FindFirstChild("PlayerModule")
+                return module and require(module):GetControls()
+            end)
+            if ok and controls and type(controls.GetMoveVector)=="function" then
+                local original=controls.GetMoveVector
+                local bridge={controls=controls,original=original}
+                bridge.wrapper=function(self,...)
+                    if bridge.owner then return input:GetFocusedTextBox() and Vector3.zero or bridge.vector or Vector3.zero end
+                    return original(self,...)
+                end
+                controls.GetMoveVector=bridge.wrapper; move_bridge=bridge
+            end
+        end
+        if move_bridge then
+            if not scope.movement_cleanup then
+                scope.movement_cleanup=true
+                scope:defer(function()
+                    if move_bridge and move_bridge.owner==scope then
+                        local bridge=move_bridge; bridge.owner=nil; bridge.vector=nil
+                        if bridge.controls.GetMoveVector==bridge.wrapper then bridge.controls.GetMoveVector=bridge.original end
+                        move_bridge=nil
+                    end
+                end)
+            end
+            release_owned(scope)
+            move_bridge.owner=scope
+            local v=Vector3.new((keys.D and 1 or 0)-(keys.A and 1 or 0),0,(keys.S and 1 or 0)-(keys.W and 1 or 0))
+            move_bridge.vector=v.Magnitude>1 and v.Unit or v
+            return true
+        end
+        -- No OS keypress fallback while tabbed out. VIM targets Roblox only.
+        scope.client_input=true
+        for _,key in ipairs({"W","S","A","D"}) do hold(scope,key,keys[key]==true) end
+        return false
+    end
+    local function stop_automated_move(scope)
+        if move_bridge and move_bridge.owner==scope then move_bridge.vector=Vector3.zero end
+        release_owned(scope)
+    end
+
     local function add(id,title,category,description,spec)
         spec.id=id; spec.title=title; spec.category=category; spec.description=description
         registry:register(id,spec); Engine.definitions[#Engine.definitions+1]=spec
@@ -865,13 +912,13 @@ local function create_pivot_modules(ctx)
         local offset=Vector3.new(origin.X-handler.X,0,origin.Z-handler.Z)
         local progress=offset:Dot(toward); local lateral=(offset-toward*progress).Magnitude
         local finishing=shooting and radial.Magnitude<14 and closing>3 and progress<3
-        local driving=not reversing and radial.Magnitude>2 and ((not shooting and closing>=7 and closing>=flat_velocity.Magnitude*.6) or finishing)
+        local driving=not reversing and radial.Magnitude>2 and ((not shooting and closing>=5.5 and closing>=flat_velocity.Magnitude*.42) or finishing)
         if driving then
-            local gap=math.min(shooting and 3.2 or 7,4+closing*.12,radial.Magnitude*.65,math.max(1,radial.Magnitude-1.3))
-            local lead=(flat_velocity-toward*closing)*.10
+            local gap=math.min(shooting and 3.2 or 9,4.5+closing*.16,radial.Magnitude*.7,math.max(1,radial.Magnitude-1.3))
+            local lead=(flat_velocity-toward*closing)*.18
             if lead.Magnitude>1.2 then lead=lead.Unit*1.2 end
             local intercept=Core.farm_clamp(handler+toward*gap+lead,bounds)
-            local recover=progress<(was_recovering and gap-.8 or gap-1.8) or lateral>4
+            local recover=progress<(was_recovering and gap-.65 or gap-1.6) or lateral>3.2
             return intercept,nil,recover and "Recovering rim run" or "Cutting off drive",{driving=true,recover=recover}
         end
         if close_front==false then return Core.guard_wide_waypoint(origin,handler,basket,velocity,spacing,shooting,reversing,route,now,bounds) end
@@ -923,7 +970,7 @@ local function create_pivot_modules(ctx)
         if failure then error(failure) end
     end
     local function guard_release(scope,state)
-        local ok,err=pcall(guard_holds,scope,state,false,false); release_owned(scope)
+        local ok,err=pcall(guard_holds,scope,state,false,false); stop_automated_move(scope)
         state.steering=nil; state.keys=nil; state.arrived=nil; state.route=nil; state.pulse=nil; state.pending_contest=nil; state.tracking=nil; state.front_phase="Paused"; state.drive_recover=nil
         if not ok then ctx.report("Guard release: "..tostring(err)) end
     end
@@ -944,7 +991,7 @@ local function create_pivot_modules(ctx)
         local state={model=ok and model or nil,part=ok and part or nil,history={},focused=true,next_target=0,last_contest=-10,shot_seen=ok and model:GetAttribute("ShotStartTime") or nil}
         local _,actions=Engine:guard_context(state,root().Position); state.actions=actions
         scope:defer(function() guard_release(scope,state) end)
-        local lost=input.WindowFocusReleased:Connect(function() state.focused=false; guard_release(scope,state) end)
+        local lost=input.WindowFocusReleased:Connect(function() state.focused=false; stop_automated_move(scope); guard_holds(scope,state,false,false) end)
         scope:defer(function() lost:Disconnect() end)
         if input.WindowFocused then local c=input.WindowFocused:Connect(function() state.focused=true end); scope:defer(function() c:Disconnect() end) end
         return state
@@ -956,7 +1003,7 @@ local function create_pivot_modules(ctx)
         if not state.actions and actions then
             guard_release(scope,state); state.actions=actions
         end
-        if not state.focused or input:GetFocusedTextBox() or ctx.runner.current or a.CanMove==false or a.OnCourt==false or a.Fouled==true or held_ball(own) or own:GetAttribute("Basketball")==true then guard_release(scope,state); return end
+        if input:GetFocusedTextBox() or ctx.runner.current or a.CanMove==false or a.OnCourt==false or a.Fouled==true or held_ball(own) or own:GetAttribute("Basketball")==true then guard_release(scope,state); return end
         finish_pulse(scope,state)
         if os.clock()>=state.next_target or state.part and not state.part.Parent then
             state.next_target=os.clock()+.15
@@ -1014,7 +1061,7 @@ local function create_pivot_modules(ctx)
         end
         if state.bounds then keys=Core.farm_safe_keys(keys,mine.Position,forward.Unit,right.Unit,mine_velocity,state.bounds) end
         state.keys=keys
-        for _,key in ipairs({"W","S","A","D"}) do hold(scope,key,keys[key]==true) end
+        automated_move(scope,keys)
         local stamina=tonumber(a.Stamina or own:GetAttribute("Stamina"))
         if stamina then if stamina<25 then state.fatigued=true elseif stamina>=40 then state.fatigued=false end end
         local _,_,edge=Core.farm_clamp(mine.Position,state.bounds)
@@ -4379,7 +4426,7 @@ local function create_pivot_modules(ctx)
         if failure then error("Guard/sprint input failed: "..failure) end
     end
     local function farm_release(scope,state)
-        release_owned(scope); farm_actions(state,false,false); state.steering=nil; state.steering_keys=nil; state.arrived=nil
+        stop_automated_move(scope); farm_actions(state,false,false); state.steering=nil; state.steering_keys=nil; state.arrived=nil
     end
     local function farm_flat(v) return Vector3.new(v.X,0,v.Z) end
     local function farm_cap(v,limit) return v.Magnitude>limit and v.Unit*limit or v end
@@ -4507,7 +4554,7 @@ local function create_pivot_modules(ctx)
         local prefix=plan=="Rim" and (hint=="Z" and "VZ" or "VC") or (hint=="Z" and "CX" or "ZX")
         entries[1]={code=prefix,name=plan=="Rim" and "Between the legs" or "Behind the back"}
         for _=1,2 do
-            local code,name=Core.farm_offense_move(state,hint,80,24,catalog)
+            local code,name=Core.farm_offense_move(state,_==1 and (hint=="Z" and "C" or "Z") or hint,80,24,catalog)
             entries[#entries+1]={code=code,name=name}
         end
         return {entries=entries,index=1,next_at=now,expires=now+6}
@@ -4525,7 +4572,7 @@ local function create_pivot_modules(ctx)
         state.last_dribble=now; self.farm_stats.dribbles=self.farm_stats.dribbles+1
         self.farm_last_move=move.name.." / chain "..combo.index.." of "..#combo.entries
         combo.index=combo.index+1; combo.next_at=now+(#move.code>=3 and .36 or .26)
-        if combo.index>#combo.entries then state.combo=nil; state.next_combo=now+1; self.farm_stats.chains=self.farm_stats.chains+1 end
+        if combo.index>#combo.entries then state.combo=nil; state.next_combo=now+.35; self.farm_stats.chains=self.farm_stats.chains+1 end
         return true
     end
     function Core.farm_shot_plan(state,varied,now)
@@ -4939,7 +4986,7 @@ end]])
             local b=state.bounds
             if b then for _,marker in ipairs(b.markers or {}) do if not marker.Parent or not marker:IsDescendantOf(workspace) then b=nil; break end end end
             local point=b and origin and b.frame:PointToObjectSpace(origin)
-            writefile("vanta_badge_farm_runtime.json",farm_http:JSONEncode({build="2026.11.08.10",status=Engine.farm_status,focused=state.focused,returnReason=state.return_reason,returnAttempts=state.return_attempts,postgame=state.result_seen==true,progressAge=state.health and os.clock()-(state.health.progress_at or state.health.entered),shotClock=state.shot_clock,role=state.role,basketSource=state.basket_source,shotClearance=state.shot_clearance and math.min(999,state.shot_clearance),stats=Engine.farm_stats,
+            writefile("vanta_badge_farm_runtime.json",farm_http:JSONEncode({build="2026.11.08.11",status=Engine.farm_status,focused=state.focused,returnReason=state.return_reason,returnAttempts=state.return_attempts,returnError=state.return_error,teleporting=state.teleporting,busy=state.busy,inputTransport=move_bridge and "PlayerModule" or "Roblox virtual input",postgame=state.result_seen==true,progressAge=state.health and os.clock()-(state.health.progress_at or state.health.entered),shotClock=state.shot_clock,role=state.role,basketSource=state.basket_source,shotClearance=state.shot_clearance and math.min(999,state.shot_clearance),stats=Engine.farm_stats,
                 position=origin and {origin.X,origin.Y,origin.Z} or false,bounds=b and point and {source=b.source,x=b.x,z=b.z,localPosition={point.X,point.Y,point.Z}} or false,
                 boundaryBrake=state.boundary_braking==true,guard=state.guard==true,sprint=state.sprinting==true,keys=state.steering_keys or {}}))
         end)
@@ -4971,7 +5018,7 @@ end]])
         if state.arrived or braking then
             local recovery,blocked=Core.farm_safe_keys({},mine.Position,f.Unit,r.Unit,velocity,state.bounds)
             release_owned(scope); state.steering=nil; state.steering_keys=recovery; state.boundary_braking=blocked
-            for _,key in ipairs({"W","S","D","A"}) do hold(scope,key,recovery[key]==true) end
+            automated_move(scope,recovery)
             farm_actions(state,guard==true,false); return
         end
         state.steering=Core.farm_smooth(state.steering,d.Unit,state.dt)
@@ -4982,9 +5029,10 @@ end]])
         end
         local keys,blocked=Core.farm_safe_keys(requested,mine.Position,f.Unit,r.Unit,velocity,state.bounds)
         state.steering_keys=keys; state.boundary_braking=blocked
-        for _,key in ipairs({"W","S","D","A"}) do hold(scope,key,keys[key]==true) end
+        automated_move(scope,keys)
         local _,_,edge=Core.farm_clamp(mine.Position,state.bounds)
-        farm_actions(state,guard==true,next(keys)~=nil and not blocked and not state.nav_recovering and d.Magnitude>(guard and 8 or 5) and edge>5)
+        local burst=state.role=="offense" and (state.attack_escape and os.clock()<(state.attack_escape_until or 0) or state.combo~=nil)
+        farm_actions(state,guard==true,next(keys)~=nil and not blocked and not state.nav_recovering and d.Magnitude>(burst and 2.2 or guard and 8 or 3.5) and edge>3)
     end
     function Core.farm_drive_lane(origin,basket,opponents,bounds)
         local toward=farm_flat(basket-origin); local distance=toward.Magnitude
@@ -5054,13 +5102,21 @@ end]])
             assert(type(queue)=="function","Badge loop requires queue_on_teleport to continue between places")
             local state={alive=true,busy=false,next_at=0,owned={},last_shot=-10,teleporting=false,queue_owned=false,focused=true,history={},last_jump=-10}
             local focus_lost=input.WindowFocusReleased:Connect(function()
-                state.focused=false; state.shot_ready_since=nil; farm_release(scope,state)
-                if state.adapter and Engine.auto_shoot_held then pcall(state.adapter.release); Engine.auto_shoot_held=false end
+                state.focused=false; stop_automated_move(scope); farm_actions(state,false,false)
             end)
             scope:defer(function() focus_lost:Disconnect() end)
             if input.WindowFocused then local link=input.WindowFocused:Connect(function() state.focused=true end); scope:defer(function() link:Disconnect() end) end
+            local travel=game:GetService("TeleportService")
+            if travel and travel.TeleportInitFailed then
+                local link=travel.TeleportInitFailed:Connect(function(who,result,message,place)
+                    if who==ctx.player and (place==nil or place==78438427735992) then
+                        state.teleporting=false; state.return_error=tostring(message or result); state.return_at=os.clock()+2
+                    end
+                end)
+                scope:defer(function() link:Disconnect() end)
+            end
             local teleport=ctx.player.OnTeleport
-            if teleport then local c=teleport:Connect(function(phase) if phase==Enum.TeleportState.Started or phase==Enum.TeleportState.InProgress then state.teleporting=true end; if phase==Enum.TeleportState.Failed then state.teleporting=false end end); scope:defer(function() c:Disconnect() end) end
+            if teleport then local c=teleport:Connect(function(phase) if phase==Enum.TeleportState.Started or phase==Enum.TeleportState.InProgress then state.teleporting=true; state.teleport_at=os.clock() end; if phase==Enum.TeleportState.Failed then state.teleporting=false; state.return_error="Teleport failed"; state.return_at=os.clock()+2 end end); scope:defer(function() c:Disconnect() end) end
             scope:defer(function()
                 state.alive=false; local released,err=pcall(farm_release,scope,state); if not released then ctx.report(tostring(err)) end
                 if state.adapter and Engine.auto_shoot_held then pcall(state.adapter.release); Engine.auto_shoot_held=false end
@@ -5076,11 +5132,18 @@ end]])
             farm_session=tostring(os.time())..":"..tostring(os.clock())
             farm_write(true)
             queue([[local ok,c=pcall(function() return game:GetService("HttpService"):JSONDecode(readfile("vanta_badge_farm.json")) end)
-if ok and c.enabled==true and c.session==]]..string.format("%q",farm_session)..[[ then loadstring(game:HttpGet("https://raw.githubusercontent.com/zyhnq/fuckyoumatthew/main/pivot_launcher.lua?v=20261108.10"))() end]])
+if ok and c.enabled==true and c.session==]]..string.format("%q",farm_session)..[[ then loadstring(game:HttpGet("https://raw.githubusercontent.com/zyhnq/fuckyoumatthew/main/pivot_launcher.lua?v=20261108.11"))() end]])
             Engine.farm_status="Starting"; return state
         end,
         step=function(scope,state,s,dt)
             state.dt=dt or .05
+            if state.busy and os.clock()-(state.request_at or os.clock())>15 then
+                state.busy=false; state.request_id=(state.request_id or 0)+1; state.next_at=0
+                state.return_error="Request timed out"; state.return_at=os.clock()+2
+            end
+            if state.teleporting and os.clock()-(state.teleport_at or os.clock())>25 then
+                state.teleporting=false; state.return_error="Teleport did not finish"; state.return_at=os.clock()+2
+            end
             if state.busy or state.teleporting or os.clock()<state.next_at then return end
             local function status(value) if Engine.farm_status~=value then Engine.farm_status=value; ctx.report("Badge farm / "..value) end end
             if type(isrbxactive)=="function" then local ok,active=pcall(isrbxactive); if ok and type(active)=="boolean" then state.focused=active end end
@@ -5095,9 +5158,11 @@ if ok and c.enabled==true and c.session==]]..string.format("%q",farm_session)..[
                 if mode=="Blacktop" then state.health={entered=os.clock()}; state.result_seen=nil; state.return_pending=nil; state.return_at=nil end
             end
             local function request(label,call,done)
-                state.busy=true; status(label)
+                state.busy=true; state.request_at=os.clock(); state.request_id=(state.request_id or 0)+1; local request_id=state.request_id; status(label)
                 task.spawn(function()
                     local accepted,a,b=pcall(call)
+                    if state.request_id~=request_id then return end
+                    if not accepted or a~=true then state.return_error=tostring(accepted and (b or "rejected") or a) end
                     state.busy=false; state.next_at=os.clock()+(accepted and a~=false and 1.5 or 8)
                     if not state.alive then
                         if done and accepted and a==true then done(true) end
@@ -5116,7 +5181,7 @@ if ok and c.enabled==true and c.session==]]..string.format("%q",farm_session)..[
             local ok,gui=pcall(farm_controllers)
             if not ok then
                 farm_release(scope,state)
-                if state.return_pending and os.clock()>=state.return_at then
+                if (state.return_pending or state.result_seen) and os.clock()>=state.return_at then
                     state.return_attempts=(state.return_attempts or 0)+1; state.return_at=os.clock()+math.min(60,state.return_attempts*10)
                     request("Recovering stalled court",function() game:GetService("TeleportService"):Teleport(78438427735992,ctx.player); return true end)
                 else status("Waiting for game controllers"); state.next_at=os.clock()+1 end
@@ -5179,7 +5244,7 @@ if ok and c.enabled==true and c.session==]]..string.format("%q",farm_session)..[
                 end
                 return
             end
-            if not state.focused then state.combo=nil; farm_release(scope,state); status("Paused while Roblox is unfocused"); return end
+
             if input:GetFocusedTextBox() or ctx.runner.current then state.combo=nil; farm_release(scope,state); status("Paused while typing or running a combo"); return end
             if not s.farm_auto_play then farm_release(scope,state); status("Match active / auto play off"); return end
             local success,c=pcall(local_state); local mine=root(); local model=rig()
@@ -5278,10 +5343,10 @@ if ok and c.enabled==true and c.session==]]..string.format("%q",farm_session)..[
                 end
                 if state.shot_clearance>=clock_policy.clearance then state.pressure_since=nil; state.attack_escape=nil
                 else state.pressure_since=state.pressure_since or os.clock() end
-                if clock_policy.dribble and not clock_policy.simple and not state.combo and not dribbling and state.pressure_since and os.clock()-state.pressure_since>2.5 and os.clock()>(state.next_separation or 0) then
+                if clock_policy.dribble and not clock_policy.simple and not state.combo and not dribbling and state.pressure_since and os.clock()-state.pressure_since>.45 and os.clock()>(state.next_separation or 0) then
                     local point,move=Core.farm_separation(mine.Position,basket.Position,opponents,state.bounds,active_range)
-                    state.attack_escape=point; state.escape_move=move; state.attack_escape_until=os.clock()+.7
-                    state.next_separation=os.clock()+3; state.offense_route=nil
+                    state.attack_escape=point; state.escape_move=move; state.attack_escape_until=os.clock()+1.1
+                    state.next_separation=os.clock()+1.45; state.offense_route=nil
                 end
                 local pocket_blocked=state.attack_pocket and Core.farm_clearance(mine.Position,state.attack_pocket,opponents)<3
                 if not state.attack_pocket or os.clock()>=(state.next_pocket or 0) or pocket_blocked then
@@ -5304,6 +5369,7 @@ if ok and c.enabled==true and c.session==]]..string.format("%q",farm_session)..[
                     end
                 else
                     state.shot_ready_since=nil
+                    farm_steer(scope,state,goal,false)
                     if clock_policy.dribble and s.farm_dribble and state.actions.Dribble then
                         local direction=farm_flat(goal-mine.Position)
                         if direction.Magnitude>.1 then
@@ -5311,8 +5377,10 @@ if ok and c.enabled==true and c.session==]]..string.format("%q",farm_session)..[
                             local chaining=s.farm_chains and not clock_policy.simple and (not state.stamina or state.stamina>=30)
                             if chaining then
                                 if not state.combo and not dribbling and a.Debounce~=true and threat<11 and os.clock()>=(state.next_combo or 0) then
-                                    state.combo=Core.farm_combo_sequence(state,hint,s.farm_dribble_all and Engine.dribble_moves or nil,attack_plan,os.clock())
+                                    local catalog=s.farm_dribble_all and Engine.dribble_moves or nil; if threat<6 then catalog=nil end
+                                    state.combo=Core.farm_combo_sequence(state,hint,catalog,attack_plan,os.clock())
                                 end
+                                if state.combo then local _,_,edge=Core.farm_clamp(mine.Position,state.bounds); farm_actions(state,false,edge>3 and not state.boundary_braking) end
                                 Engine:step_farm_combo(state,a,direction.Unit,os.clock())
                             else
                                 state.combo=nil
@@ -5325,9 +5393,9 @@ if ok and c.enabled==true and c.session==]]..string.format("%q",farm_session)..[
                             end
                         end
                     else state.combo=nil end
-                    if separating then farm_steer(scope,state,goal,false); status("Creating separation")
-                    elseif blocked then farm_steer(scope,state,goal,false); status("Driving around defender")
-                    else farm_steer(scope,state,goal,false); status("Moving into shot range") end
+                    if separating then status("Creating separation")
+                    elseif blocked then status("Driving around defender")
+                    else status("Moving into shot range") end
                 end
             else
                 if not teammate then state.offense_route=nil; state.attack_pocket=nil; state.attack_basket=nil end
@@ -5351,7 +5419,7 @@ if ok and c.enabled==true and c.session==]]..string.format("%q",farm_session)..[
                         state.defense_recover=tactics and tactics.recover or false
                         state.defense_route=route; farm_steer(scope,state,waypoint,not state.defense_recover)
                         if state.defense_recover and state.steering_keys and next(state.steering_keys) and not state.boundary_braking and not state.nav_recovering then
-                            local _,_,edge=Core.farm_clamp(mine.Position,state.bounds); farm_actions(state,false,edge>5)
+                            local _,_,edge=Core.farm_clamp(mine.Position,state.bounds); farm_actions(state,false,edge>3)
                         end
                         status(tactics and tactics.driving and phase or "Guarding between ball handler and basket")
                     else farm_release(scope,state); status("Waiting for defensive basket") end
@@ -6011,7 +6079,7 @@ do
     local rail_line=frame(shell,20,97,660,1,theme.line)
     local top_line=frame(shell,20,54,660,1,theme.line)
     local logo=label(shell,"VANTA",20,12,140,28,19,theme.text); logo.Font=Enum.Font.GothamBold; logo.TextXAlignment=Enum.TextXAlignment.Left
-    local build_label=label(shell,"BUILD 2026.11.08.10",242,17,150,18,10,theme.muted); build_label.Name="PivotBuild"; build_label.Font=Enum.Font.RobotoMono; build_label.TextWrapped=false
+    local build_label=label(shell,"BUILD 2026.11.08.11",242,17,150,18,10,theme.muted); build_label.Name="PivotBuild"; build_label.Font=Enum.Font.RobotoMono; build_label.TextWrapped=false
     local heading=label(shell,"Practical Basketball",94,14,240,26,11,theme.muted); heading.Font=Enum.Font.GothamMedium
     close.BackgroundColor3=theme.rail; close.TextColor3=theme.muted; close.TextSize=14; corner(close,4)
     local search=make("TextBox",{Text="",PlaceholderText="Find a control...",PlaceholderColor3=theme.muted,Position=UDim2.fromOffset(484,10),Size=UDim2.fromOffset(166,23),
