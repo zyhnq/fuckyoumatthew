@@ -806,6 +806,7 @@ local function create_pivot_modules(ctx)
         if state.pulse and os.clock()>=state.release_at then hold(scope,state.pulse,false); state.pulse=nil end
     end
     Engine.settings.guard_contest=true
+    Engine.settings.guard_close_front=true
     function Core.guard_choose(list,origin,previous,hold_previous)
         local best,distance,retained,has_handler
         for _,item in ipairs(list) do if item.has_ball then has_handler=true; break end end
@@ -839,7 +840,7 @@ local function create_pivot_modules(ctx)
         tracker.velocity=velocity
         return velocity,now<(tracker.reversed_until or 0)
     end
-    function Core.guard_waypoint(origin,handler,basket,velocity,spacing,shooting,reversing,route,now,bounds)
+    function Core.guard_wide_waypoint(origin,handler,basket,velocity,spacing,shooting,reversing,route,now,bounds)
         local flat=function(v) return Vector3.new(v.X,0,v.Z) end
         local radial=flat(basket-handler)
         if radial.Magnitude<.1 then return Core.farm_clamp(handler,bounds),nil end
@@ -855,13 +856,37 @@ local function create_pivot_modules(ctx)
         local waypoint,_,next_route=Core.farm_route(origin,desired,{{key="handler",position=handler,velocity=velocity}},route,now,false,bounds)
         return waypoint,next_route
     end
-    function Core.guard_motion(delta,velocity,arrived,target_speed)
+    function Core.guard_waypoint(origin,handler,basket,velocity,spacing,shooting,reversing,route,now,bounds,close_front)
+        if close_front==false then return Core.guard_wide_waypoint(origin,handler,basket,velocity,spacing,shooting,reversing,route,now,bounds) end
+        local radial=Vector3.new(basket.X-handler.X,0,basket.Z-handler.Z)
+        if radial.Magnitude<.1 then return Core.farm_clamp(handler,bounds),nil,"Holding front" end
+        local toward=radial.Unit; local gap=math.min(spacing,shooting and 2.2 or 2.6,radial.Magnitude*.5)
+        local front=Core.farm_clamp(handler+toward*gap,bounds)
+        local offset=Vector3.new(origin.X-handler.X,0,origin.Z-handler.Z)
+        if offset:Dot(toward)>.4 then return front,nil,"Holding front" end
+        local side=Vector3.new(-toward.Z,0,toward.X); local selected,cost,sign
+        for _,value in ipairs({-1,1}) do
+            local point,error=Core.farm_clamp(handler+toward*gap+side*(value*3.2),bounds)
+            local score=(point-origin).Magnitude+error*8-(route and route.side==value and .7 or 0)
+            if not cost or score<cost then selected=point; cost=score; sign=value end
+        end
+        return selected,{side=sign,point=selected,created=now},"Recovering front"
+    end
+    function Engine:guard_summary()
+        local entry=self.registry.active.guard
+        if not entry then return "Auto Guard off" end
+        local state=entry.state; local mine=root()
+        if not state.model or not state.part or not state.part.Parent or not mine then return "Waiting for an opponent" end
+        local distance=(state.part.Position-mine.Position).Magnitude
+        return state.model.Name.." / "..string.format("%.1f studs",distance).." / "..(state.front_phase or "Tracking")
+    end
+    function Core.guard_motion(delta,velocity,arrived,target_speed,tight)
         delta=Vector3.new(delta.X,0,delta.Z); velocity=Vector3.new(velocity.X,0,velocity.Z)
         local moving=(target_speed or 0)>4
-        local arrival=arrived and (moving and 1.1 or 1.7) or (moving and .65 or 1.05)
+        local arrival=tight and (arrived and (moving and .5 or .85) or (moving and .3 or .5)) or arrived and (moving and 1.1 or 1.7) or (moving and .65 or 1.05)
         local settled=delta.Magnitude<arrival and velocity.Magnitude<3.5
         if settled then return Vector3.zero,true,false end
-        local correction=velocity*.14
+        local correction=velocity*(tight and .08 or .14)
         if correction.Magnitude>2 then correction=correction.Unit*2 end
         local projected=delta-correction
         local braking=velocity.Magnitude>4 and (delta.Magnitude<1 or projected:Dot(delta)<0)
@@ -885,7 +910,7 @@ local function create_pivot_modules(ctx)
     end
     local function guard_release(scope,state)
         local ok,err=pcall(guard_holds,scope,state,false,false); release_owned(scope)
-        state.steering=nil; state.keys=nil; state.arrived=nil; state.route=nil; state.pulse=nil; state.pending_contest=nil; state.tracking=nil
+        state.steering=nil; state.keys=nil; state.arrived=nil; state.route=nil; state.pulse=nil; state.pending_contest=nil; state.tracking=nil; state.front_phase="Paused"
         if not ok then ctx.report("Guard release: "..tostring(err)) end
     end
     local function guard_candidate(model,part,own,mine,a,s,state)
@@ -956,15 +981,16 @@ local function create_pivot_modules(ctx)
             if state.actions and state.actions.Jump then state.actions.Jump:Fire() else pulse(scope,state,jump_key(s)) end
             state.last_contest=os.clock(); state.pending_contest=nil
         end
-        local waypoint,route=Core.guard_waypoint(mine.Position,position,rim.Position,velocity,s.guard_distance,shooting,reversing,state.route,os.clock(),state.bounds)
+        local waypoint,route,phase=Core.guard_waypoint(mine.Position,position,rim.Position,velocity,s.guard_distance,shooting,reversing,state.route,os.clock(),state.bounds,s.guard_close_front)
+        state.front_phase=phase
         state.route=route
         local delta=Vector3.new(waypoint.X-mine.Position.X,0,waypoint.Z-mine.Position.Z)
         local camera=camera_service(); local forward=Vector3.new(camera.CFrame.LookVector.X,0,camera.CFrame.LookVector.Z)
         local right=Vector3.new(camera.CFrame.RightVector.X,0,camera.CFrame.RightVector.Z)
         if forward.Magnitude<.01 or right.Magnitude<.01 then guard_release(scope,state); return end
-        local direction,arrived,braking=Core.guard_motion(delta,mine_velocity,state.arrived,velocity.Magnitude)
+        local direction,arrived,braking=Core.guard_motion(delta,mine_velocity,state.arrived,velocity.Magnitude,s.guard_close_front)
         state.arrived=arrived; state.braking=braking
-        direction=Core.farm_smooth(state.steering,direction,dt); state.steering=direction
+        if not s.guard_close_front then direction=Core.farm_smooth(state.steering,direction,dt) end; state.steering=direction
         local f=direction:Dot(forward.Unit); local r=direction:Dot(right.Unit)
         local threshold=.3/math.max(.5,s.guard_strength); local keys={}
         for _,entry in ipairs({{"W",f},{"S",-f},{"D",r},{"A",-r}}) do
@@ -4363,17 +4389,32 @@ local function create_pivot_modules(ctx)
         local blended=previous*(1-alpha)+direction*alpha
         return blended.Magnitude>.01 and blended.Unit or direction
     end
+    function Core.farm_separation(origin,basket,opponents,bounds,range)
+        local flat=function(v) return Vector3.new(v.X,0,v.Z) end
+        local toward=flat(basket-origin); if toward.Magnitude<.1 then return origin,"X" end
+        toward=toward.Unit; local side=Vector3.new(-toward.Z,0,toward.X)
+        local selected,score,move
+        for _,item in ipairs({{offset=-toward*5,move="X"},{offset=side*6-toward*2,move="Z"},{offset=-side*6-toward*2,move="C"}}) do
+            local point,error,edge=Core.farm_clamp(origin+item.offset,bounds)
+            if error<.5 and edge>.5 and flat(point-origin).Magnitude>2 then
+                local clearance=Core.farm_shot_clearance(point,opponents,.4)
+                local lane=Core.farm_clearance(origin,point,opponents)
+                local value=math.min(clearance,20)*2+math.min(lane,8)-math.max(0,(point-basket).Magnitude-range)*.7
+                if not score or value>score then selected=point; score=value; move=item.move end
+            end
+        end
+        return selected or origin,move or "X"
+    end
     function Core.farm_attack_target(origin,basket,opponents,bounds,range,previous)
         local radius=math.sqrt(math.max(16,range*range-(basket.Y-origin.Y)^2))*.92
         local function score(point)
-            local threat=math.huge
-            for _,other in ipairs(opponents) do threat=math.min(threat,farm_flat(other.position+farm_cap((other.velocity or Vector3.zero)*.2,3)-point).Magnitude) end
+            local threat=Core.farm_shot_clearance(point,opponents,.45)
             local path=Core.farm_clearance(origin,point,opponents)
             return farm_flat(point-origin).Magnitude*.65+math.max(0,10-threat)*7+math.max(0,3.5-path)*8-(threat>=10 and 25 or 0)
         end
         local chosen,best
         if (basket-origin).Magnitude<=range and Core.farm_shot_clearance(origin,opponents,.4)>=10 then return origin end
-        for _,distance in ipairs({radius,math.max(5,radius*.65)}) do for i=0,11 do
+        for _,distance in ipairs({radius,math.max(5,radius*.65),math.max(4,radius*.4)}) do for i=0,11 do
             local angle=i*math.pi/6; local point=Vector3.new(basket.X+math.cos(angle)*distance,origin.Y,basket.Z+math.sin(angle)*distance)
             local clipped,error,edge=Core.farm_clamp(point,bounds)
             if error<.25 and edge>1 and farm_flat(clipped-origin).Magnitude>2 then
@@ -4581,7 +4622,7 @@ local function create_pivot_modules(ctx)
         state.next_diagnostic=os.clock()+2
         pcall(function()
             local b=state.bounds; local point=b and b.frame:PointToObjectSpace(origin)
-            writefile("vanta_badge_farm_runtime.json",farm_http:JSONEncode({build="2026.11.07.09",status=Engine.farm_status,role=state.role,basketSource=state.basket_source,shotClearance=state.shot_clearance and math.min(999,state.shot_clearance),stats=Engine.farm_stats,
+            writefile("vanta_badge_farm_runtime.json",farm_http:JSONEncode({build="2026.11.08.05",status=Engine.farm_status,role=state.role,basketSource=state.basket_source,shotClearance=state.shot_clearance and math.min(999,state.shot_clearance),stats=Engine.farm_stats,
                 position={origin.X,origin.Y,origin.Z},bounds=b and {source=b.source,x=b.x,z=b.z,localPosition={point.X,point.Y,point.Z}} or false,
                 boundaryBrake=state.boundary_braking==true,guard=state.guard==true,sprint=state.sprinting==true,keys=state.steering_keys or {}}))
         end)
@@ -4606,7 +4647,7 @@ local function create_pivot_modules(ctx)
         local f=cam.CFrame.LookVector; f=Vector3.new(f.X,0,f.Z)
         local r=cam.CFrame.RightVector; r=Vector3.new(r.X,0,r.Z)
         if f.Magnitude<.01 or r.Magnitude<.01 then farm_release(scope,state); return end
-        local arrival=overflow>.05 and .08 or target_edge<1 and 3.2 or guard and 1.3 or 1.7
+        local arrival=overflow>.05 and .08 or target_edge<1 and 3.2 or guard and .65 or 1.7
         state.arrived=d.Magnitude<arrival or state.arrived and d.Magnitude<arrival+.7
         local velocity=state.velocity or Vector3.new(0,0,0)
         local braking=d.Magnitude>0 and d.Magnitude<5 and velocity:Dot(d.Unit)>d.Magnitude*5
@@ -4658,7 +4699,7 @@ local function create_pivot_modules(ctx)
             farm_session=tostring(os.time())..":"..tostring(os.clock())
             farm_write(true)
             queue([[local ok,c=pcall(function() return game:GetService("HttpService"):JSONDecode(readfile("vanta_badge_farm.json")) end)
-if ok and c.enabled==true and c.session==]]..string.format("%q",farm_session)..[[ then loadstring(game:HttpGet("https://raw.githubusercontent.com/zyhnq/fuckyoumatthew/main/pivot_launcher.lua?v=20261108.04"))() end]])
+if ok and c.enabled==true and c.session==]]..string.format("%q",farm_session)..[[ then loadstring(game:HttpGet("https://raw.githubusercontent.com/zyhnq/fuckyoumatthew/main/pivot_launcher.lua?v=20261108.05"))() end]])
             Engine.farm_status="Starting"; return state
         end,
         step=function(scope,state,s,dt)
@@ -4792,7 +4833,7 @@ if ok and c.enabled==true and c.session==]]..string.format("%q",farm_session)..[
             if state.role~=role or state.possession_owner~=owner then
                 state.role=role; state.offense_route=nil; state.defense_route=nil; state.attack_pocket=nil
                 state.shot_ready_since=nil; state.nav_time=nil; state.escape_until=nil; state.steering=nil
-                state.possession_owner=owner; state.defense_handler=nil; state.defense_tracking=nil
+                state.possession_owner=owner; state.defense_handler=nil; state.defense_tracking=nil; state.pressure_since=nil; state.attack_escape=nil
             end
             if possession then
                 state.defense_route=nil
@@ -4802,14 +4843,24 @@ if ok and c.enabled==true and c.session==]]..string.format("%q",farm_session)..[
                 local threat=math.huge
                 for _,other in ipairs(opponents) do local predicted=other.position+farm_cap(other.velocity*.18,3); threat=math.min(threat,farm_flat(predicted-mine.Position).Magnitude) end
                 state.shot_clearance=Core.farm_shot_clearance(mine.Position,opponents,.4)
+                if state.shot_clearance>=10 then state.pressure_since=nil; state.attack_escape=nil
+                else state.pressure_since=state.pressure_since or os.clock() end
+                if state.pressure_since and os.clock()-state.pressure_since>2.5 and os.clock()>(state.next_separation or 0) then
+                    local point,move=Core.farm_separation(mine.Position,basket.Position,opponents,state.bounds,s.farm_shot_range)
+                    state.attack_escape=point; state.escape_move=move; state.attack_escape_until=os.clock()+.7
+                    state.next_separation=os.clock()+3; state.offense_route=nil
+                end
                 state.attack_pocket=Core.farm_attack_target(mine.Position,basket.Position,opponents,state.bounds,s.farm_shot_range,state.attack_pocket)
-                local goal,blocked,route=Core.farm_route(mine.Position,state.attack_pocket,opponents,state.offense_route,os.clock(),true,state.bounds)
+                local separating=state.attack_escape and os.clock()<state.attack_escape_until
+                local destination=separating and state.attack_escape or state.attack_pocket
+                local goal,blocked,route=Core.farm_route(mine.Position,destination,opponents,state.offense_route,os.clock(),true,state.bounds)
+                if separating then goal=state.attack_escape; blocked=false; route=nil end
                 state.offense_route=route
                 if distance<=s.farm_shot_range and state.shot_clearance>=10 and not dribbling and a.Debounce~=true then
                     state.offense_route=nil
                     farm_release(scope,state); status("Setting up shot")
                     state.shot_ready_since=state.shot_ready_since or os.clock()
-                    local settled=os.clock()-state.shot_ready_since>=.2 and state.velocity.Magnitude<4
+                    local settled=os.clock()-state.shot_ready_since>=.12 and state.velocity.Magnitude<3
                     if settled and os.clock()-state.last_shot>=2 and not state.adapter.held() and a.ReleasedShot~=false then
                         state.shot_ready_since=nil; state.last_shot=os.clock(); Engine.auto_shoot_held=true; state.adapter.begin()
                         Engine.farm_stats.shots=Engine.farm_stats.shots+1
@@ -4819,12 +4870,13 @@ if ok and c.enabled==true and c.session==]]..string.format("%q",farm_session)..[
                     if s.farm_dribble and threat<8 and not dribbling and a.Debounce~=true and os.clock()-(state.last_dribble or -10)>2.1 and state.actions.Dribble then
                         local direction=farm_flat(goal-mine.Position)
                         if direction.Magnitude>.1 then
-                            local move=route and route.side and route.side<0 and "Z" or "X"
+                            local move=separating and state.escape_move or route and route.side and route.side<0 and "Z" or "X"
                             state.actions.Dribble:Fire(move,state.sprinting==true,direction.Unit)
                             state.last_dribble=os.clock(); Engine.farm_stats.dribbles=Engine.farm_stats.dribbles+1
                         end
                     end
-                    if blocked then farm_steer(scope,state,goal,false); status("Driving around defender")
+                    if separating then farm_steer(scope,state,goal,false); status("Creating separation")
+                    elseif blocked then farm_steer(scope,state,goal,false); status("Driving around defender")
                     else farm_steer(scope,state,goal,false); status("Moving into shot range") end
                 end
             else
@@ -4845,7 +4897,7 @@ if ok and c.enabled==true and c.session==]]..string.format("%q",farm_session)..[
                         if state.defense_handler~=handler.key then state.defense_handler=handler.key; state.defense_tracking={}; state.defense_route=nil end
                         local tracked,reversing=Core.guard_observe(state.defense_tracking,handler.position,handler.part.AssemblyLinearVelocity,os.clock())
                         if reversing then state.defense_route=nil; state.steering=nil end
-                        local waypoint,route=Core.guard_waypoint(mine.Position,handler.position,basket.Position,tracked,3.5,shooting,reversing,state.defense_route,os.clock(),state.bounds)
+                        local waypoint,route=Core.guard_waypoint(mine.Position,handler.position,basket.Position,tracked,2.5,shooting,reversing,state.defense_route,os.clock(),state.bounds)
                         state.defense_route=route; farm_steer(scope,state,waypoint,true); status("Guarding between ball handler and basket")
                     else farm_release(scope,state); status("Waiting for defensive basket") end
                 elseif teammate then
@@ -5461,7 +5513,7 @@ do
     local rail_line=frame(shell,20,97,660,1,theme.line)
     local top_line=frame(shell,20,54,660,1,theme.line)
     local logo=label(shell,"VANTA",20,12,140,28,19,theme.text); logo.Font=Enum.Font.GothamBold; logo.TextXAlignment=Enum.TextXAlignment.Left
-    local build_label=label(shell,"BUILD 2026.11.08.04",242,17,150,18,10,theme.muted); build_label.Name="PivotBuild"; build_label.Font=Enum.Font.RobotoMono; build_label.TextWrapped=false
+    local build_label=label(shell,"BUILD 2026.11.08.05",242,17,150,18,10,theme.muted); build_label.Name="PivotBuild"; build_label.Font=Enum.Font.RobotoMono; build_label.TextWrapped=false
     local heading=label(shell,"Practical Basketball",94,14,240,26,11,theme.muted); heading.Font=Enum.Font.GothamMedium
     close.BackgroundColor3=theme.rail; close.TextColor3=theme.muted; close.TextSize=14; corner(close,4)
     local search=make("TextBox",{Text="",PlaceholderText="Find a control...",PlaceholderColor3=theme.muted,Position=UDim2.fromOffset(484,10),Size=UDim2.fromOffset(166,23),
@@ -5859,7 +5911,7 @@ do
     local container=page
     local collapsed={}
     local expanded,choosing,section_button,record_tools,court_alignment
-    local dribble_editor_open=false; local character_open=false; local library_open=false; local module_selection_label; local shot_profile_label; local farm_status_label; local heatmap_status_label
+    local dribble_editor_open=false; local character_open=false; local library_open=false; local module_selection_label; local shot_profile_label; local farm_status_label; local heatmap_status_label; local guard_status_label
     local auxiliary={}; local capture_switch; local character_status; local library_status
     local function clear()
         for _,object in ipairs(rows) do object:Destroy() end; rows={}; fields={}; auxiliary={}; character_status=nil; library_status=nil; module_selection_label=nil; shot_profile_label=nil; farm_status_label=nil; heatmap_status_label=nil; visual_status_label=nil; y=46
@@ -5978,6 +6030,7 @@ do
     local buttons={}
     local function update_buttons()
         if farm_status_label and farm_status_label.Parent then farm_status_label.Text=engine:farm_summary() end
+        if guard_status_label and guard_status_label.Parent then guard_status_label.Text=engine:guard_summary() end
         if heatmap_status_label and heatmap_status_label.Parent then heatmap_status_label.Text=engine.heatmap_status end
         if shot_profile_label and shot_profile_label.Parent then local summary=engine:shot_profile_summary(); if shot_profile_label.Text~=summary then shot_profile_label.Text=summary end end
         if visual_status_label and visual_status_label.Parent then
@@ -6516,6 +6569,8 @@ do
                             action("Copy rendering report",function() export(engine:rendering_report()) end)
                         elseif id=="meter_style" then choice("meter_style","Meter style",{"Vertical","Rocket","Bat","Funnel","Hoop","Roblox","None"})
                         elseif id=="guard" then
+                            guard_status_label=text(engine:guard_summary(),12,theme.muted,44)
+                            toggle_action("Close front defense",function() return engine.settings.guard_close_front end,function(on) engine.settings.guard_close_front=on end)
                             toggle_action("Guard sprint",function() return engine.settings.guard_sprint end,function(on) engine.settings.guard_sprint=on end)
                             toggle_action("Auto contest shots",function() return engine.settings.guard_contest end,function(on) engine.settings.guard_contest=on end)
                             toggle_action("Ball handler only",function() return engine.settings.ball_handler_only end,function(on) engine.settings.ball_handler_only=on end)
