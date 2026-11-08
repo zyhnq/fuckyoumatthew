@@ -594,10 +594,22 @@ local function create_pivot_modules(ctx)
     end
     function Core.farm_hold_shooter(state,list,handler,now,possessing)
         if possessing then state.contest_shooter=nil; return handler end
+        if not handler and state.role=="defense" then
+            for _,other in ipairs(list) do
+                if other.key==state.possession_owner and Core.shot_action_active(other.model:GetAttribute("Action")) then
+                    local stamp=other.model:GetAttribute("ShotStartTime")
+                    local previous=state.contest_shooter
+                    if type(stamp)=="number" and (not previous or previous.key~=other.key or previous.shot~=stamp) then
+                        state.contest_shooter={key=other.key,shot=stamp,observed=now,expires=now+.75}
+                    end
+                    break
+                end
+            end
+        end
         if handler then
             if state.contest_shooter and state.contest_shooter.key~=handler.key then state.contest_shooter=nil end
             local model=handler.model; local stamp=model:GetAttribute("ShotStartTime")
-            if type(stamp)=="number" and Core.guard_shot_detect(model:GetAttribute("Action"),model:GetAttribute("InAir"),stamp) then
+            if type(stamp)=="number" and Core.shot_action_active(model:GetAttribute("Action")) then
                 local previous=state.contest_shooter
                 if not previous or previous.key~=handler.key or previous.shot~=stamp then
                     state.contest_shooter={key=handler.key,shot=stamp,observed=now,expires=now+.75}
@@ -4745,6 +4757,11 @@ local function create_pivot_modules(ctx)
         local approach=d.Magnitude>.01 and math.max(0,(velocity or Vector3.zero):Dot(d.Unit)) or 0
         return 6+math.min(3,approach*.12)
     end
+    function Core.farm_drive_has_time(seconds,distance,finish_distance)
+        if seconds==nil then return true end
+        local approach_time=math.max(0,distance-finish_distance)/15
+        return seconds>=approach_time+1.15
+    end
     function Core.farm_motion_pending(motion,attributes,now)
         return motion and now<motion.expires and attributes.CanMove~=false and attributes.InAir~=true and attributes.Action~="Gathering" and not Core.shot_action_active(attributes.Action)
     end
@@ -5253,7 +5270,7 @@ end]])
         local now=os.clock()
         if not force and now<(state.next_history_sample or 0) then return end
         state.next_history_sample=now+2
-        self.farm_decisions=self.farm_decisions or {version=1,build="2026.11.08.19",place=game.PlaceId,rows={}}
+        self.farm_decisions=self.farm_decisions or {version=1,build="2026.11.08.20",place=game.PlaceId,rows={}}
         local ok,c=pcall(local_state); local a=ok and c and c.data and c.data.Attributes or {}
         local court=state.clock_controller and state.clock_controller.CurrentCourt
         local s=self.farm_stats
@@ -5282,7 +5299,7 @@ end]])
             local b=state.bounds
             if b then for _,marker in ipairs(b.markers or {}) do if not marker.Parent or not marker:IsDescendantOf(workspace) then b=nil; break end end end
             local point=b and origin and b.frame:PointToObjectSpace(origin)
-            writefile("vanta_badge_farm_runtime.json",farm_http:JSONEncode({build="2026.11.08.19",status=Engine.farm_status,focused=state.focused,returnReason=state.return_reason,returnAttempts=state.return_attempts,returnError=state.return_error,teleporting=state.teleporting,busy=state.busy,attackDecision=state.attack_decision,retainedShooter=state.contest_shooter and state.contest_shooter.shot,gatherMotion=state.shot_motion and state.shot_motion.kind,stepbackStarted=state.stepback_started,ballCandidates=state.ball_candidates,visibleOpponents=state.visible_opponents,hasPossession=state.has_possession,boundaryReselections=state.boundary_reselections,idle=Engine.farm_idle,inputTransport=move_bridge and "PlayerModule" or "Roblox virtual input",postgame=state.result_seen==true,progressAge=state.health and os.clock()-(state.health.progress_at or state.health.entered),shotClock=state.shot_clock,role=state.role,basketSource=state.basket_source,shotClearance=state.shot_clearance and math.min(999,state.shot_clearance),stats=Engine.farm_stats,
+            writefile("vanta_badge_farm_runtime.json",farm_http:JSONEncode({build="2026.11.08.20",status=Engine.farm_status,focused=state.focused,returnReason=state.return_reason,returnAttempts=state.return_attempts,returnError=state.return_error,teleporting=state.teleporting,busy=state.busy,attackDecision=state.attack_decision,retainedShooter=state.contest_shooter and state.contest_shooter.shot,gatherMotion=state.shot_motion and state.shot_motion.kind,stepbackStarted=state.stepback_started,ballCandidates=state.ball_candidates,visibleOpponents=state.visible_opponents,hasPossession=state.has_possession,boundaryReselections=state.boundary_reselections,idle=Engine.farm_idle,inputTransport=move_bridge and "PlayerModule" or "Roblox virtual input",postgame=state.result_seen==true,progressAge=state.health and os.clock()-(state.health.progress_at or state.health.entered),shotClock=state.shot_clock,role=state.role,basketSource=state.basket_source,shotClearance=state.shot_clearance and math.min(999,state.shot_clearance),stats=Engine.farm_stats,
                 position=origin and {origin.X,origin.Y,origin.Z} or false,bounds=b and point and {source=b.source,x=b.x,z=b.z,localPosition={point.X,point.Y,point.Z}} or false,
                 boundaryBrake=state.boundary_braking==true,guard=state.guard==true,sprint=state.sprinting==true,keys=state.steering_keys or {}}))
         end)
@@ -5436,7 +5453,7 @@ end]])
             farm_session=tostring(os.time())..":"..tostring(os.clock())
             farm_write(true)
             queue([[local ok,c=pcall(function() return game:GetService("HttpService"):JSONDecode(readfile("vanta_badge_farm.json")) end)
-if ok and c.enabled==true and c.session==]]..string.format("%q",farm_session)..[[ then loadstring(game:HttpGet("https://raw.githubusercontent.com/zyhnq/fuckyoumatthew/main/pivot_launcher.lua?v=20261108.19"))() end]])
+if ok and c.enabled==true and c.session==]]..string.format("%q",farm_session)..[[ then loadstring(game:HttpGet("https://raw.githubusercontent.com/zyhnq/fuckyoumatthew/main/pivot_launcher.lua?v=20261108.20"))() end]])
             Engine.farm_status="Starting"; return state
         end,
         step=function(scope,state,s,dt)
@@ -5611,7 +5628,10 @@ if ok and c.enabled==true and c.session==]]..string.format("%q",farm_session)..[
             handler=Core.farm_hold_shooter(state,opponents,handler,os.clock(),possession or teammate~=nil)
             if handler then
                 local action=handler.model:GetAttribute("Action")
-                if action=="Shooting" or action=="Dunking" or handler.model:GetAttribute("InAir")==true and handler.model:GetAttribute("ShotStartTime")~=nil then state.opponent_shot_pending=true end
+                if not possession and handler.has_ball and state.role=="offense" then
+                    state.need_takeback=nil; state.clear_target=nil; state.clear_since=nil; state.opponent_shot_pending=nil
+                end
+                if Core.shot_action_active(action) then state.opponent_shot_pending=true end
             end
             if possession and state.role~="offense" and state.opponent_shot_pending then state.need_takeback=true; state.clear_target=nil end
             local role=possession and "offense" or handler and "defense" or teammate and "spacing" or "rebound"
@@ -5654,16 +5674,26 @@ if ok and c.enabled==true and c.session==]]..string.format("%q",farm_session)..[
                 end
                 state.attack_decision=opportunity and "Take open "..opportunity or "Create space / "..attack_plan
                 local defender_down=false; for _,opponent in ipairs(opponents) do if opponent.down then defender_down=true; break end end
-                if state.stepback_target and os.clock()>=(state.stepback_until or 0) then state.stepback_target=nil end
+                if not clock_policy.dribble then state.combo=nil end
+                if state.stepback_target then
+                    local late=state.shot_clock and state.shot_clock<=4.5
+                    local retreat_ready=late and Core.farm_stepback_ready(state,mine.Position,basket.Position,a,os.clock(),minimum)
+                    if os.clock()>=(state.stepback_until or 0) or late and not retreat_ready then
+                        state.stepback_target=nil
+                    end
+                end
                 local drive,drive_distance
-                if s.farm_open_drive and not opportunity and not state.stepback_target and not state.combo and not clock_policy.final and (not state.shot_clock or state.shot_clock>5) and (not defender_down or distance>s.farm_shot_range) then drive,drive_distance=Core.farm_drive_lane(mine.Position,basket.Position,opponents,state.bounds) end
-                if drive then
+                local finish_distance=Core.farm_finish_distance(mine.Position,basket.Position,state.velocity)
+                if s.farm_open_drive and not opportunity and not state.stepback_target and not clock_policy.final and (not defender_down or distance>s.farm_shot_range) then
+                    drive,drive_distance=Core.farm_drive_lane(mine.Position,basket.Position,opponents,state.bounds)
+                end
+                if drive and (not state.combo or drive_distance<=14) and Core.farm_drive_has_time(state.shot_clock,drive_distance,finish_distance) then
                     state.combo=nil; state.shot_ready_since=nil; state.offense_route=nil; state.attack_escape=nil
                     state.finish_approach=true; state.arrived=nil
                     farm_steer(scope,state,drive,false)
                     if state.steering_keys and next(state.steering_keys) and not state.boundary_braking then farm_actions(state,false,true) end
                     status("Driving open lane / layup")
-                    if drive_distance<=Core.farm_finish_distance(mine.Position,basket.Position,state.velocity) and not dribbling and a.Debounce~=true and a.ReleasedShot~=false and os.clock()-state.last_shot>=2 and not state.adapter.held() then
+                    if drive_distance<=finish_distance and not dribbling and a.Debounce~=true and a.ReleasedShot~=false and os.clock()-state.last_shot>=2 and not state.adapter.held() then
                         local dunk=s.farm_hop_gathers and (state.finish_cycle or 0)%2==1 and not state.fatigued
                         farm_actions(state,false,dunk)
                         state.last_shot=os.clock(); state.shot_motion={kind="Finish",goal=drive,sprint=dunk,expires=os.clock()+.28}
@@ -5710,7 +5740,7 @@ if ok and c.enabled==true and c.session==]]..string.format("%q",farm_session)..[
                 else
                     state.shot_ready_since=nil
                     farm_steer(scope,state,goal,false)
-                    if clock_policy.dribble and s.farm_dribble and state.actions.Dribble then
+                    if not opportunity and clock_policy.dribble and s.farm_dribble and state.actions.Dribble then
                         local direction=farm_flat(goal-mine.Position)
                         if direction.Magnitude>.1 then
                             local hint=separating and state.escape_move or route and (route.side<0 and "Z" or "C") or (state.dribble_index or 0)%2==0 and "Z" or "C"
@@ -5776,7 +5806,9 @@ if ok and c.enabled==true and c.session==]]..string.format("%q",farm_session)..[
                     local basket=farm_basket(state,a,handler.position,true)
                     if basket then
                         local shot=handler.model:GetAttribute("ShotStartTime")
-                        local shooting=Core.guard_shot_detect(handler.model:GetAttribute("Action"),handler.model:GetAttribute("InAir"),shot)
+                        local action=handler.model:GetAttribute("Action")
+                        local shooting=Core.shot_action_active(action)
+                        local closeout_action=shooting or action=="Gathering" or action=="ContactPlant"
                         if shooting and handler.model:GetAttribute("InAir")==true and a.InAir~=true and Core.farm_contest_ready(farm_flat(handler.position-mine.Position).Magnitude,state.contest_shooter and os.clock()-state.contest_shooter.observed or 0) and os.clock()-state.last_jump>1.1 and state.actions.Jump and (state.contested_handler~=handler.key or state.contested_shot~=shot) then
                             state.contested_handler=handler.key; state.contested_shot=shot; state.last_jump=os.clock()
                             state.actions.Jump:Fire()
@@ -5785,14 +5817,14 @@ if ok and c.enabled==true and c.session==]]..string.format("%q",farm_session)..[
                         if state.defense_handler~=handler.key then state.defense_handler=handler.key; state.defense_tracking={}; state.defense_route=nil end
                         local tracked,reversing=Core.guard_observe(state.defense_tracking,handler.position,handler.part.AssemblyLinearVelocity,os.clock())
                         if reversing then state.defense_route=nil; state.steering=nil end
-                        local waypoint,route,phase,tactics=Core.guard_waypoint(mine.Position,handler.position,basket.Position,tracked,4,shooting,reversing,state.defense_route,os.clock(),state.bounds,true,state.defense_recover)
+                        local waypoint,route,phase,tactics=Core.guard_waypoint(mine.Position,handler.position,basket.Position,tracked,4,closeout_action,reversing,state.defense_route,os.clock(),state.bounds,true,state.defense_recover)
                         state.defense_recover=tactics and tactics.recover or false
-                        local closeout=shooting and farm_flat(handler.position-mine.Position).Magnitude>4.5
+                        local closeout=closeout_action and farm_flat(handler.position-mine.Position).Magnitude>4.5
                         state.defense_route=route; farm_steer(scope,state,waypoint,not (state.defense_recover or closeout))
                         if (state.defense_recover or closeout) and state.steering_keys and next(state.steering_keys) and not state.boundary_braking and not state.nav_recovering then
                             local _,_,edge=Core.farm_clamp(mine.Position,state.bounds); farm_actions(state,false,edge>3)
                         end
-                        status(shooting and "Closing out shooter" or tactics and tactics.driving and phase or "Guarding between ball handler and basket")
+                        status(closeout_action and "Closing out shooter" or tactics and tactics.driving and phase or "Guarding between ball handler and basket")
                     else farm_release(scope,state); status("Waiting for defensive basket") end
                 elseif teammate then
                     local basket=farm_basket(state,a,mine.Position,false)
@@ -6450,7 +6482,7 @@ do
     local rail_line=frame(shell,20,97,660,1,theme.line)
     local top_line=frame(shell,20,54,660,1,theme.line)
     local logo=label(shell,"VANTA",20,12,140,28,19,theme.text); logo.Font=Enum.Font.GothamBold; logo.TextXAlignment=Enum.TextXAlignment.Left
-    local build_label=label(shell,"BUILD 2026.11.08.19",242,17,150,18,10,theme.muted); build_label.Name="PivotBuild"; build_label.Font=Enum.Font.RobotoMono; build_label.TextWrapped=false
+    local build_label=label(shell,"BUILD 2026.11.08.20",242,17,150,18,10,theme.muted); build_label.Name="PivotBuild"; build_label.Font=Enum.Font.RobotoMono; build_label.TextWrapped=false
     local heading=label(shell,"Practical Basketball",94,14,240,26,11,theme.muted); heading.Font=Enum.Font.GothamMedium
     close.BackgroundColor3=theme.rail; close.TextColor3=theme.muted; close.TextSize=14; corner(close,4)
     local search=make("TextBox",{Text="",PlaceholderText="Find a control...",PlaceholderColor3=theme.muted,Position=UDim2.fromOffset(484,10),Size=UDim2.fromOffset(166,23),
