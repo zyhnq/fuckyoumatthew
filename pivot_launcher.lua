@@ -1,4 +1,4 @@
--- Vanta Launcher 1.7 | choose a game; only its matching module is downloaded.
+-- Vanta Launcher 1.8 | automatically loads the current supported game.
 local Players=game:GetService("Players")
 local Input=game:GetService("UserInputService")
 local player=assert(Players.LocalPlayer,"Run Vanta Launcher on the client")
@@ -15,8 +15,21 @@ local games={
     {id="aotr",name="Attack on Titan Revolution",module="Vanta AOTR",file="vanta_aotr.lua",universe=4658598196,place=13379208636,description="Mission farm, blade reload, titan outlines & retry",color=Color3.fromRGB(182,66,235)}
 }
 local function matches(entry) return game.GameId==entry.universe or game.PlaceId==entry.place end
-local detected="Unsupported game"
-for _,entry in ipairs(games) do if matches(entry) then detected=entry.name end end
+local detected="Unsupported game"; local selected
+for _,entry in ipairs(games) do if matches(entry) then detected=entry.name; selected=entry; break end end
+local function download(entry)
+    local source=game:HttpGet(base..entry.file.."?v=20261107.02")
+    assert(type(source)=="string" and #source>100,"Empty script response")
+    local run,err=loadstring(source,"@Vanta/"..entry.file)
+    assert(run,err)
+    return run
+end
+local auto_error
+if selected then
+    local ok,result=pcall(function() return download(selected)() end)
+    if ok then return result end
+    auto_error=tostring(result); warn("Vanta auto-load: "..auto_error)
+end
 local links={}; local alive=true; local loading=false
 local function connect(event,fn) local link=event:Connect(fn); links[#links+1]=link; return link end
 local function make(class,props,p) local obj=Instance.new(class); for key,value in pairs(props) do obj[key]=value end; obj.Parent=p; return obj end
@@ -31,9 +44,9 @@ end
 label(panel,"Title","VANTA",22,17,-80,34,29).Font=Enum.Font.SourceSansBold
 label(panel,"Subtitle","Choose your game",23,54,-46,22,16,Color3.fromRGB(152,165,186))
 label(panel,"Detected","Detected: "..detected,23,84,-46,22,13,Color3.fromRGB(159,189,244))
-local status=label(panel,"Status","Select a game to load its script.",23,435,-46,30,13,Color3.fromRGB(152,165,186))
+local status=label(panel,"Status",auto_error and "Auto-load failed — click your game to retry." or "Join a supported game, then run Vanta again.",23,435,-46,30,13,Color3.fromRGB(152,165,186))
 local close=make("TextButton",{Name="Close",Text="×",Position=UDim2.new(1,-50,0,20),Size=UDim2.fromOffset(28,28),BackgroundColor3=Color3.fromRGB(27,32,43),TextColor3=Color3.fromRGB(184,197,218),Font=Enum.Font.SourceSans,TextSize=23,BorderSizePixel=0},panel); round(close,6)
-local control={Version="1.7"}
+local control={Version="1.8"}
 function control:Unload()
     if not alive then return end
     alive=false
@@ -47,10 +60,7 @@ local function load_game(entry)
     task.spawn(function()
         -- Fetch/compile first; network or syntax failures keep the chooser open.
         local ok,result=pcall(function()
-            local source=game:HttpGet(base..entry.file.."?v=20261107.01")
-            assert(type(source)=="string" and #source>100,"Empty script response")
-            local run,err=loadstring(source,"@Vanta/"..entry.file)
-            assert(run,err)
+            local run=download(entry)
             if not alive then return nil end
             return run()
         end)

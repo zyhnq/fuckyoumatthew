@@ -13,6 +13,35 @@ function Core.visible(object)
     end
     return true
 end
+-- Reuses the arguments of a genuine Nape registration. Never constructs damage.
+function Core.nape_fanout(ctx)
+    local self={seen=0,forwarded=0,lastError=nil}; local last={}
+    function self:plan(remote,method,args)
+        if method~="InvokeServer" or args[1]~="Hitboxes" or args[2]~="Register" or not ctx.accept(remote) then return nil end
+        local container=ctx.titans(); if not container then return nil end
+        local nodes={}; local original=false
+        for _,model in ipairs(container:GetChildren()) do
+            local h=model:IsA("Model") and model:FindFirstChildOfClass("Humanoid")
+            local node=Core.path(model,{"Hitboxes","Hit","Nape"})
+            if h and h.Health>0 and node and node:IsA("BasePart") then
+                if node==args[3] then original=true end
+                if #nodes<128 then nodes[#nodes+1]=node end
+            end
+        end
+        if not original then return nil end
+        self.lastError=nil
+        self.seen=self.seen+1
+        local now=ctx.now(); local targets={}
+        for node,t in pairs(last) do if not node.Parent or now-t>2 then last[node]=nil end end
+        for _,node in ipairs(nodes) do
+            if node~=args[3] and (not last[node] or now-last[node]>=.2) then targets[#targets+1]=node end
+        end
+        last[args[3]]=now
+        for _,node in ipairs(targets) do last[node]=now end
+        return targets
+    end
+    return self
+end
 function Core.target(titans,origin,current,options)
     if not titans then return nil end
     local best,distance=nil,math.huge
@@ -38,7 +67,7 @@ function Core.target(titans,origin,current,options)
     return best
 end
 function Core.engine(ctx)
-    local self={config={farm=false,attack=true,aim=true,reload=true,retry=false,noclip=true,esp=false,bossWeakpoint=true,
+    local self={config={farm=false,attack=true,multiHit=false,aim=true,reload=true,retry=false,noclip=true,esp=false,bossWeakpoint=true,
         speed=110,range=6000,distance=7,height=1,attackInterval=.55,reloadKey="R"},
         alive=true,phase="Idle",message="Join a mission, then enable Auto farm",target=nil,swings=0,eliminations=0,reloads=0,retries=0,lastError=nil}
     local ranges={speed={30,220},range={100,12000},distance={3,16},height={-5,12},attackInterval={.25,2}}
@@ -56,7 +85,7 @@ function Core.engine(ctx)
         if key=="noclip" and not value and ctx.restore_collision then ctx.restore_collision() end
     end
     function self:stop()
-        self.config.farm=false; self.config.retry=false; self.config.esp=false; self.target=nil; release(); status("Stopped","Stopped · all farm input and movement released")
+        self.config.farm=false; self.config.multiHit=false; self.config.retry=false; self.config.esp=false; self.target=nil; release(); status("Stopped","Stopped · all farm input and movement released")
     end
     function self:close() if not self.alive then return end; self:stop(); self.alive=false end
     function self:step(dt)
@@ -111,8 +140,9 @@ function Core.engine(ctx)
 end
 if VANTA_AOTR_TEST then return Core end
 
--- Vanta AOTR 1.1 | mission startup and automatic diagnostic reporting.
+-- Vanta AOTR 1.2 | direct mouse input and genuine Nape hit fan-out.
 local Players=game:GetService("Players")
+local unpack=table.unpack or unpack
 local Run=game:GetService("RunService")
 local Input=game:GetService("UserInputService")
 local player=assert(Players.LocalPlayer,"Run Vanta on the client")
@@ -127,9 +157,10 @@ local function round(obj,size) make("UICorner",{CornerRadius=UDim.new(0,size)},o
 local theme={base=Color3.fromRGB(9,8,12),rail=Color3.fromRGB(13,10,18),panel=Color3.fromRGB(16,13,22),input=Color3.fromRGB(19,15,26),
     line=Color3.fromRGB(37,29,46),text=Color3.fromRGB(240,236,246),muted=Color3.fromRGB(153,143,169),accent=Color3.fromRGB(182,66,235),selected=Color3.fromRGB(39,20,53)}
 local virtual; pcall(function() virtual=game:GetService("VirtualInputManager") end)
-local mouse_down=false; local held_key; local input_release_at; local mouse_x,mouse_y=0,0
+local mouse_down=false; local held_key; local input_release_at; local mouse_x,mouse_y=0,0; local direct_mouse=false
+local function input_backend() return type(mouse1press)=="function" and type(mouse1release)=="function" and "Executor mouse" or virtual and "Virtual input" or "Unavailable" end
 local function release_input()
-    if mouse_down then pcall(function() virtual:SendMouseButtonEvent(mouse_x,mouse_y,0,false,game,0) end); mouse_down=false end
+    if mouse_down then pcall(function() if direct_mouse then mouse1release() else virtual:SendMouseButtonEvent(mouse_x,mouse_y,0,false,game,0) end end); mouse_down=false; direct_mouse=false end
     if held_key then local key=held_key; pcall(function() virtual:SendKeyEvent(false,key,false,game) end); held_key=nil end
     input_release_at=nil
 end
@@ -214,12 +245,54 @@ local engine=Core.engine({now=os.clock,character=character,titans=function() ret
     move=move,halt=halt,restore_collision=restore_collision,release=release_input,key=key_press,broken_blade=broken_blade,retry_button=retry_button,
     click_button=function(b) click_at(b.AbsolutePosition.X+b.AbsoluteSize.X/2,b.AbsolutePosition.Y+b.AbsoluteSize.Y/2) end,
     attack=function()
-        local camera=workspace.CurrentCamera; assert(camera and virtual,"Mouse input simulation unavailable")
+        local camera=workspace.CurrentCamera; assert(camera and input_backend()~="Unavailable","Mouse input simulation unavailable")
         if mouse_down then return end
         mouse_x=camera.ViewportSize.X/2; mouse_y=camera.ViewportSize.Y/2; mouse_down=true
-        virtual:SendMouseButtonEvent(mouse_x,mouse_y,0,true,game,0); input_release_at=os.clock()+.12
+        direct_mouse=input_backend()=="Executor mouse"
+        if direct_mouse then assert(mouse1press()~=false,"Executor mouse press failed")
+        else virtual:SendMouseButtonEvent(mouse_x,mouse_y,0,true,game,0) end
+        input_release_at=os.clock()+.18
     end,
     error=function(err) warn("Vanta AOTR: "..tostring(err)) end})
+local Storage=game:GetService("ReplicatedStorage")
+local fanout=Core.nape_fanout({now=os.clock,titans=function() return workspace:FindFirstChild("Titans") end,
+    accept=function(remote) return remote==Core.path(Storage,{"Assets","Remotes","GET"}) end})
+local hit_hook,previous_namecall; local forwarding=setmetatable({},{__mode="k"}); local hit_hook_installed=false
+local function install_hit_hook()
+    if hit_hook_installed then return end
+    assert(type(hookmetamethod)=="function" and type(getnamecallmethod)=="function","Attack all Titans requires hookmetamethod and getnamecallmethod")
+    local function intercept(remote,...)
+        local method=getnamecallmethod(); local thread=coroutine.running(); local args={...}; local size=select("#",...); local targets
+        if alive and engine.config.multiHit and not forwarding[thread] and not pause_reason() then
+            local ok,value=pcall(function() return fanout:plan(remote,method,args) end)
+            if ok then targets=value else fanout.lastError=tostring(value) end
+        end
+        local function pack(...) return {n=select("#",...),...} end
+        local original=pack(previous_namecall(remote,...))
+        if targets and #targets>0 then task.spawn(function()
+            local worker=coroutine.running(); forwarding[worker]=true
+            for _,node in ipairs(targets) do
+                if not alive or not engine.config.multiHit or pause_reason() then break end
+                local titan=node.Parent and node.Parent.Parent and node.Parent.Parent.Parent
+                local hum=titan and titan:FindFirstChildOfClass("Humanoid")
+                if hum and hum.Health>0 then
+                    local copy={}; for i=1,size do copy[i]=args[i] end; copy[3]=node
+                    local ok,err=pcall(function() return remote:InvokeServer(unpack(copy,1,size)) end)
+                    if ok then fanout.forwarded=fanout.forwarded+1 else fanout.lastError=tostring(err); break end
+                end
+            end
+            forwarding[worker]=nil
+        end) end
+        return unpack(original,1,original.n)
+    end
+    hit_hook=type(newcclosure)=="function" and newcclosure(intercept) or intercept
+    previous_namecall=hookmetamethod(game,"__namecall",hit_hook)
+    hit_hook_installed=true
+end
+local function set_config(key,value)
+    if key=="multiHit" and value==true then install_hit_hook() end
+    engine:set(key,value)
+end
 local gui=make("ScreenGui",{Name="VantaAOTR",ResetOnSpawn=false,IgnoreGuiInset=true,DisplayOrder=120,ZIndexBehavior=Enum.ZIndexBehavior.Sibling},parent)
 local canvas=make("Frame",{Name="Canvas",Size=UDim2.fromScale(1,1),BackgroundTransparency=1,BorderSizePixel=0},gui)
 local window=make("Frame",{Name="Window",AnchorPoint=Vector2.new(.5,.5),Position=UDim2.fromScale(.5,.5),Size=UDim2.fromOffset(980,680),BackgroundColor3=theme.base,BorderSizePixel=0,ZIndex=20},canvas); round(window,7)
@@ -248,7 +321,7 @@ local group_title=label(group,"Farm  −",14,0,500,44,18); group_title.Font=Enum
 make("Frame",{Position=UDim2.fromOffset(14,44),Size=UDim2.new(1,-28,0,1),BackgroundColor3=theme.line,BorderSizePixel=0,ZIndex=24},group)
 local footer=make("Frame",{BackgroundColor3=theme.line,BorderSizePixel=0,ZIndex=21},window)
 local status=label(window,"Ready",202,630,440,32,12,theme.muted); status.Name="Status"
-local build=label(window,"BUILD 2026.11.06.18",0,0,140,18,10,theme.muted); build.Font=Enum.Font.RobotoMono
+local build=label(window,"BUILD 2026.11.07.02",0,0,140,18,10,theme.muted); build.Font=Enum.Font.RobotoMono
 local live=label(canvas,"",136,10,700,32,13); live.Name="LiveStatus"
 local open=button(canvas,"Vanta AOTR",function() menu_open=not menu_open; window.Visible=menu_open end); open.Position=UDim2.fromOffset(20,10); open.Size=UDim2.fromOffset(104,32)
 local rows,nav,refreshers={},{},{}; local section="Farm"
@@ -264,7 +337,7 @@ local function layout_rows()
 end
 local function refresh() for _,fn in ipairs(refreshers) do fn() end end
 local function apply(key,value)
-    local ok,err=pcall(function() engine:set(key,value) end)
+    local ok,err=pcall(function() set_config(key,value) end)
     if ok and key=="farm" and value==true then menu_open=false; window.Visible=false end
     if not ok then engine.message=tostring(err) end; refresh()
 end
@@ -304,6 +377,7 @@ field("Farm","Search range / studs","range",100,12000)
 field("Farm","Nape approach distance","distance",3,16)
 field("Farm","Nape height offset","height",-5,12)
 toggle("Combat","Auto attack","attack","Uses the game's normal mouse attack input")
+toggle("Combat","Attack all Titans / Nape","multiHit","Reuses a real Nape hit for living Titans; requires a supported hit packet")
 toggle("Combat","Aim camera at weakpoint","aim")
 toggle("Combat","Reload broken blades","reload","Reloads when a blade reports its Broken attribute")
 field("Combat","Attack interval / seconds","attackInterval",.25,2,.05)
@@ -325,10 +399,10 @@ local function runtime_report()
             bodies[#bodies+1]=body
         end
     end end
-    return {version="1.1",placeId=game.PlaceId,gameId=game.GameId,time=os.clock(),phase=engine.phase,message=engine.message,error=engine.lastError,
+    return {version="1.2",placeId=game.PlaceId,gameId=game.GameId,time=os.clock(),phase=engine.phase,message=engine.message,error=engine.lastError,
         gear=gear,root=root~=nil,health=hum and hum.Health,anchored=root and root.Anchored,position=root and tostring(root.Position),velocity=root and tostring(root.AssemblyLinearVelocity),
         pauseReason=pause_reason(),movement=bodies,target=engine.target and engine.target.model.Name,targetDistance=engine.target and root and (engine.target.part.Position-root.Position).Magnitude,
-        attackInputs=engine.swings,titans=titan_container and #titan_container:GetChildren() or 0,bladeParts=#blades,input=virtual~=nil,config=engine.config}
+        attackInputs=engine.swings,titans=titan_container and #titan_container:GetChildren() or 0,bladeParts=#blades,input=input_backend()~="Unavailable",inputBackend=input_backend(),napeHits=fanout.seen,extraHitRequests=fanout.forwarded,hitError=fanout.lastError,config=engine.config}
 end
 local diagnostic=row("Settings","Mission diagnostics",60)
 local inspect=button(diagnostic,"Save",function()
@@ -338,16 +412,19 @@ local inspect=button(diagnostic,"Save",function()
     end)
     engine.message=ok and "Saved vanta_aotr_runtime.json" or tostring(err)
 end); inspect.Size=UDim2.fromOffset(86,26); inspect.Position=UDim2.new(1,-102,0,10)
-local control={Version="1.1",Engine=engine}
+local control={Version="1.2",Engine=engine}
 local highlights={}
 function control:Unload()
     if not alive then return end; alive=false; engine:close(); release_input(); halt()
+    if hit_hook_installed and type(getrawmetatable)=="function" then
+        pcall(function() if getrawmetatable(game).__namecall==hit_hook then hookmetamethod(game,"__namecall",previous_namecall) end end)
+    end
     Run:UnbindFromRenderStep("VantaAOTR.Camera")
     for _,link in ipairs(connections) do link:Disconnect() end; connections={}
     for _,h in pairs(highlights) do h:Destroy() end; highlights={}; gui:Destroy()
 end
-function control:Set(key,value) engine:set(key,value); refresh() end
-function control:GetStatus() return {version=self.Version,alive=alive,phase=engine.phase,message=engine.message,target=engine.target and engine.target.model.Name,swings=engine.swings,observedDefeats=engine.eliminations,error=engine.lastError} end
+function control:Set(key,value) set_config(key,value); refresh() end
+function control:GetStatus() return {version=self.Version,alive=alive,phase=engine.phase,message=engine.message,target=engine.target and engine.target.model.Name,swings=engine.swings,observedDefeats=engine.eliminations,error=engine.lastError,inputBackend=input_backend(),napeHits=fanout.seen,extraHitRequests=fanout.forwarded,hitError=fanout.lastError} end
 local close=button(window,"X",function() control:Unload() end); close.Size=UDim2.fromOffset(24,26); close.Position=UDim2.new(1,-40,0,24)
 local restore; restore=button(canvas,"Vanta  ·  Restore",function() menu_open=true; window.Visible=true; restore.Visible=false end); restore.Name="Restore"; restore.Position=UDim2.fromOffset(20,50); restore.Size=UDim2.fromOffset(164,34); restore.Visible=false
 local minimize=button(window,"−",function() menu_open=false; window.Visible=false; restore.Visible=true end); minimize.Name="Minimize"; minimize.Position=UDim2.new(1,-72,0,24); minimize.Size=UDim2.fromOffset(24,26)
@@ -412,7 +489,8 @@ connect(Run.Heartbeat,function(dt)
         pcall(function() writefile("vanta_aotr_runtime.json",game:GetService("HttpService"):JSONEncode(runtime_report())) end)
     end
     if ui_elapsed>=.1 then ui_elapsed=0; fit(); status.Text=engine.phase.." · "..engine.message; live.Text=status.Text
-        stats.Text="Attack inputs: "..engine.swings.."   Observed defeats: "..engine.eliminations.."\nReload requests: "..engine.reloads.."   Retry requests: "..engine.retries.."\nInput backend: "..(virtual and "Virtual input" or "Unavailable"); refresh()
+        local hit_status=fanout.lastError or (fanout.seen>0 and (fanout.seen.." real Nape hits / "..fanout.forwarded.." extra requests") or "waiting for a real Nape hit")
+        stats.Text="Attack inputs: "..engine.swings.."   Observed defeats: "..engine.eliminations.."\nReload requests: "..engine.reloads.."   Retry requests: "..engine.retries.."\nInput: "..input_backend()..(engine.config.multiHit and " · "..hit_status or ""); refresh()
     end
     if esp_elapsed>=.5 then esp_elapsed=0; update_esp() end
 end)
@@ -427,5 +505,5 @@ end)
 local unload=make("BindableEvent",{Name="Unload"},gui); connect(unload.Event,function() control:Unload() end)
 connect(gui.Destroying,function() control:Unload() end)
 refresh(); layout_rows(); fit()
-print("Vanta AOTR 1.1 loaded · Auto farm closes menu and starts · F8 stop · Delete unload")
+print("Vanta AOTR 1.2 loaded · Auto farm closes menu and starts · F8 stop · Delete unload")
 return control
