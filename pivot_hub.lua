@@ -4553,8 +4553,22 @@ local function create_pivot_modules(ctx)
         if type(options)=="table" and options.hop then packet.Input="EE"; packet.Sprint=options.sprint==true end
         return packet
     end
-    function Core.farm_combo_sequence(state,hint,catalog,plan,now)
+    function Core.farm_combo_sequence(state,hint,catalog,plan,now,read)
         local entries={}
+        if read then
+            state.chain_cycle=(state.chain_cycle or 0)+1
+            local left=hint=="Z"; local cycle=(state.chain_cycle-1)%3
+            entries[1]={code=left and "CX" or "ZX",name="Behind the back escape"}
+            entries[2]=cycle==0 and {code=left and "VC" or "VZ",name="Between the legs counter"} or cycle==1 and {code=left and "CC" or "ZZ",name="Double crossover counter"} or {code=left and "CXZ" or "ZXC",name="Spin counter"}
+            if catalog and #catalog>0 and state.chain_cycle%4==0 then
+                state.catalog_counter=(state.catalog_counter or 0)%#catalog+1
+                local chosen=catalog[state.catalog_counter]; entries[2]={code=chosen.code,name=chosen.name}
+            end
+            if read.retreat and plan~="Rim" then
+                entries[3]={code=cycle==1 and "XX" or "X",name=cycle==1 and "Snatchback jumper setup" or "Stepback jumper setup",retreat=read.retreat}
+            else entries[3]={code=left and "Z" or "C",name="Sprint crossover exit"} end
+            return {entries=entries,index=1,next_at=now,expires=now+5}
+        end
         local prefix=plan=="Rim" and (hint=="Z" and "VZ" or "VC") or (hint=="Z" and "CX" or "ZX")
         entries[1]={code=prefix,name=plan=="Rim" and "Between the legs" or "Behind the back"}
         for _=1,2 do
@@ -4572,18 +4586,25 @@ local function create_pivot_modules(ctx)
         if attributes.Debounce==true or now<combo.next_at then return true end
         local move=combo.entries[combo.index]
         if not move then state.combo=nil; state.next_combo=now+1; return false end
+        if move.retreat then
+            local delta=mine and farm_flat(move.retreat-mine.Position)
+            if delta and delta.Magnitude>.1 then direction=delta.Unit end
+            farm_actions(state,false,false)
+            state.stepback_target=move.retreat; state.stepback_until=now+1.8
+            state.attack_escape=nil; state.offense_route=nil; state.shot_ready_since=nil
+        end
         if move.code=="H" then state.actions.Dribble:Fire("H") else state.actions.Dribble:Fire(move.code,state.sprinting==true,direction) end
         state.last_dribble=now; self.farm_stats.dribbles=self.farm_stats.dribbles+1
         self.farm_last_move=move.name.." / chain "..combo.index.." of "..#combo.entries
         combo.index=combo.index+1; combo.next_at=now+(#move.code>=3 and .36 or .26)
-        if combo.index>#combo.entries then state.combo=nil; state.next_combo=now+.35; self.farm_stats.chains=self.farm_stats.chains+1 end
+        if combo.index>#combo.entries then state.combo=nil; state.next_combo=now+(move.retreat and 1.85 or .35); self.farm_stats.chains=self.farm_stats.chains+1 end
         return true
     end
     function Core.farm_shot_plan(state,varied,now)
         if not varied then return "Mid" end
-        if not state.attack_plan or now>(state.attack_plan_until or 0) and not state.combo and not state.in_dribble and (not state.velocity or state.velocity.Magnitude<3) then
+        if not state.attack_plan or now>(state.attack_plan_until or 0) and not state.combo and not state.in_dribble and not (state.stepback_target and now<(state.stepback_until or 0)) and (not state.velocity or state.velocity.Magnitude<3) then
             state.attack_cycle=(state.attack_cycle or 0)+1
-            state.attack_plan=({"Three","Mid","Rim"})[(state.attack_cycle-1)%3+1]
+            state.attack_plan=({"Three","Mid","Three","Mid","Rim"})[(state.attack_cycle-1)%5+1]
             state.attack_plan_until=now+6
             state.attack_pocket=nil; state.next_pocket=nil; state.offense_route=nil
         end
@@ -4598,6 +4619,33 @@ local function create_pivot_modules(ctx)
         if part and part.CFrame and math.abs(part.CFrame.UpVector.Y)<.4 then return true end
         return false
     end
+    function Core.farm_dribble_read(origin,basket,opponents,bounds,range,minimum)
+        local toward=farm_flat(basket-origin)
+        if toward.Magnitude<.1 then return "C",nil end
+        toward=toward.Unit; local side=Vector3.new(-toward.Z,0,toward.X)
+        local hint,best
+        for _,choice in ipairs({{sign=1,hint="Z"},{sign=-1,hint="C"}}) do
+            local point,error=Core.farm_clamp(origin+side*(choice.sign*5)-toward*1.5,bounds)
+            local clearance=Core.farm_shot_clearance(point,opponents,.3)
+            local lane=Core.farm_clearance(origin,point,opponents)
+            local value=math.min(clearance,18)+math.min(lane,8)*1.5-error*10
+            if not best or value>best then hint=choice.hint; best=value end
+        end
+        local retreat,score
+        for _,depth in ipairs({4.5,3,2.5}) do for _,lateral in ipairs({0,2,-2}) do
+            local point,error,edge=Core.farm_clamp(origin-toward*depth+side*lateral,bounds)
+            local radius=farm_flat(point-basket).Magnitude
+            if error<.1 and edge>1.5 and (point-basket).Magnitude<=range and (not minimum or radius>=minimum) then
+                local lane=Core.farm_clearance(origin,point,opponents)
+                if lane>2 then
+                    local value=math.min(Core.farm_shot_clearance(point,opponents,.35),22)*2+math.min(lane,8)-math.abs(lateral)*.15
+                    if not score or value>score then retreat=point; score=value end
+                end
+            end
+        end end
+        return hint or "C",retreat
+    end
+
     function Core.farm_separation(origin,basket,opponents,bounds,range)
         local flat=function(v) return Vector3.new(v.X,0,v.Z) end
         local toward=flat(basket-origin); if toward.Magnitude<.1 then return origin,"X" end
@@ -4990,7 +5038,7 @@ end]])
             local b=state.bounds
             if b then for _,marker in ipairs(b.markers or {}) do if not marker.Parent or not marker:IsDescendantOf(workspace) then b=nil; break end end end
             local point=b and origin and b.frame:PointToObjectSpace(origin)
-            writefile("vanta_badge_farm_runtime.json",farm_http:JSONEncode({build="2026.11.08.12",status=Engine.farm_status,focused=state.focused,returnReason=state.return_reason,returnAttempts=state.return_attempts,returnError=state.return_error,teleporting=state.teleporting,busy=state.busy,inputTransport=move_bridge and "PlayerModule" or "Roblox virtual input",postgame=state.result_seen==true,progressAge=state.health and os.clock()-(state.health.progress_at or state.health.entered),shotClock=state.shot_clock,role=state.role,basketSource=state.basket_source,shotClearance=state.shot_clearance and math.min(999,state.shot_clearance),stats=Engine.farm_stats,
+            writefile("vanta_badge_farm_runtime.json",farm_http:JSONEncode({build="2026.11.08.13",status=Engine.farm_status,focused=state.focused,returnReason=state.return_reason,returnAttempts=state.return_attempts,returnError=state.return_error,teleporting=state.teleporting,busy=state.busy,inputTransport=move_bridge and "PlayerModule" or "Roblox virtual input",postgame=state.result_seen==true,progressAge=state.health and os.clock()-(state.health.progress_at or state.health.entered),shotClock=state.shot_clock,role=state.role,basketSource=state.basket_source,shotClearance=state.shot_clearance and math.min(999,state.shot_clearance),stats=Engine.farm_stats,
                 position=origin and {origin.X,origin.Y,origin.Z} or false,bounds=b and point and {source=b.source,x=b.x,z=b.z,localPosition={point.X,point.Y,point.Z}} or false,
                 boundaryBrake=state.boundary_braking==true,guard=state.guard==true,sprint=state.sprinting==true,keys=state.steering_keys or {}}))
         end)
@@ -5015,7 +5063,7 @@ end]])
         local f=cam.CFrame.LookVector; f=Vector3.new(f.X,0,f.Z)
         local r=cam.CFrame.RightVector; r=Vector3.new(r.X,0,r.Z)
         if f.Magnitude<.01 or r.Magnitude<.01 then farm_release(scope,state); return end
-        local arrival=overflow>.05 and .08 or target_edge<1 and 3.2 or guard and .65 or 1.7
+        local arrival=overflow>.05 and .08 or target_edge<1 and 3.2 or guard and .65 or state.stepback_target and .55 or 1.7
         state.arrived=d.Magnitude<arrival or state.arrived and d.Magnitude<arrival+.7
         local velocity=state.velocity or Vector3.new(0,0,0)
         local braking=d.Magnitude>0 and d.Magnitude<5 and velocity:Dot(d.Unit)>d.Magnitude*5
@@ -5036,7 +5084,7 @@ end]])
         automated_move(scope,keys)
         local _,_,edge=Core.farm_clamp(mine.Position,state.bounds)
         local burst=state.role=="offense" and (state.attack_escape and os.clock()<(state.attack_escape_until or 0) or state.combo~=nil)
-        farm_actions(state,guard==true,next(keys)~=nil and not blocked and not state.nav_recovering and d.Magnitude>(burst and 2.2 or guard and 8 or 3.5) and edge>3)
+        farm_actions(state,guard==true,next(keys)~=nil and not state.stepback_target and not blocked and not state.nav_recovering and d.Magnitude>(burst and 2.2 or guard and 8 or 3.5) and edge>3)
     end
     function Core.farm_drive_lane(origin,basket,opponents,bounds)
         local toward=farm_flat(basket-origin); local distance=toward.Magnitude
@@ -5136,7 +5184,7 @@ end]])
             farm_session=tostring(os.time())..":"..tostring(os.clock())
             farm_write(true)
             queue([[local ok,c=pcall(function() return game:GetService("HttpService"):JSONDecode(readfile("vanta_badge_farm.json")) end)
-if ok and c.enabled==true and c.session==]]..string.format("%q",farm_session)..[[ then loadstring(game:HttpGet("https://raw.githubusercontent.com/zyhnq/fuckyoumatthew/main/pivot_launcher.lua?v=20261108.12"))() end]])
+if ok and c.enabled==true and c.session==]]..string.format("%q",farm_session)..[[ then loadstring(game:HttpGet("https://raw.githubusercontent.com/zyhnq/fuckyoumatthew/main/pivot_launcher.lua?v=20261108.13"))() end]])
             Engine.farm_status="Starting"; return state
         end,
         step=function(scope,state,s,dt)
@@ -5309,7 +5357,7 @@ if ok and c.enabled==true and c.session==]]..string.format("%q",farm_session)..[
             if state.role~=role or state.possession_owner~=owner then
                 state.role=role; state.offense_route=nil; state.defense_route=nil; state.attack_pocket=nil
                 state.shot_ready_since=nil; state.nav_time=nil; state.escape_until=nil; state.steering=nil
-                state.possession_owner=owner; state.defense_handler=nil; state.defense_tracking=nil; state.defense_recover=nil; state.pressure_since=nil; state.attack_escape=nil; state.attack_plan=nil; state.combo=nil; state.next_pocket=nil
+                state.possession_owner=owner; state.defense_handler=nil; state.defense_tracking=nil; state.defense_recover=nil; state.pressure_since=nil; state.attack_escape=nil; state.attack_plan=nil; state.combo=nil; state.next_pocket=nil; state.stepback_target=nil; state.stepback_until=nil
             end
             if possession then
                 state.defense_route=nil
@@ -5329,8 +5377,9 @@ if ok and c.enabled==true and c.session==]]..string.format("%q",farm_session)..[
                 for _,other in ipairs(opponents) do local predicted=other.position+farm_cap(other.velocity*.18,3); threat=math.min(threat,farm_flat(predicted-mine.Position).Magnitude) end
                 state.shot_clearance=Core.farm_shot_clearance(mine.Position,opponents,.4)
                 local defender_down=false; for _,opponent in ipairs(opponents) do if opponent.down then defender_down=true; break end end
+                if state.stepback_target and os.clock()>=(state.stepback_until or 0) then state.stepback_target=nil end
                 local drive,drive_distance
-                if s.farm_open_drive and not clock_policy.final and (not state.shot_clock or state.shot_clock>5) and (not defender_down or distance>s.farm_shot_range) then drive,drive_distance=Core.farm_drive_lane(mine.Position,basket.Position,opponents,state.bounds) end
+                if s.farm_open_drive and not state.stepback_target and not state.combo and not clock_policy.final and (not state.shot_clock or state.shot_clock>5) and (not defender_down or distance>s.farm_shot_range) then drive,drive_distance=Core.farm_drive_lane(mine.Position,basket.Position,opponents,state.bounds) end
                 if drive then
                     state.combo=nil; state.shot_ready_since=nil; state.offense_route=nil; state.attack_escape=nil
                     farm_steer(scope,state,drive,false)
@@ -5347,7 +5396,7 @@ if ok and c.enabled==true and c.session==]]..string.format("%q",farm_session)..[
                 end
                 if state.shot_clearance>=clock_policy.clearance then state.pressure_since=nil; state.attack_escape=nil
                 else state.pressure_since=state.pressure_since or os.clock() end
-                if clock_policy.dribble and not clock_policy.simple and not state.combo and not dribbling and state.pressure_since and os.clock()-state.pressure_since>.45 and os.clock()>(state.next_separation or 0) then
+                if clock_policy.dribble and not clock_policy.simple and not state.combo and not state.stepback_target and not dribbling and state.pressure_since and os.clock()-state.pressure_since>.45 and os.clock()>(state.next_separation or 0) then
                     local point,move=Core.farm_separation(mine.Position,basket.Position,opponents,state.bounds,active_range)
                     state.attack_escape=point; state.escape_move=move; state.attack_escape_until=os.clock()+1.1
                     state.next_separation=os.clock()+1.45; state.offense_route=nil
@@ -5358,12 +5407,12 @@ if ok and c.enabled==true and c.session==]]..string.format("%q",farm_session)..[
                     state.next_pocket=os.clock()+.6
                 end
                 local separating=clock_policy.dribble and not clock_policy.simple and state.attack_escape and os.clock()<state.attack_escape_until
-                local destination=separating and state.attack_escape or state.attack_pocket
+                local destination=state.stepback_target or separating and state.attack_escape or state.attack_pocket
                 local goal,blocked,route=Core.farm_route(mine.Position,destination,opponents,state.offense_route,os.clock(),true,state.bounds)
-                if separating then goal=state.attack_escape; blocked=false; route=nil end
+                if separating or state.stepback_target then goal=state.stepback_target or state.attack_escape; blocked=false; route=nil end
                 state.offense_route=route
                 if (not minimum or defender_down or farm_flat(basket.Position-mine.Position).Magnitude>=minimum) and distance<=(clock_policy.final and 42 or math.min(48,active_range+(clock_policy.range_bonus or 0))) and state.shot_clearance>=clock_policy.clearance and (not dribbling or defender_down or clock_policy.final) and a.Debounce~=true then
-                    state.offense_route=nil; state.combo=nil
+                    state.offense_route=nil; state.combo=nil; state.stepback_target=nil
                     farm_release(scope,state); status(clock_policy.final and "Shot clock / taking final shot" or state.shot_clock and state.shot_clock<=5 and "Shot clock / getting shot off" or "Setting up shot")
                     state.shot_ready_since=state.shot_ready_since or os.clock()
                     local settled=clock_policy.final or os.clock()-state.shot_ready_since>=(defender_down and .04 or clock_policy.settle) and state.velocity.Magnitude<(state.shot_clock and state.shot_clock<=5 and 4.5 or 3)
@@ -5380,11 +5429,19 @@ if ok and c.enabled==true and c.session==]]..string.format("%q",farm_session)..[
                             local hint=separating and state.escape_move or route and (route.side<0 and "Z" or "C") or (state.dribble_index or 0)%2==0 and "Z" or "C"
                             local chaining=s.farm_chains and not clock_policy.simple and (not state.stamina or state.stamina>=30)
                             if chaining then
-                                if not state.combo and not dribbling and a.Debounce~=true and threat<11 and os.clock()>=(state.next_combo or 0) then
-                                    local catalog=s.farm_dribble_all and Engine.dribble_moves or nil; if threat<6 then catalog=nil end
-                                    state.combo=Core.farm_combo_sequence(state,hint,catalog,attack_plan,os.clock())
+                                if not state.combo and not dribbling and a.Debounce~=true and not state.stepback_target and threat<14 and os.clock()>=(state.next_combo or 0) then
+                                    local read_hint,retreat=Core.farm_dribble_read(mine.Position,basket.Position,opponents,state.bounds,active_range,minimum)
+                                    state.combo=Core.farm_combo_sequence(state,read_hint,s.farm_dribble_all and Engine.dribble_moves or nil,attack_plan,os.clock(),{retreat=retreat})
                                 end
                                 if state.combo then local _,_,edge=Core.farm_clamp(mine.Position,state.bounds); farm_actions(state,false,edge>3 and not state.boundary_braking) end
+                                if state.combo and state.combo.index==#state.combo.entries then
+                                    local last=state.combo.entries[state.combo.index]
+                                    if last.retreat then
+                                        local _,retreat=Core.farm_dribble_read(mine.Position,basket.Position,opponents,state.bounds,active_range,minimum)
+                                        if retreat then last.retreat=retreat
+                                        else last.retreat=nil; last.code="C"; last.name="Crossover exit / no safe stepback" end
+                                    end
+                                end
                                 Engine:step_farm_combo(state,a,direction.Unit,os.clock())
                             else
                                 state.combo=nil
@@ -5397,7 +5454,8 @@ if ok and c.enabled==true and c.session==]]..string.format("%q",farm_session)..[
                             end
                         end
                     else state.combo=nil end
-                    if separating then status("Creating separation")
+                    if state.stepback_target then status("Stepback / looking for jumper")
+                    elseif separating then status("Creating separation")
                     elseif blocked then status("Driving around defender")
                     else status("Moving into shot range") end
                 end
@@ -6084,7 +6142,7 @@ do
     local rail_line=frame(shell,20,97,660,1,theme.line)
     local top_line=frame(shell,20,54,660,1,theme.line)
     local logo=label(shell,"VANTA",20,12,140,28,19,theme.text); logo.Font=Enum.Font.GothamBold; logo.TextXAlignment=Enum.TextXAlignment.Left
-    local build_label=label(shell,"BUILD 2026.11.08.12",242,17,150,18,10,theme.muted); build_label.Name="PivotBuild"; build_label.Font=Enum.Font.RobotoMono; build_label.TextWrapped=false
+    local build_label=label(shell,"BUILD 2026.11.08.13",242,17,150,18,10,theme.muted); build_label.Name="PivotBuild"; build_label.Font=Enum.Font.RobotoMono; build_label.TextWrapped=false
     local heading=label(shell,"Practical Basketball",94,14,240,26,11,theme.muted); heading.Font=Enum.Font.GothamMedium
     close.BackgroundColor3=theme.rail; close.TextColor3=theme.muted; close.TextSize=14; corner(close,4)
     local search=make("TextBox",{Text="",PlaceholderText="Find a control...",PlaceholderColor3=theme.muted,Position=UDim2.fromOffset(484,10),Size=UDim2.fromOffset(166,23),
