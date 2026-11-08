@@ -1,8 +1,16 @@
--- Vanta Launcher 1.29 | automatically loads the current supported game.
+-- Vanta Launcher 1.30 | automatically loads the current supported game.
 local Players=game:GetService("Players")
 local Input=game:GetService("UserInputService")
-local player=assert(Players.LocalPlayer,"Run Vanta Launcher on the client")
-local parent=player:WaitForChild("PlayerGui")
+local RunService=game:GetService("RunService")
+assert(RunService:IsClient(),"Vanta needs the Roblox client. Join a game and attach the executor to that Roblox session before running the loader.")
+local deadline=os.clock()+60
+while not Players.LocalPlayer or not game:IsLoaded() do
+    if os.clock()>=deadline then error("Vanta startup timed out waiting for the Roblox client. Rejoin, reattach the executor, then run the loader again.",0) end
+    task.wait(.1)
+end
+local player=Players.LocalPlayer
+local parent=player:WaitForChild("PlayerGui",20)
+assert(parent,"Vanta could not find PlayerGui after startup. Rejoin and attach the executor to the active game.")
 local prior=parent:FindFirstChild("PivotLauncher")
 if prior then
     local unload=prior:FindFirstChild("Unload")
