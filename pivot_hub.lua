@@ -683,11 +683,40 @@ local function create_pivot_modules(ctx)
     attribute_module("debounce","No debounce",{Debounce=false},"Observed Debounce attribute")
     attribute_module("cold","No cold zone",{Cold=false},"Observed Cold attribute")
     attribute_module("sprint","Client sprint state",{Sprinting=true},"Observed Sprinting attribute")
+    function Core.farm_ball_reference(value)
+        if typeof(value)~="Instance" then return nil end
+        if value:IsA("ObjectValue") then value=value.Value; if typeof(value)~="Instance" then return nil end end
+        local part
+        if value:IsA("BasePart") then part=value
+        elseif value:IsA("Model") then part=value.PrimaryPart or value:FindFirstChildWhichIsA("BasePart",true) end
+        if part and part.Parent and part:IsDescendantOf(workspace) then return part end
+    end
+    function Core.farm_model_ball(model,attributes)
+        local ball=attributes and Core.farm_ball_reference(attributes.Basketball)
+        if ball then return ball end
+        if not model then return nil end
+        local folder=model:FindFirstChild("Attributes")
+        local reference=folder and folder:FindFirstChild("Basketball")
+        return Core.farm_ball_reference(reference)
+    end
+    function Core.farm_boundary_court(group)
+        local current=group
+        while current and current~=workspace do
+            local number=current:GetAttribute("CourtNumber") or current.Name:match("^Court(%d+)$")
+            if number~=nil then return tostring(tonumber(number) or number) end
+            current=current.Parent
+        end
+    end
+
     local function held_ball(model)
         if not model then return nil end
+        local reference=Core.farm_model_ball(model); if reference then return reference end
         for _,obj in ipairs(model:GetDescendants()) do
             if obj:IsA("Motor6D") and obj.Name=="Basketball" and obj.Part1 and obj.Part1:IsA("BasePart") then return obj.Part1 end
         end
+    end
+    function Core.farm_has_ball(model,attributes)
+        return held_ball(model)~=nil or Core.farm_model_ball(model,attributes)~=nil or attributes and attributes.Basketball==true or model and model:GetAttribute("Basketball")==true or false
     end
     local function split_speed(scope,state,s)
         local model=character(); if state and model~=state then error("Character changed") end
@@ -784,7 +813,7 @@ local function create_pivot_modules(ctx)
             for _,who in ipairs(players:GetPlayers()) do if who~=ctx.player then local model=rig(who); if model then list[#list+1]={object=model,label=who.DisplayName or who.Name,who=who} end end end
         elseif kind=="balls" then
             local folder=workspace:FindFirstChild("Basketballs")
-            if folder then for _,obj in ipairs(folder:GetChildren()) do if obj:IsA("BasePart") then list[#list+1]={object=obj,label="Ball"} end end end
+            if folder then for i,obj in ipairs(folder:GetChildren()) do if i>64 then break end; local part=Core.farm_ball_reference(obj); if part then list[#list+1]={object=part,label="Ball"} end end end
         elseif kind=="rims" then
             list=indexed_rims()
         end
@@ -4872,7 +4901,7 @@ local function create_pivot_modules(ctx)
                 local ball=held_ball(other)
                 local velocity=Core.farm_observe(state.history,who,point.Position,os.clock(),point.AssemblyLinearVelocity)
                 local target=teammate and teammates or list
-                target[#target+1]={key=who,model=other,position=point.Position,velocity=velocity,part=point,ball=ball,has_ball=ball~=nil or other:GetAttribute("Basketball")==true,down=Core.farm_defender_down(other,point)}
+                target[#target+1]={key=who,model=other,position=point.Position,velocity=velocity,part=point,ball=ball,has_ball=Core.farm_has_ball(other),down=Core.farm_defender_down(other,point)}
             end
         end end
         for key,item in pairs(state.history) do if os.clock()-item.time>5 then state.history[key]=nil end end
@@ -4924,7 +4953,9 @@ local function create_pivot_modules(ctx)
         if state.bounds then
             local valid=true
             for _,marker in ipairs(state.bounds.markers or {}) do if not marker.Parent or not marker:IsDescendantOf(workspace) then valid=false; break end end
-            if valid and state.bounds.verified then return state.bounds end
+            local _,overflow=Core.farm_clamp(origin,state.bounds)
+            if valid and state.bounds.verified and overflow<=5.5 and math.abs(origin.Y-state.bounds.frame.Position.Y)<20 then return state.bounds end
+            state.next_bounds=0; state.boundary_reselections=(state.boundary_reselections or 0)+1
             state.bounds=nil
         end
         if os.clock()<(state.next_bounds or 0) then return nil end
@@ -4936,6 +4967,7 @@ local function create_pivot_modules(ctx)
         if #roots==0 then roots[1]=workspace end
         local function collect(group)
             if seen[group] or group.Name:lower()~="outofbounds" then return end
+            local owner=Core.farm_boundary_court(group); if owner and court_number~=nil and owner~=tostring(tonumber(court_number) or court_number) then return end
             seen[group]=true; groups[#groups+1]=group
         end
         for _,folder in ipairs(roots) do collect(folder); for _,child in ipairs(folder:GetDescendants()) do collect(child) end end
@@ -4949,7 +4981,7 @@ local function create_pivot_modules(ctx)
             if bounds then
                 local _,distance=Core.farm_clamp(origin,bounds)
                 local cost=distance*100+farm_flat(bounds.frame.Position-origin).Magnitude*.01
-                if not best_cost or cost<best_cost then best=bounds; best_cost=cost; bounds.source=group:GetFullName() end
+                if not best_cost or cost<best_cost then best=bounds; best_cost=cost; bounds.source=group:GetFullName(); bounds.group=group end
             end
         end
         state.bounds=best; return best
@@ -5122,7 +5154,7 @@ end]])
             local b=state.bounds
             if b then for _,marker in ipairs(b.markers or {}) do if not marker.Parent or not marker:IsDescendantOf(workspace) then b=nil; break end end end
             local point=b and origin and b.frame:PointToObjectSpace(origin)
-            writefile("vanta_badge_farm_runtime.json",farm_http:JSONEncode({build="2026.11.08.15",status=Engine.farm_status,focused=state.focused,returnReason=state.return_reason,returnAttempts=state.return_attempts,returnError=state.return_error,teleporting=state.teleporting,busy=state.busy,idle=Engine.farm_idle,inputTransport=move_bridge and "PlayerModule" or "Roblox virtual input",postgame=state.result_seen==true,progressAge=state.health and os.clock()-(state.health.progress_at or state.health.entered),shotClock=state.shot_clock,role=state.role,basketSource=state.basket_source,shotClearance=state.shot_clearance and math.min(999,state.shot_clearance),stats=Engine.farm_stats,
+            writefile("vanta_badge_farm_runtime.json",farm_http:JSONEncode({build="2026.11.08.16",status=Engine.farm_status,focused=state.focused,returnReason=state.return_reason,returnAttempts=state.return_attempts,returnError=state.return_error,teleporting=state.teleporting,busy=state.busy,ballCandidates=state.ball_candidates,visibleOpponents=state.visible_opponents,hasPossession=state.has_possession,boundaryReselections=state.boundary_reselections,idle=Engine.farm_idle,inputTransport=move_bridge and "PlayerModule" or "Roblox virtual input",postgame=state.result_seen==true,progressAge=state.health and os.clock()-(state.health.progress_at or state.health.entered),shotClock=state.shot_clock,role=state.role,basketSource=state.basket_source,shotClearance=state.shot_clearance and math.min(999,state.shot_clearance),stats=Engine.farm_stats,
                 position=origin and {origin.X,origin.Y,origin.Z} or false,bounds=b and point and {source=b.source,x=b.x,z=b.z,localPosition={point.X,point.Y,point.Z}} or false,
                 boundaryBrake=state.boundary_braking==true,guard=state.guard==true,sprint=state.sprinting==true,keys=state.steering_keys or {}}))
         end)
@@ -5272,7 +5304,7 @@ end]])
             farm_session=tostring(os.time())..":"..tostring(os.clock())
             farm_write(true)
             queue([[local ok,c=pcall(function() return game:GetService("HttpService"):JSONDecode(readfile("vanta_badge_farm.json")) end)
-if ok and c.enabled==true and c.session==]]..string.format("%q",farm_session)..[[ then loadstring(game:HttpGet("https://raw.githubusercontent.com/zyhnq/fuckyoumatthew/main/pivot_launcher.lua?v=20261108.15"))() end]])
+if ok and c.enabled==true and c.session==]]..string.format("%q",farm_session)..[[ then loadstring(game:HttpGet("https://raw.githubusercontent.com/zyhnq/fuckyoumatthew/main/pivot_launcher.lua?v=20261108.16"))() end]])
             Engine.farm_status="Starting"; return state
         end,
         step=function(scope,state,s,dt)
@@ -5426,13 +5458,13 @@ if ok and c.enabled==true and c.session==]]..string.format("%q",farm_session)..[
                 state.combo=nil
                 state.shot_ready_since=nil
                 if Engine.auto_shoot_held then state.adapter.release(); Engine.auto_shoot_held=false end
-                farm_steer(scope,state,position_error>.05 and safe_position or safe_drift,not (held_ball(model) or model:GetAttribute("Basketball")==true))
+                farm_steer(scope,state,position_error>.05 and safe_position or safe_drift,not Core.farm_has_ball(model,a))
                 status("Boundary brake / returning inside"); return
             end
             local dribbling=type(a.Action)=="string" and a.Action:lower():find("dribbl",1,true)~=nil
             if a.Action and a.Action~="" and a.Action~="Guard" and a.Action~="Guarding" and not dribbling then state.combo=nil; state.shot_ready_since=nil; farm_release(scope,state); status("Waiting for current action"); return end
             local opponents,teammates=farm_opponents(model,state,mine.Position)
-            local possession=held_ball(model)~=nil or model:GetAttribute("Basketball")==true
+            local possession=Core.farm_has_ball(model,a)
             local handler=Core.farm_holder(opponents,mine.Position,state.possession_owner)
             local teammate=Core.farm_holder(teammates,mine.Position,state.possession_owner)
             if handler then
@@ -5441,6 +5473,7 @@ if ok and c.enabled==true and c.session==]]..string.format("%q",farm_session)..[
             end
             if possession and state.role~="offense" and state.opponent_shot_pending then state.need_takeback=true; state.clear_target=nil end
             local role=possession and "offense" or handler and "defense" or teammate and "spacing" or "rebound"
+            state.visible_opponents=#opponents; state.has_possession=possession
             local owner=possession and ctx.player or handler and handler.key or teammate and teammate.key
             if state.role~=role or state.possession_owner~=owner then
                 state.role=role; state.offense_route=nil; state.defense_route=nil; state.attack_pocket=nil
@@ -5561,7 +5594,20 @@ if ok and c.enabled==true and c.session==]]..string.format("%q",farm_session)..[
                 if not teammate then state.offense_route=nil; state.attack_pocket=nil; state.attack_basket=nil end
                 state.shot_ready_since=nil
                 local ball,distance
-                for _,item in ipairs(candidates("balls")) do local p=item.object; if p:IsA("BasePart") and Core.farm_relevant(p.Position,mine.Position,state.bounds,state.boundary_court,p:GetAttribute("CourtNumber"),true) then local d=(p.Position-mine.Position).Magnitude; if not distance or d<distance then ball=p; distance=d end end end
+                local available=candidates("balls"); local seen={}
+                for _,item in ipairs(available) do seen[item.object]=true end
+                local function include(value)
+                    local part=Core.farm_ball_reference(value)
+                    if part and not seen[part] then seen[part]=true; available[#available+1]={object=part} end
+                end
+                include(a.Basketball)
+                local group=state.bounds and state.bounds.group
+                local attributes=group and group.Parent and group.Parent:FindFirstChild("Attributes")
+                if attributes then include(attributes:FindFirstChild("Basketball")) end
+                local own_attributes=group and group:FindFirstChild("Attributes")
+                if own_attributes then include(own_attributes:FindFirstChild("Basketball")) end
+                state.ball_candidates=#available; state.visible_opponents=#opponents; state.has_possession=possession
+                for _,item in ipairs(available) do local p=item.object; if p:IsA("BasePart") and Core.farm_relevant(p.Position,mine.Position,state.bounds,state.boundary_court,p:GetAttribute("CourtNumber"),true) then local d=(p.Position-mine.Position).Magnitude; if not distance or d<distance then ball=p; distance=d end end end
                 if handler then
                     local basket=farm_basket(state,a,handler.position,true)
                     if basket then
@@ -5604,7 +5650,7 @@ if ok and c.enabled==true and c.session==]]..string.format("%q",farm_session)..[
                             state.last_jump=os.clock(); state.actions.Jump:Fire(); Engine.farm_stats.rebounds=Engine.farm_stats.rebounds+1
                         end
                         farm_steer(scope,state,landing,false); status("Intercepting loose ball")
-                    else farm_release(scope,state); status("Waiting for a ball") end
+                    else farm_release(scope,state); status(state.ball_candidates>0 and "Ball outside active court / checking court" or "Waiting for court ball reference") end
                 end
             end
         end,interval=.05,conflicts={"guard","auto_shoot","fly","spin","auto_ankle","dribble_library","dribble_macros"}})
@@ -6240,7 +6286,7 @@ do
     local rail_line=frame(shell,20,97,660,1,theme.line)
     local top_line=frame(shell,20,54,660,1,theme.line)
     local logo=label(shell,"VANTA",20,12,140,28,19,theme.text); logo.Font=Enum.Font.GothamBold; logo.TextXAlignment=Enum.TextXAlignment.Left
-    local build_label=label(shell,"BUILD 2026.11.08.15",242,17,150,18,10,theme.muted); build_label.Name="PivotBuild"; build_label.Font=Enum.Font.RobotoMono; build_label.TextWrapped=false
+    local build_label=label(shell,"BUILD 2026.11.08.16",242,17,150,18,10,theme.muted); build_label.Name="PivotBuild"; build_label.Font=Enum.Font.RobotoMono; build_label.TextWrapped=false
     local heading=label(shell,"Practical Basketball",94,14,240,26,11,theme.muted); heading.Font=Enum.Font.GothamMedium
     close.BackgroundColor3=theme.rail; close.TextColor3=theme.muted; close.TextSize=14; corner(close,4)
     local search=make("TextBox",{Text="",PlaceholderText="Find a control...",PlaceholderColor3=theme.muted,Position=UDim2.fromOffset(484,10),Size=UDim2.fromOffset(166,23),
