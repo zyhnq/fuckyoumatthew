@@ -192,6 +192,7 @@ function Core.bounded(value,minimum,maximum)
     if not value or value~=value or value==math.huge or value==-math.huge or value<minimum or value>maximum then return nil end
     return value
 end
+function Core.shot_action_active(action) return action=="Shooting" or action=="Dunking" or action=="ClutchLayup" or action=="ContactLayup" end
 function Core.shot_type(name,details)
     name=tostring(name or ""):lower(); details=details or {}
     if details.action=="Dunking" or name:find("dunk",1,true) then return "Dunks" end
@@ -338,7 +339,7 @@ function Core.animation_release(scope,deps)
     local function eligible(track)
         if state.closed or deps.paused() or not deps.held() then return nil end
         local attributes=deps.attributes()
-        if not attributes or (attributes.Action~="Shooting" and attributes.Action~="Dunking") or attributes.ReleasedShot~=false then return nil end
+        if not attributes or not Core.shot_action_active(attributes.Action) or attributes.ReleasedShot~=false then return nil end
         local shot=Core.bounded(attributes.ShotStartTime,0,math.huge)
         local name=attributes.BaseAnimation
         if not shot or type(name)~="string" or name=="" or state.sent[shot] then return nil end
@@ -383,7 +384,7 @@ function Core.animation_release(scope,deps)
         local frame=Core.bounded(dt,.001,.1)
         if frame then self.frame_dt=self.frame_dt*.8+frame*.2 end
         local attributes=deps.attributes()
-        local active=attributes and (attributes.Action=="Shooting" or attributes.Action=="Dunking") and attributes.ReleasedShot==false
+        local active=attributes and Core.shot_action_active(attributes.Action) and attributes.ReleasedShot==false
         local id=active and Core.bounded(attributes.ShotStartTime,0,math.huge)
         if self.observed and self.observed.id~=id then
             if not self.observed.sent then telemetry({kind="skip",shot=self.observed.id,name=self.observed.name,shot_type=self.observed.shot_type,reason=self.observed.reason or "Shot ended before the release target"}) end
@@ -863,9 +864,10 @@ local function create_pivot_modules(ctx)
         local flat_velocity=Vector3.new(velocity.X,0,velocity.Z); local closing=flat_velocity:Dot(toward)
         local offset=Vector3.new(origin.X-handler.X,0,origin.Z-handler.Z)
         local progress=offset:Dot(toward); local lateral=(offset-toward*progress).Magnitude
-        local driving=not shooting and not reversing and closing>=7 and closing>=flat_velocity.Magnitude*.6 and radial.Magnitude>3
+        local finishing=shooting and radial.Magnitude<14 and closing>3 and progress<3
+        local driving=not reversing and radial.Magnitude>2 and ((not shooting and closing>=7 and closing>=flat_velocity.Magnitude*.6) or finishing)
         if driving then
-            local gap=math.min(7,4+closing*.12,radial.Magnitude*.65,math.max(1,radial.Magnitude-1.3))
+            local gap=math.min(shooting and 3.2 or 7,4+closing*.12,radial.Magnitude*.65,math.max(1,radial.Magnitude-1.3))
             local lead=(flat_velocity-toward*closing)*.10
             if lead.Magnitude>1.2 then lead=lead.Unit*1.2 end
             local intercept=Core.farm_clamp(handler+toward*gap+lead,bounds)
@@ -4280,12 +4282,13 @@ local function create_pivot_modules(ctx)
     -- Blacktop signatures verified against the user's queue and match captures.
     Engine.settings.farm_mode="1v1"; Engine.settings.farm_any_region=false
     Engine.settings.farm_auto_play=true; Engine.settings.farm_shot_range=22
+    Engine.settings.farm_jelly=true
     Engine.settings.farm_dribble=true; Engine.settings.farm_open_drive=true; Engine.settings.farm_dribble_all=true; Engine.settings.farm_chains=true; Engine.settings.farm_hop_gathers=true; Engine.settings.farm_varied_shots=true; Engine.settings.farm_three_range=42
     Engine.ranges.farm_three_range={36,48}
     Engine.ranges.farm_shot_range={10,34}
     Engine.cosmetic_choices.badge_farm={{"farm_mode","Match mode",{"1v1","2v2","3v3","4v4","5v5"}}}
     Engine.cosmetic_fields.badge_farm={{"farm_shot_range","Middy shot range / studs"},{"farm_three_range","Three-point shot range / studs"}}
-    Engine.cosmetic_toggles.badge_farm={{"farm_any_region","Any region"},{"farm_auto_play","Auto play matches"},{"farm_dribble","Use controlled dribble moves"},{"farm_dribble_all","Use all supported dribble moves"},{"farm_open_drive","Attack open lanes"},{"farm_chains","Chained dribble sequences"},{"farm_hop_gathers","Double-tap gathers"},{"farm_varied_shots","Mix threes, middies and finishes"}}
+    Engine.cosmetic_toggles.badge_farm={{"farm_any_region","Any region"},{"farm_auto_play","Auto play matches"},{"farm_dribble","Use controlled dribble moves"},{"farm_dribble_all","Use all supported dribble moves"},{"farm_open_drive","Attack open lanes"},{"farm_chains","Chained dribble sequences"},{"farm_hop_gathers","Double-tap gathers"},{"farm_jelly","Clutch / jelly layup attempts"},{"farm_varied_shots","Mix threes, middies and finishes"}}
     function Core.shot_clock_value(value)
         if type(value)~="number" and type(value)~="string" then return nil end
         local number=tonumber(value)
@@ -4332,10 +4335,10 @@ local function create_pivot_modules(ctx)
     end
     Engine.farm_status="Off"; Engine.farm_matches=0; Engine.farm_badge_lines={}
     Engine.farm_last_move="None"
-    Engine.farm_stats={shots=0,layups=0,dribbles=0,contests=0,rebounds=0,recoveries=0,requeues=0}
+    Engine.farm_stats={shots=0,layups=0,dribbles=0,chains=0,clutches=0,contests=0,rebounds=0,recoveries=0,requeues=0}
     function Engine:farm_summary()
         local s=self.farm_stats
-        return self.farm_status.." / Clock "..(self.farm_clock and string.format("%.1fs",self.farm_clock) or "--").."\nMatches "..self.farm_matches.."  Shots "..s.shots.."  Dribbles "..s.dribbles.."\nContests "..s.contests.."  Rebound attempts "..s.rebounds.."  Recoveries "..s.recoveries.."\nLast move: "..self.farm_last_move.." / Finish attempts "..s.layups
+        return self.farm_status.." / Clock "..(self.farm_clock and string.format("%.1fs",self.farm_clock) or "--").."\nMatches "..self.farm_matches.."  Shots "..s.shots.."  Dribbles "..s.dribbles.."\nContests "..s.contests.."  Rebound attempts "..s.rebounds.."  Recoveries "..s.recoveries.."\nLast move: "..self.farm_last_move.." / Finish attempts "..s.layups.." / Chains sent "..s.chains.." / Clutches "..s.clutches
     end
     local farm_file="vanta_badge_farm.json"; local farm_session
     local farm_http=game:GetService("HttpService")
@@ -4343,7 +4346,7 @@ local function create_pivot_modules(ctx)
         assert(type(writefile)=="function","Badge loop requires executor file access")
         writefile(farm_file,farm_http:JSONEncode({version=1,session=farm_session,enabled=enabled,mode=Engine.settings.farm_mode,
             anyRegion=Engine.settings.farm_any_region,autoPlay=Engine.settings.farm_auto_play,
-            shotRange=Engine.settings.farm_shot_range,dribble=Engine.settings.farm_dribble,openDrive=Engine.settings.farm_open_drive,allMoves=Engine.settings.farm_dribble_all,chains=Engine.settings.farm_chains,hopGathers=Engine.settings.farm_hop_gathers,variedShots=Engine.settings.farm_varied_shots,threeRange=Engine.settings.farm_three_range,matches=Engine.farm_matches,badgeLines=Engine.farm_badge_lines,stats=Engine.farm_stats}))
+            shotRange=Engine.settings.farm_shot_range,dribble=Engine.settings.farm_dribble,openDrive=Engine.settings.farm_open_drive,allMoves=Engine.settings.farm_dribble_all,chains=Engine.settings.farm_chains,hopGathers=Engine.settings.farm_hop_gathers,jelly=Engine.settings.farm_jelly,variedShots=Engine.settings.farm_varied_shots,threeRange=Engine.settings.farm_three_range,matches=Engine.farm_matches,badgeLines=Engine.farm_badge_lines,stats=Engine.farm_stats}))
     end
     local function farm_controllers()
         local aero=ctx.player:FindFirstChild("PlayerScripts")
@@ -4507,7 +4510,7 @@ local function create_pivot_modules(ctx)
             local code,name=Core.farm_offense_move(state,hint,80,24,catalog)
             entries[#entries+1]={code=code,name=name}
         end
-        return {entries=entries,index=1,next_at=now,expires=now+4}
+        return {entries=entries,index=1,next_at=now,expires=now+6}
     end
     function Engine:step_farm_combo(state,attributes,direction,now)
         local combo=state.combo
@@ -4522,7 +4525,7 @@ local function create_pivot_modules(ctx)
         state.last_dribble=now; self.farm_stats.dribbles=self.farm_stats.dribbles+1
         self.farm_last_move=move.name.." / chain "..combo.index.." of "..#combo.entries
         combo.index=combo.index+1; combo.next_at=now+(#move.code>=3 and .36 or .26)
-        if combo.index>#combo.entries then state.combo=nil; state.next_combo=now+1 end
+        if combo.index>#combo.entries then state.combo=nil; state.next_combo=now+1; self.farm_stats.chains=self.farm_stats.chains+1 end
         return true
     end
     function Core.farm_shot_plan(state,varied,now)
@@ -4880,13 +4883,64 @@ end]])
             Engine.autoload_teleporting=false; Engine:disarm_autoload_resume(); Engine.autoload_queued=false
         end
     end) end
+    function Core.farm_match_health(state,sample,now)
+        state.entered=state.entered or now
+        if sample.in_game==true or sample.on_court==true and sample.clock and sample.clock>0 then state.play_seen=true end
+        if type(sample.clock)=="number" and type(state.last_clock)=="number" and sample.clock<state.last_clock then state.play_seen=true end
+        state.last_clock=sample.clock
+        local terminal=tostring(sample.status or ""):lower():gsub("[^%a]","")
+        if terminal=="gameover" or terminal=="matchover" or terminal=="matchcomplete" or terminal=="gamecomplete" or terminal=="final" or terminal=="victory" or terminal=="defeat" then return "Scoreboard reports match ended" end
+        local signature=table.concat({tostring(sample.clock),tostring(sample.home),tostring(sample.away),tostring(sample.shot),tostring(sample.opponent_shot),tostring(sample.possession),tostring(sample.players)},"/")
+        if signature~=state.signature then state.signature=signature; state.progress_at=now end
+        if state.play_seen and (sample.in_game==false or sample.in_game==nil and sample.on_court==false) then
+            state.inactive_since=state.inactive_since or now
+            if now-state.inactive_since>=20 then return "Match no longer active" end
+        else state.inactive_since=nil end
+        if state.play_seen and sample.players==1 then
+            state.alone_since=state.alone_since or now
+            if now-state.alone_since>=30 then return "Opponent left / court empty" end
+        else state.alone_since=nil end
+        if sample.home~=nil or sample.away~=nil then
+            local score=tostring(sample.home).."/"..tostring(sample.away)
+            if score~=state.score then state.score=score; state.score_at=now end
+            if state.play_seen and now-state.score_at>=360 and (sample.clock==nil or sample.clock==0) then return "Stalled court / no score or running clock for 360 seconds" end
+        end
+        if state.play_seen and now-(state.progress_at or now)>=120 then return "Court stalled / no game progress for 120 seconds" end
+        if not state.play_seen and now-state.entered>=180 then return "Court did not start within 180 seconds" end
+    end
+    function Engine:farm_health_sample(state)
+        local ok,c=pcall(local_state); local attrs=ok and c and c.data and c.data.Attributes or {}
+        local current_clock=self:read_shot_clock(state,attrs.CourtNumber)
+        local sample={in_game=attrs.InGame,on_court=attrs.OnCourt,clock=current_clock,shot=attrs.ShotStartTime,possession=rig() and rig():GetAttribute("Basketball")==true,players=0}
+        pcall(function()
+            local court=state.clock_controller and state.clock_controller.CurrentCourt
+            if court then sample.home=court.Team1Score; sample.away=court.Team2Score; sample.status=court.Scoreboard and court.Scoreboard.LastStatus end
+        end)
+        for _,who in ipairs(players:GetPlayers()) do
+            sample.players=sample.players+1
+            if who~=ctx.player then local model=rig(who); local shot=model and tonumber(model:GetAttribute("ShotStartTime")); if shot then sample.opponent_shot=math.max(sample.opponent_shot or 0,shot) end end
+        end
+        return sample
+    end
+    function Engine:try_farm_jelly(state,attributes,settings)
+        if not settings.farm_jelly or not state.actions or not state.actions.Clutch or not Engine.auto_shoot_held or attributes.CanClutch~=true or attributes.InAir~=true or attributes.ReleasedShot~=false then return false end
+        if Core.shot_type(attributes.BaseAnimation,{action=attributes.Action})~="Layups" then return false end
+        local shot=attributes.ShotStartTime
+        if type(shot)~="number" or state.clutched_shot==shot then return false end
+        state.actions.Clutch:Fire()
+        state.clutched_shot=shot; state.last_shot=os.clock(); self.farm_stats.clutches=self.farm_stats.clutches+1
+        self.farm_last_move="Clutch layup attempt"
+        return true
+    end
     local function farm_boundary_report(state,origin)
         if os.clock()<(state.next_diagnostic or 0) then return end
         state.next_diagnostic=os.clock()+2
         pcall(function()
-            local b=state.bounds; local point=b and b.frame:PointToObjectSpace(origin)
-            writefile("vanta_badge_farm_runtime.json",farm_http:JSONEncode({build="2026.11.08.09",status=Engine.farm_status,role=state.role,basketSource=state.basket_source,shotClearance=state.shot_clearance and math.min(999,state.shot_clearance),stats=Engine.farm_stats,
-                position={origin.X,origin.Y,origin.Z},bounds=b and {source=b.source,x=b.x,z=b.z,localPosition={point.X,point.Y,point.Z}} or false,
+            local b=state.bounds
+            if b then for _,marker in ipairs(b.markers or {}) do if not marker.Parent or not marker:IsDescendantOf(workspace) then b=nil; break end end end
+            local point=b and origin and b.frame:PointToObjectSpace(origin)
+            writefile("vanta_badge_farm_runtime.json",farm_http:JSONEncode({build="2026.11.08.10",status=Engine.farm_status,focused=state.focused,returnReason=state.return_reason,returnAttempts=state.return_attempts,postgame=state.result_seen==true,progressAge=state.health and os.clock()-(state.health.progress_at or state.health.entered),shotClock=state.shot_clock,role=state.role,basketSource=state.basket_source,shotClearance=state.shot_clearance and math.min(999,state.shot_clearance),stats=Engine.farm_stats,
+                position=origin and {origin.X,origin.Y,origin.Z} or false,bounds=b and point and {source=b.source,x=b.x,z=b.z,localPosition={point.X,point.Y,point.Z}} or false,
                 boundaryBrake=state.boundary_braking==true,guard=state.guard==true,sprint=state.sprinting==true,keys=state.steering_keys or {}}))
         end)
     end
@@ -5022,7 +5076,7 @@ end]])
             farm_session=tostring(os.time())..":"..tostring(os.clock())
             farm_write(true)
             queue([[local ok,c=pcall(function() return game:GetService("HttpService"):JSONDecode(readfile("vanta_badge_farm.json")) end)
-if ok and c.enabled==true and c.session==]]..string.format("%q",farm_session)..[[ then loadstring(game:HttpGet("https://raw.githubusercontent.com/zyhnq/fuckyoumatthew/main/pivot_launcher.lua?v=20261108.09"))() end]])
+if ok and c.enabled==true and c.session==]]..string.format("%q",farm_session)..[[ then loadstring(game:HttpGet("https://raw.githubusercontent.com/zyhnq/fuckyoumatthew/main/pivot_launcher.lua?v=20261108.10"))() end]])
             Engine.farm_status="Starting"; return state
         end,
         step=function(scope,state,s,dt)
@@ -5030,13 +5084,16 @@ if ok and c.enabled==true and c.session==]]..string.format("%q",farm_session)..[
             if state.busy or state.teleporting or os.clock()<state.next_at then return end
             local function status(value) if Engine.farm_status~=value then Engine.farm_status=value; ctx.report("Badge farm / "..value) end end
             if type(isrbxactive)=="function" then local ok,active=pcall(isrbxactive); if ok and type(active)=="boolean" then state.focused=active end end
-            if not state.focused then state.combo=nil; farm_release(scope,state); status("Paused while Roblox is unfocused"); return end
-            if input:GetFocusedTextBox() or ctx.runner.current then state.combo=nil; farm_release(scope,state); status("Paused while typing or running a combo"); return end
-            local signature=s.farm_mode..tostring(s.farm_any_region)..tostring(s.farm_auto_play)..tostring(s.farm_shot_range)..tostring(s.farm_dribble)..tostring(s.farm_open_drive)..tostring(s.farm_dribble_all)..tostring(s.farm_chains)..tostring(s.farm_hop_gathers)..tostring(s.farm_varied_shots)..tostring(s.farm_three_range)
+            local report_root=root(); farm_boundary_report(state,report_root and report_root.Position)
+
+
+            local signature=s.farm_mode..tostring(s.farm_any_region)..tostring(s.farm_auto_play)..tostring(s.farm_shot_range)..tostring(s.farm_dribble)..tostring(s.farm_open_drive)..tostring(s.farm_dribble_all)..tostring(s.farm_chains)..tostring(s.farm_hop_gathers)..tostring(s.farm_jelly)..tostring(s.farm_varied_shots)..tostring(s.farm_three_range)
             if state.saved~=signature then farm_write(true); state.saved=signature end
             local mode=workspace:GetAttribute("Gamemode")
-            local ok,gui=pcall(farm_controllers)
-            if not ok then farm_release(scope,state); status("Waiting for game controllers"); state.next_at=os.clock()+1; return end
+            if state.last_mode~=mode then
+                state.last_mode=mode
+                if mode=="Blacktop" then state.health={entered=os.clock()}; state.result_seen=nil; state.return_pending=nil; state.return_at=nil end
+            end
             local function request(label,call,done)
                 state.busy=true; status(label)
                 task.spawn(function()
@@ -5049,6 +5106,21 @@ if ok and c.enabled==true and c.session==]]..string.format("%q",farm_session)..[
                     if not accepted or a~=true then status("Request failed: "..tostring(accepted and (b or "rejected") or a))
                     elseif done then local good,err=pcall(done,false); if not good then status("Request completion failed: "..tostring(err)) end end
                 end)
+            end
+            if mode=="Blacktop" then
+            local sample=Engine:farm_health_sample(state)
+            state.health=state.health or {entered=os.clock()}
+            local recovery=Core.farm_match_health(state.health,sample,os.clock())
+            if recovery and not state.return_pending and not state.result_seen then state.return_pending=true; state.return_reason=recovery; state.return_at=os.clock()+3; pcall(farm_write,true) end
+            end
+            local ok,gui=pcall(farm_controllers)
+            if not ok then
+                farm_release(scope,state)
+                if state.return_pending and os.clock()>=state.return_at then
+                    state.return_attempts=(state.return_attempts or 0)+1; state.return_at=os.clock()+math.min(60,state.return_attempts*10)
+                    request("Recovering stalled court",function() game:GetService("TeleportService"):Teleport(78438427735992,ctx.player); return true end)
+                else status("Waiting for game controllers"); state.next_at=os.clock()+1 end
+                return
             end
             if mode=="BlacktopMatchmaking" then
                 farm_release(scope,state)
@@ -5082,9 +5154,10 @@ if ok and c.enabled==true and c.session==]]..string.format("%q",farm_session)..[
                 return
             end
             if mode~="Blacktop" then farm_release(scope,state); status("Join public Blacktop matchmaking"); return end
-            local summary=gui:GetComponent("Summary")
+            local summary_ok,summary=pcall(function() return gui:GetComponent("Summary") end)
+            if not summary_ok then summary=nil end
             if summary and summary.Active==true and not state.result_seen then
-                state.result_seen=true; state.return_at=math.min(os.clock()+90,math.max(os.clock()+15,(tonumber(summary.ActiveUntil) or 0)+2))
+                state.result_seen=true; state.return_at=math.min(os.clock()+30,math.max(os.clock()+5,(tonumber(summary.ActiveUntil) or 0)+1))
                 Engine.farm_matches=Engine.farm_matches+1; Engine.farm_badge_lines={}
                 local pg=ctx.player:FindFirstChild("PlayerGui")
                 if pg then for _,o in ipairs(pg:GetDescendants()) do
@@ -5095,8 +5168,8 @@ if ok and c.enabled==true and c.session==]]..string.format("%q",farm_session)..[
                 end end
                 farm_write(true)
             end
-            if state.result_seen then
-                farm_release(scope,state); status("Match complete / waiting for postgame display")
+            if state.result_seen or state.return_pending then
+                state.combo=nil; farm_release(scope,state); status(state.return_reason and "Returning / "..state.return_reason or "Match complete / waiting for postgame display")
                 if os.clock()>=state.return_at then
                     state.return_attempts=(state.return_attempts or 0)+1
                     state.return_at=os.clock()+math.min(60,10*state.return_attempts)
@@ -5106,10 +5179,13 @@ if ok and c.enabled==true and c.session==]]..string.format("%q",farm_session)..[
                 end
                 return
             end
+            if not state.focused then state.combo=nil; farm_release(scope,state); status("Paused while Roblox is unfocused"); return end
+            if input:GetFocusedTextBox() or ctx.runner.current then state.combo=nil; farm_release(scope,state); status("Paused while typing or running a combo"); return end
             if not s.farm_auto_play then farm_release(scope,state); status("Match active / auto play off"); return end
             local success,c=pcall(local_state); local mine=root(); local model=rig()
             if not success or not c or not c.data or not c.data.Attributes or not mine or not model then farm_release(scope,state); status("Waiting for spawned court character"); return end
-            state.velocity=Core.farm_observe(state.history,"self",mine.Position,os.clock(),mine.AssemblyLinearVelocity)
+            state.self_motion=state.self_motion or {}
+            state.velocity=Core.guard_observe(state.self_motion,mine.Position,mine.AssemblyLinearVelocity,os.clock())
             farm_bounds(state,s,mine.Position,c.data.Attributes.CourtNumber)
             farm_boundary_report(state,mine.Position)
             if not state.bounds then state.shot_ready_since=nil; farm_release(scope,state); status("Movement paused / playable boundary markers unavailable"); return end
@@ -5133,6 +5209,12 @@ if ok and c.enabled==true and c.session==]]..string.format("%q",farm_session)..[
                 if not enabled then farm_release(scope,state); status("Auto Green unavailable: "..tostring(err)); state.next_at=os.clock()+3; return end
                 state.owned.meter_release=true
             end
+            Engine:try_farm_jelly(state,a,s)
+            if Engine.auto_shoot_held then
+                farm_release(scope,state)
+                if os.clock()-state.last_shot>1.5 then state.adapter.release() end
+                status("Timing shot"); return
+            end
             local safe_drift,drift_error=Core.farm_clamp(mine.Position+state.velocity*.3,state.bounds)
             local safe_position,position_error=Core.farm_clamp(mine.Position,state.bounds)
             if drift_error>.1 or position_error>.05 then
@@ -5141,11 +5223,6 @@ if ok and c.enabled==true and c.session==]]..string.format("%q",farm_session)..[
                 if Engine.auto_shoot_held then state.adapter.release(); Engine.auto_shoot_held=false end
                 farm_steer(scope,state,position_error>.05 and safe_position or safe_drift,not (held_ball(model) or model:GetAttribute("Basketball")==true))
                 status("Boundary brake / returning inside"); return
-            end
-            if Engine.auto_shoot_held then
-                farm_release(scope,state)
-                if os.clock()-state.last_shot>1.5 then state.adapter.release() end
-                status("Timing shot"); return
             end
             local dribbling=type(a.Action)=="string" and a.Action:lower():find("dribbl",1,true)~=nil
             if a.Action and a.Action~="" and a.Action~="Guard" and a.Action~="Guarding" and not dribbling then state.combo=nil; state.shot_ready_since=nil; farm_release(scope,state); status("Waiting for current action"); return end
@@ -5262,7 +5339,7 @@ if ok and c.enabled==true and c.session==]]..string.format("%q",farm_session)..[
                     if basket then
                         local shot=handler.model:GetAttribute("ShotStartTime")
                         local shooting=handler.model:GetAttribute("InAir")==true and (shot~=nil or handler.model:GetAttribute("Action")=="Shooting")
-                        if shooting and farm_flat(handler.position-mine.Position).Magnitude<9 and os.clock()-state.last_jump>1.1 and state.actions.Jump and (state.contested_handler~=handler.key or state.contested_shot~=shot) then
+                        if shooting and a.InAir~=true and farm_flat(handler.position-mine.Position).Magnitude<9 and os.clock()-state.last_jump>1.1 and state.actions.Jump and (state.contested_handler~=handler.key or state.contested_shot~=shot) then
                             state.contested_handler=handler.key; state.contested_shot=shot; state.last_jump=os.clock()
                             state.actions.Jump:Fire()
                             Engine.farm_stats.contests=Engine.farm_stats.contests+1
@@ -5321,6 +5398,7 @@ if ok and c.enabled==true and c.session==]]..string.format("%q",farm_session)..[
         if type(saved.allMoves)=="boolean" then Engine.settings.farm_dribble_all=saved.allMoves end
         if type(saved.chains)=="boolean" then Engine.settings.farm_chains=saved.chains end
         if type(saved.hopGathers)=="boolean" then Engine.settings.farm_hop_gathers=saved.hopGathers end
+        if type(saved.jelly)=="boolean" then Engine.settings.farm_jelly=saved.jelly end
         if type(saved.variedShots)=="boolean" then Engine.settings.farm_varied_shots=saved.variedShots end
         Engine.settings.farm_three_range=Core.bounded(saved.threeRange,36,48) or 42
         if type(saved.stats)=="table" then for key in pairs(Engine.farm_stats) do Engine.farm_stats[key]=Core.bounded(saved.stats[key],0,100000000) or 0 end end
@@ -5933,7 +6011,7 @@ do
     local rail_line=frame(shell,20,97,660,1,theme.line)
     local top_line=frame(shell,20,54,660,1,theme.line)
     local logo=label(shell,"VANTA",20,12,140,28,19,theme.text); logo.Font=Enum.Font.GothamBold; logo.TextXAlignment=Enum.TextXAlignment.Left
-    local build_label=label(shell,"BUILD 2026.11.08.09",242,17,150,18,10,theme.muted); build_label.Name="PivotBuild"; build_label.Font=Enum.Font.RobotoMono; build_label.TextWrapped=false
+    local build_label=label(shell,"BUILD 2026.11.08.10",242,17,150,18,10,theme.muted); build_label.Name="PivotBuild"; build_label.Font=Enum.Font.RobotoMono; build_label.TextWrapped=false
     local heading=label(shell,"Practical Basketball",94,14,240,26,11,theme.muted); heading.Font=Enum.Font.GothamMedium
     close.BackgroundColor3=theme.rail; close.TextColor3=theme.muted; close.TextSize=14; corner(close,4)
     local search=make("TextBox",{Text="",PlaceholderText="Find a control...",PlaceholderColor3=theme.muted,Position=UDim2.fromOffset(484,10),Size=UDim2.fromOffset(166,23),
