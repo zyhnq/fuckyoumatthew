@@ -4212,6 +4212,35 @@ local function create_pivot_modules(ctx)
         self.module_preset_status=valid.autoload and "Autoload on startup: "..valid.autoload or "Preset autoload off"
         ctx.report(self.module_preset_status)
     end
+    function Engine:capture_profile_extras()
+        local recording
+        if #self.recording.steps==0 then recording={version=1,steps={}} else local err; recording,err=Core.validate_recording(self.recording); assert(recording,err) end
+        local library,err=self:validate_dribble_library(self.dribble_library); assert(library,err)
+        local draft={}
+        for _,step in ipairs(self.dribble_draft) do draft[#draft+1]={move=step.move,sprint=step.sprint} end
+        local goal=self.defensive_rim
+        return {recording=recording,dribbles=library,draft=draft,goal=goal and goal.Parent and {path=goal:GetFullName(),place=game.PlaceId,position={goal.Position.X,goal.Position.Y,goal.Position.Z}} or nil}
+    end
+    function Engine:restore_profile_extras(data)
+        if data==nil then return end
+        assert(type(data)=="table","Invalid profile extras")
+        local recording,err
+        if type(data.recording)=="table" and type(data.recording.steps)=="table" and #data.recording.steps==0 then recording={version=1,steps={}} else recording,err=Core.validate_recording(data.recording); assert(recording,err) end
+        local library,reason=self:validate_dribble_library(data.dribbles); assert(library,reason)
+        local draft={}
+        if type(data.draft)=="table" and #data.draft>0 then
+            local validated,why=self:validate_dribble_library({version=1,bindings={},combos={{name="Draft",key="None",gap=180,steps=data.draft}}}); assert(validated,why)
+            draft=validated.combos[1].steps
+        end
+        local goal
+        if type(data.goal)=="table" and data.goal.place==game.PlaceId and type(data.goal.path)=="string" and type(data.goal.position)=="table" then
+            local p=data.goal.position
+            if type(p[1])=="number" and type(p[2])=="number" and type(p[3])=="number" then
+                for _,item in ipairs(candidates("rims")) do if item.object:GetFullName()==data.goal.path and (item.object.Position-Vector3.new(p[1],p[2],p[3])).Magnitude<3 then goal=item.object; break end end
+            end
+        end
+        self.recording=recording; self.dribble_library=library; self.dribble_draft=draft; self.defensive_rim=goal
+    end
     function Engine:autoload_saved_modules()
         if self.autoload_attempted or not self.saved_modules.autoload then return false end
         self.autoload_attempted=true
@@ -4238,10 +4267,11 @@ local function create_pivot_modules(ctx)
     Engine.cosmetic_fields.badge_farm={{"farm_shot_range","Shoot within / studs"}}
     Engine.cosmetic_toggles.badge_farm={{"farm_any_region","Any region"},{"farm_auto_play","Auto play matches"},{"farm_dribble","Use controlled dribble moves"}}
     Engine.farm_status="Off"; Engine.farm_matches=0; Engine.farm_badge_lines={}
+    Engine.farm_last_move="None"
     Engine.farm_stats={shots=0,dribbles=0,contests=0,rebounds=0,recoveries=0,requeues=0}
     function Engine:farm_summary()
         local s=self.farm_stats
-        return self.farm_status.."\nMatches "..self.farm_matches.."  Shots "..s.shots.."  Dribbles "..s.dribbles.."\nContests "..s.contests.."  Rebound attempts "..s.rebounds.."  Recoveries "..s.recoveries
+        return self.farm_status.."\nMatches "..self.farm_matches.."  Shots "..s.shots.."  Dribbles "..s.dribbles.."\nContests "..s.contests.."  Rebound attempts "..s.rebounds.."  Recoveries "..s.recoveries.."\nLast move: "..self.farm_last_move
     end
     local farm_file="vanta_badge_farm.json"; local farm_session
     local farm_http=game:GetService("HttpService")
@@ -4389,6 +4419,25 @@ local function create_pivot_modules(ctx)
         local blended=previous*(1-alpha)+direction*alpha
         return blended.Magnitude>.01 and blended.Unit or direction
     end
+    function Core.farm_offense_move(state,hint,stamina)
+        local pools={Z={{"Z","Left crossover"},{"ZZ","Double crossover left"},{"CX","Behind the back left"},{"VZ","Between the legs left"},{"CXZ","Spin left"}},C={{"C","Right crossover"},{"CC","Double crossover right"},{"ZX","Behind the back right"},{"VC","Between the legs right"},{"ZXC","Spin right"}},X={{"X","Stepback"},{"XX","Snatchback"},{"XZ","Double behind right"},{"XC","Double behind left"}}}
+        local pool=pools[hint] or pools.C
+        state.dribble_index=(state.dribble_index or 0)+1
+        local chosen=pool[(state.dribble_index-1)%#pool+1]
+        if stamina and stamina<30 then chosen=pool[1] end
+        if chosen[1]==state.last_combo and #pool>1 and not (stamina and stamina<30) then chosen=pool[state.dribble_index%#pool+1] end
+        state.last_combo=chosen[1]; state.last_move_name=chosen[2]
+        return chosen[1],chosen[2],#chosen[1]>=3 and 2.2 or #chosen[1]==2 and 1.8 or 1.4
+    end
+    function Core.farm_defender_down(model,part)
+        for _,key in ipairs({"AnkleBroken","AnklesBroken","KnockedDown"}) do if model:GetAttribute(key)==true then return true end end
+        local action=tostring(model:GetAttribute("Action") or ""):lower():gsub("[^%a]","")
+        if action:find("anklebreak",1,true) or action:find("anklebroken",1,true) or action:find("brokenankle",1,true) or action:find("stumble",1,true) or action:find("knockdown",1,true) then return true end
+        local humanoid=model:FindFirstChildOfClass("Humanoid")
+        if humanoid and humanoid.PlatformStand==true then return true end
+        if part and part.CFrame and math.abs(part.CFrame.UpVector.Y)<.4 then return true end
+        return false
+    end
     function Core.farm_separation(origin,basket,opponents,bounds,range)
         local flat=function(v) return Vector3.new(v.X,0,v.Z) end
         local toward=flat(basket-origin); if toward.Magnitude<.1 then return origin,"X" end
@@ -4430,12 +4479,12 @@ local function create_pivot_modules(ctx)
     end
     function Core.farm_shot_clearance(origin,opponents,horizon)
         local clearance=math.huge
-        for _,other in ipairs(opponents) do
+        for _,other in ipairs(opponents) do if not other.down then
             local offset=farm_flat(other.position-origin); local velocity=farm_cap(farm_flat(other.velocity or Vector3.zero),40)
             local speed2=velocity:Dot(velocity)
             local t=speed2>.01 and math.max(0,math.min(horizon or .4,-offset:Dot(velocity)/speed2)) or 0
             clearance=math.min(clearance,(offset+velocity*t).Magnitude)
-        end
+        end end
         return clearance
     end
     function Core.farm_relevant(position,origin,bounds,court,other_court,airborne)
@@ -4528,7 +4577,7 @@ local function create_pivot_modules(ctx)
                 local ball=held_ball(other)
                 local velocity=Core.farm_observe(state.history,who,point.Position,os.clock(),point.AssemblyLinearVelocity)
                 local target=teammate and teammates or list
-                target[#target+1]={key=who,model=other,position=point.Position,velocity=velocity,part=point,ball=ball,has_ball=ball~=nil or other:GetAttribute("Basketball")==true}
+                target[#target+1]={key=who,model=other,position=point.Position,velocity=velocity,part=point,ball=ball,has_ball=ball~=nil or other:GetAttribute("Basketball")==true,down=Core.farm_defender_down(other,point)}
             end
         end end
         for key,item in pairs(state.history) do if os.clock()-item.time>5 then state.history[key]=nil end end
@@ -4622,7 +4671,7 @@ local function create_pivot_modules(ctx)
         state.next_diagnostic=os.clock()+2
         pcall(function()
             local b=state.bounds; local point=b and b.frame:PointToObjectSpace(origin)
-            writefile("vanta_badge_farm_runtime.json",farm_http:JSONEncode({build="2026.11.08.05",status=Engine.farm_status,role=state.role,basketSource=state.basket_source,shotClearance=state.shot_clearance and math.min(999,state.shot_clearance),stats=Engine.farm_stats,
+            writefile("vanta_badge_farm_runtime.json",farm_http:JSONEncode({build="2026.11.08.06",status=Engine.farm_status,role=state.role,basketSource=state.basket_source,shotClearance=state.shot_clearance and math.min(999,state.shot_clearance),stats=Engine.farm_stats,
                 position={origin.X,origin.Y,origin.Z},bounds=b and {source=b.source,x=b.x,z=b.z,localPosition={point.X,point.Y,point.Z}} or false,
                 boundaryBrake=state.boundary_braking==true,guard=state.guard==true,sprint=state.sprinting==true,keys=state.steering_keys or {}}))
         end)
@@ -4699,7 +4748,7 @@ local function create_pivot_modules(ctx)
             farm_session=tostring(os.time())..":"..tostring(os.clock())
             farm_write(true)
             queue([[local ok,c=pcall(function() return game:GetService("HttpService"):JSONDecode(readfile("vanta_badge_farm.json")) end)
-if ok and c.enabled==true and c.session==]]..string.format("%q",farm_session)..[[ then loadstring(game:HttpGet("https://raw.githubusercontent.com/zyhnq/fuckyoumatthew/main/pivot_launcher.lua?v=20261108.05"))() end]])
+if ok and c.enabled==true and c.session==]]..string.format("%q",farm_session)..[[ then loadstring(game:HttpGet("https://raw.githubusercontent.com/zyhnq/fuckyoumatthew/main/pivot_launcher.lua?v=20261108.06"))() end]])
             Engine.farm_status="Starting"; return state
         end,
         step=function(scope,state,s,dt)
@@ -4843,6 +4892,7 @@ if ok and c.enabled==true and c.session==]]..string.format("%q",farm_session)..[
                 local threat=math.huge
                 for _,other in ipairs(opponents) do local predicted=other.position+farm_cap(other.velocity*.18,3); threat=math.min(threat,farm_flat(predicted-mine.Position).Magnitude) end
                 state.shot_clearance=Core.farm_shot_clearance(mine.Position,opponents,.4)
+                local defender_down=false; for _,opponent in ipairs(opponents) do if opponent.down then defender_down=true; break end end
                 if state.shot_clearance>=10 then state.pressure_since=nil; state.attack_escape=nil
                 else state.pressure_since=state.pressure_since or os.clock() end
                 if state.pressure_since and os.clock()-state.pressure_since>2.5 and os.clock()>(state.next_separation or 0) then
@@ -4856,21 +4906,23 @@ if ok and c.enabled==true and c.session==]]..string.format("%q",farm_session)..[
                 local goal,blocked,route=Core.farm_route(mine.Position,destination,opponents,state.offense_route,os.clock(),true,state.bounds)
                 if separating then goal=state.attack_escape; blocked=false; route=nil end
                 state.offense_route=route
-                if distance<=s.farm_shot_range and state.shot_clearance>=10 and not dribbling and a.Debounce~=true then
+                if distance<=s.farm_shot_range and state.shot_clearance>=10 and (not dribbling or defender_down) and a.Debounce~=true then
                     state.offense_route=nil
                     farm_release(scope,state); status("Setting up shot")
                     state.shot_ready_since=state.shot_ready_since or os.clock()
-                    local settled=os.clock()-state.shot_ready_since>=.12 and state.velocity.Magnitude<3
+                    local settled=os.clock()-state.shot_ready_since>=(defender_down and .04 or .12) and state.velocity.Magnitude<3
                     if settled and os.clock()-state.last_shot>=2 and not state.adapter.held() and a.ReleasedShot~=false then
                         state.shot_ready_since=nil; state.last_shot=os.clock(); Engine.auto_shoot_held=true; state.adapter.begin()
                         Engine.farm_stats.shots=Engine.farm_stats.shots+1
                     end
                 else
                     state.shot_ready_since=nil
-                    if s.farm_dribble and threat<8 and not dribbling and a.Debounce~=true and os.clock()-(state.last_dribble or -10)>2.1 and state.actions.Dribble then
+                    if s.farm_dribble and threat<8 and not dribbling and a.Debounce~=true and os.clock()-(state.last_dribble or -10)>(state.dribble_cooldown or 1.4) and state.actions.Dribble then
                         local direction=farm_flat(goal-mine.Position)
                         if direction.Magnitude>.1 then
-                            local move=separating and state.escape_move or route and route.side and route.side<0 and "Z" or "X"
+                            local hint=separating and state.escape_move or route and (route.side<0 and "Z" or "C") or (state.dribble_index or 0)%2==0 and "Z" or "C"
+                            local move,name,cooldown=Core.farm_offense_move(state,hint,state.stamina)
+                            state.dribble_cooldown=cooldown; Engine.farm_last_move=name
                             state.actions.Dribble:Fire(move,state.sprinting==true,direction.Unit)
                             state.last_dribble=os.clock(); Engine.farm_stats.dribbles=Engine.farm_stats.dribbles+1
                         end
@@ -4961,7 +5013,7 @@ if ok and c.enabled==true and c.session==]]..string.format("%q",farm_session)..[
     -- Read presets only after the entire module catalog and its settings exist.
     for key,value in pairs(Engine.settings) do if preset_defaults[key]==nil then preset_defaults[key]=value end end
     if type(readfile)=="function" then pcall(function() Engine:read_saved_modules() end) end
-    Engine:autoload_saved_modules()
+    if not ctx.skip_preset_autoload then Engine:autoload_saved_modules() end
     return Engine
 end
 
@@ -4993,7 +5045,8 @@ local backend = native and "Native keys" or (virtual and "VirtualInputManager (u
 local file = "c4_practical_hub_v2.json"
 local disk_read = type(readfile)=="function"
 local disk_write = type(writefile)=="function"
-local module_profiles = {}
+local module_profiles,profile_extras = {},{}
+local profile_autoload=0
 local restored = "Session profiles"
 if disk_read then
     local ok, data = pcall(function()
@@ -5003,9 +5056,12 @@ if disk_read then
         for index=1,3 do
             profiles[index]=Core.validate(data.profiles[tostring(index)])
             if type(data.modules)=="table" then module_profiles[index]=data.modules[tostring(index)] end
+            if type(data.extras)=="table" then profile_extras[index]=data.extras[tostring(index)] end
         end
-        if profiles[1] then config=Core.copy(profiles[1]) end
-        restored="Saved profiles restored; slot 1 is the startup profile"
+        local chosen=tonumber(data.autoloadSlot)
+        if chosen and chosen%1==0 and chosen>=1 and chosen<=3 and profiles[chosen] and module_profiles[chosen] then profile_autoload=chosen; config=Core.copy(profiles[chosen])
+        elseif data.autoloadSlot==nil and profiles[1] then config=Core.copy(profiles[1]) end
+        restored=profile_autoload>0 and "Full profile "..profile_autoload.." selected for autoload" or "Saved profiles restored"
     end
 end
 local runner = Core.runner({
@@ -5192,10 +5248,28 @@ end
 button(combo_page,"RUN SEQUENCE / configured hotkey",combo)
 local profile_page=pages.Profiles
 label(profile_page,"PROFILES + HOTKEYS",28,accent)
-label(profile_page,"Save profile stores controls, enabled modules and their settings. Load profile restores them. Older profiles need saving again to include modules.",52,muted)
-local slot=1
-local slot_button
-slot_button=button(profile_page,"SLOT 1 / click to cycle",function() slot=slot%3+1; slot_button.Text="SLOT "..slot.." / click to cycle" end)
+label(profile_page,"Save profile stores controls, modules, settings and combos. Enable Autoload this profile to restore the selected slot at startup.",52,muted)
+local slot=profile_autoload>0 and profile_autoload or 1
+local slot_button,autoload_button
+local function profile_equal(a,b)
+    if type(a)~=type(b) then return false end
+    if type(a)~="table" then return a==b end
+    for key,value in pairs(a) do if not profile_equal(value,b[key]) then return false end end
+    for key in pairs(b) do if a[key]==nil then return false end end
+    return true
+end
+local function persist_profiles()
+    assert(disk_write and disk_read,"Full-profile autoload requires file read/write access")
+    local data={version=2,autoloadSlot=profile_autoload,profiles={},modules={},extras={}}
+    for index=1,3 do if profiles[index] then data.profiles[tostring(index)]=profiles[index]; data.modules[tostring(index)]=module_profiles[index]; data.extras[tostring(index)]=profile_extras[index] end end
+    writefile(file,http:JSONEncode(data))
+    local raw=readfile(file); assert(type(raw)=="string" and #raw<=262144,"Invalid profile readback")
+    assert(profile_equal(data,http:JSONDecode(raw)),"Profile write could not be verified")
+end
+local function refresh_profile_autoload()
+    if autoload_button then autoload_button.Text=profile_autoload==slot and "Autoload this profile: ON" or "Autoload this profile: OFF" end
+end
+slot_button=button(profile_page,"SLOT "..slot.." / click to cycle",function() slot=slot%3+1; slot_button.Text="SLOT "..slot.." / click to cycle"; refresh_profile_autoload() end)
 field(profile_page,"shot","Shot hotkey / F1-F12 or RightShift")
 field(profile_page,"combo","Combo hotkey / unique; F8 is reserved")
 field(profile_page,"menu","Menu hotkey / unique; F8 is reserved")
@@ -5203,20 +5277,26 @@ button(profile_page,"SAVE SELECTED SLOT",protect(function()
     if not commit() then return end
     profiles[slot]=Core.copy(config)
     if PivotModules then
-        module_profiles[slot]=PivotModules:capture_enabled_modules()
-        module_profiles[slot].name="Slot "..slot
+        module_profiles[slot]=PivotModules:capture_enabled_modules(); module_profiles[slot].name="Slot "..slot
+        profile_extras[slot]=PivotModules:capture_profile_extras()
     end
     if not disk_write then report("Slot "..slot.." saved for this session; disk access unavailable."); return end
-    local data={version=2,profiles={},modules={}}
-    for index=1,3 do if profiles[index] then data.profiles[tostring(index)]=profiles[index]; data.modules[tostring(index)]=module_profiles[index] end end
-    writefile(file,http:JSONEncode(data)); report("Saved slot "..slot.." / "..(module_profiles[slot] and #module_profiles[slot].enabled or 0).." modules / controls and module settings")
+    persist_profiles(); report("Saved full profile "..slot.." / "..(module_profiles[slot] and #module_profiles[slot].enabled or 0).." modules / file verified")
 end))
+autoload_button=button(profile_page,"Autoload this profile: OFF",protect(function()
+    assert(profiles[slot] and module_profiles[slot],"Save this full profile first")
+    local previous=profile_autoload; profile_autoload=profile_autoload==slot and 0 or slot
+    local ok,err=pcall(persist_profiles)
+    if not ok then profile_autoload=previous; error("Autoload was not saved: "..tostring(err)) end
+    refresh_profile_autoload(); report(profile_autoload>0 and "Full profile "..profile_autoload.." will autoload on startup" or "Full-profile autoload off")
+end))
+refresh_profile_autoload()
 button(profile_page,"LOAD SELECTED SLOT",protect(function()
     if not profiles[slot] then report("This slot is empty."); return end
     if not cancel("Loading profile...") then return end
     config=Core.copy(profiles[slot]); sync()
     if PivotModules and module_profiles[slot] then
-        PivotModules:load_module_snapshot(module_profiles[slot])
+        PivotModules:restore_profile_extras(profile_extras[slot]); PivotModules:load_module_snapshot(module_profiles[slot])
         if PivotUI then PivotUI.set_theme(PivotModules.settings.theme_mode); PivotUI.edit_theme(PivotModules.settings) end
     else report("Loaded controls for slot "..slot.." / older profile has no modules; enable yours and Save profile again") end
 end))
@@ -5513,7 +5593,7 @@ do
     local rail_line=frame(shell,20,97,660,1,theme.line)
     local top_line=frame(shell,20,54,660,1,theme.line)
     local logo=label(shell,"VANTA",20,12,140,28,19,theme.text); logo.Font=Enum.Font.GothamBold; logo.TextXAlignment=Enum.TextXAlignment.Left
-    local build_label=label(shell,"BUILD 2026.11.08.05",242,17,150,18,10,theme.muted); build_label.Name="PivotBuild"; build_label.Font=Enum.Font.RobotoMono; build_label.TextWrapped=false
+    local build_label=label(shell,"BUILD 2026.11.08.06",242,17,150,18,10,theme.muted); build_label.Name="PivotBuild"; build_label.Font=Enum.Font.RobotoMono; build_label.TextWrapped=false
     local heading=label(shell,"Practical Basketball",94,14,240,26,11,theme.muted); heading.Font=Enum.Font.GothamMedium
     close.BackgroundColor3=theme.rail; close.TextColor3=theme.muted; close.TextSize=14; corner(close,4)
     local search=make("TextBox",{Text="",PlaceholderText="Find a control...",PlaceholderColor3=theme.muted,Position=UDim2.fromOffset(484,10),Size=UDim2.fromOffset(166,23),
@@ -5871,8 +5951,16 @@ end
 
 do
     local ui=PivotUI
-    local engine=Core.create_pivot_modules({players=players,player=player,input=input,run=run_service,runner=runner,gui=gui,connect=connect,report=report,reserved_keys=function() return {config.shot,config.combo,config.menu,"F8"} end})
+    local engine=Core.create_pivot_modules({players=players,player=player,input=input,run=run_service,runner=runner,gui=gui,connect=connect,report=report,skip_preset_autoload=profile_autoload>0,reserved_keys=function() return {config.shot,config.combo,config.menu,"F8"} end})
     PivotModules=engine
+    if profile_autoload>0 and not engine.registry.active.badge_farm then
+        local ok,err=pcall(function()
+            engine:restore_profile_extras(profile_extras[profile_autoload])
+            engine:load_module_snapshot(module_profiles[profile_autoload])
+            report("Autoload full profile "..profile_autoload.." / "..engine.module_preset_status)
+        end)
+        if not ok then report("Full-profile autoload failed: "..tostring(err)) end
+    end
     local theme=ui.theme
     local function paint_switch(button,on)
         if button:GetAttribute("On")==on then return end
@@ -6384,7 +6472,7 @@ do
             action("Refresh preset list from disk",function() local count=engine:read_saved_modules(); report("Read "..count.." presets / click a preset's Load to enable its modules"); rebuild() end)
             for i,item in ipairs(engine.saved_modules.presets) do
                 local index=i
-                toggle_action("Autoload on startup  /  "..item.name,function() return engine.saved_modules.autoload==item.name end,function(on) engine:set_preset_autoload(index,on); rebuild() end)
+                toggle_action("Autoload modules only  /  "..item.name,function() return engine.saved_modules.autoload==item.name end,function(on) engine:set_preset_autoload(index,on); rebuild() end)
                 local button=action(item.name.." · "..#item.enabled.." modules · Load",function() engine:load_saved_modules(index); ui.set_theme(engine.settings.theme_mode); ui.edit_theme(engine.settings); rebuild() end)
                 button.Size=UDim2.new(1,-50,0,30)
                 local remove=own(ui.button(container,"×",function() engine:remove_saved_modules(index); rebuild() end)); remove.Position=UDim2.new(1,-42,0,y-36); remove.Size=UDim2.fromOffset(34,30)
@@ -6506,7 +6594,7 @@ do
                         for _,entry in ipairs((engine.cosmetic_fields or {})[id] or {}) do if engine:show_cosmetic_control(entry[1]) and entry[1]~="model_asset" and (entry[1]~="model_height" or not engine.settings.model_fit_pb) then field(entry[1],entry[2]) end end
                         for _,entry in ipairs((engine.cosmetic_toggles or {})[id] or {}) do local key=entry[1]; if (key~="model_follow_pose" or not engine.settings.model_fit_pb) and engine:show_cosmetic_control(key) then toggle_action(entry[2],function() return engine.settings[key] end,function(on) engine.settings[key]=on; if key=="model_fit_pb" then local active=engine.registry.active.custom_model; if active then engine.registry:disable("custom_model"); local ok,err=engine.registry:enable("custom_model",engine.settings); if not ok then report(tostring(err)) end end; rebuild() end end) end end
                         if id=="badge_farm" then
-                            farm_status_label=text(engine:farm_summary(),12,theme.muted,72)
+                            farm_status_label=text(engine:farm_summary(),12,theme.muted,96)
                             text("Rewards come from the game. Keep Roblox focused for automatic movement. F8 stops the loop.",11,theme.muted,48)
                         elseif id=="dribble_library" then
                             toggle_action("Sprint variants",function() return engine.settings.dribble_sprint end,function(on) engine.settings.dribble_sprint=on end)
