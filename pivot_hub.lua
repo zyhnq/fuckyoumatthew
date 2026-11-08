@@ -4104,6 +4104,11 @@ local function create_pivot_modules(ctx)
             local ids={}; for _,definition in ipairs(self.definitions) do if enabled[definition.id] then ids[#ids+1]=definition.id end end
             names[item.name:lower()]=true; valid.presets[i]={name=item.name,enabled=ids,settings=settings}
         end
+        if data.autoload~=nil then
+            if type(data.autoload)~="string" then return nil,"Invalid autoload preset" end
+            for _,item in ipairs(valid.presets) do if item.name:lower()==data.autoload:lower() then valid.autoload=item.name; break end end
+            if not valid.autoload then return nil,"Autoload preset not found" end
+        end
         return valid
     end
     function Engine:write_saved_modules()
@@ -4132,7 +4137,7 @@ local function create_pivot_modules(ctx)
         name=tostring(name or ""):match("^%s*(.-)%s*$"); if name=="" then name="Favorites" end
         local captured=capture_modules(name)
         assert(#captured.enabled>0,"No modules are enabled. Turn on the modules you want, then save again")
-        local item={name=name,enabled=captured.enabled,settings=captured.settings}; local value={version=1,presets={}}; local replaced=false
+        local item={name=name,enabled=captured.enabled,settings=captured.settings}; local value={version=1,presets={},autoload=self.saved_modules.autoload}; local replaced=false
         for i,old in ipairs(self.saved_modules.presets) do if old.name:lower()==name:lower() then value.presets[i]=item; replaced=true else value.presets[i]=old end end
         if not replaced then value.presets[#value.presets+1]=item end
         local valid,err=self:validate_saved_modules(value); assert(valid,err); self.saved_modules=valid
@@ -4164,10 +4169,39 @@ local function create_pivot_modules(ctx)
         ctx.report(self.module_preset_status); return loaded,failures
     end
     function Engine:remove_saved_modules(index)
-        assert(self.saved_modules.presets[index],"Preset not found"); table.remove(self.saved_modules.presets,index)
+        local item=assert(self.saved_modules.presets[index],"Preset not found")
+        if self.saved_modules.autoload==item.name then self.saved_modules.autoload=nil end
+        table.remove(self.saved_modules.presets,index)
         local ok=pcall(function() self:write_saved_modules() end); ctx.report(ok and "Removed module preset" or "Removed preset for this session")
     end
-    if type(readfile)=="function" then pcall(function() Engine:read_saved_modules() end) end
+    function Engine:set_preset_autoload(index,on)
+        assert(type(on)=="boolean","Autoload must be on or off")
+        local valid,err=self:validate_saved_modules(self.saved_modules); assert(valid,err)
+        local item=assert(valid.presets[index],"Preset not found")
+        if on then assert(#item.enabled>0,"Cannot autoload an empty preset") end
+        if on then valid.autoload=item.name elseif valid.autoload==item.name then valid.autoload=nil end
+        local previous=self.saved_modules; self.saved_modules=valid
+        local ok,reason=pcall(function() self:write_saved_modules() end)
+        if not ok then self.saved_modules=previous; error("Autoload could not be saved: "..tostring(reason)) end
+        self.module_preset_status=valid.autoload and "Autoload on startup: "..valid.autoload or "Preset autoload off"
+        ctx.report(self.module_preset_status)
+    end
+    function Engine:autoload_saved_modules()
+        if self.autoload_attempted or not self.saved_modules.autoload then return false end
+        self.autoload_attempted=true
+        if self.registry.active.badge_farm then
+            self.module_preset_status="Skipped preset autoload / badge farm continuation is active"
+            return false
+        end
+        for index,item in ipairs(self.saved_modules.presets) do if item.name==self.saved_modules.autoload then
+            local ok,loaded,failures=pcall(function() return self:load_saved_modules(index) end)
+            if not ok then self.module_preset_status="Autoload failed: "..tostring(loaded)
+            else self.module_preset_status="Autoload / "..self.module_preset_status end
+            ctx.report(self.module_preset_status)
+            return ok,loaded,failures
+        end end
+        return false
+    end
 
     -- Blacktop signatures verified against the user's queue and match captures.
     Engine.settings.farm_mode="1v1"; Engine.settings.farm_any_region=false
@@ -4624,7 +4658,7 @@ local function create_pivot_modules(ctx)
             farm_session=tostring(os.time())..":"..tostring(os.clock())
             farm_write(true)
             queue([[local ok,c=pcall(function() return game:GetService("HttpService"):JSONDecode(readfile("vanta_badge_farm.json")) end)
-if ok and c.enabled==true and c.session==]]..string.format("%q",farm_session)..[[ then loadstring(game:HttpGet("https://raw.githubusercontent.com/zyhnq/fuckyoumatthew/main/pivot_launcher.lua?v=20261108.03"))() end]])
+if ok and c.enabled==true and c.session==]]..string.format("%q",farm_session)..[[ then loadstring(game:HttpGet("https://raw.githubusercontent.com/zyhnq/fuckyoumatthew/main/pivot_launcher.lua?v=20261108.04"))() end]])
             Engine.farm_status="Starting"; return state
         end,
         step=function(scope,state,s,dt)
@@ -4872,6 +4906,10 @@ if ok and c.enabled==true and c.session==]]..string.format("%q",farm_session)..[
     end)
     ctx.connect(input.TextBoxFocused,function() Engine:stop_controls() end)
     ctx.connect(input.InputBegan,function(event) if event.KeyCode==Enum.KeyCode.F8 then Engine:stop() end end)
+    -- Read presets only after the entire module catalog and its settings exist.
+    for key,value in pairs(Engine.settings) do if preset_defaults[key]==nil then preset_defaults[key]=value end end
+    if type(readfile)=="function" then pcall(function() Engine:read_saved_modules() end) end
+    Engine:autoload_saved_modules()
     return Engine
 end
 
@@ -5423,7 +5461,7 @@ do
     local rail_line=frame(shell,20,97,660,1,theme.line)
     local top_line=frame(shell,20,54,660,1,theme.line)
     local logo=label(shell,"VANTA",20,12,140,28,19,theme.text); logo.Font=Enum.Font.GothamBold; logo.TextXAlignment=Enum.TextXAlignment.Left
-    local build_label=label(shell,"BUILD 2026.11.08.03",242,17,150,18,10,theme.muted); build_label.Name="PivotBuild"; build_label.Font=Enum.Font.RobotoMono; build_label.TextWrapped=false
+    local build_label=label(shell,"BUILD 2026.11.08.04",242,17,150,18,10,theme.muted); build_label.Name="PivotBuild"; build_label.Font=Enum.Font.RobotoMono; build_label.TextWrapped=false
     local heading=label(shell,"Practical Basketball",94,14,240,26,11,theme.muted); heading.Font=Enum.Font.GothamMedium
     close.BackgroundColor3=theme.rail; close.TextColor3=theme.muted; close.TextSize=14; corner(close,4)
     local search=make("TextBox",{Text="",PlaceholderText="Find a control...",PlaceholderColor3=theme.muted,Position=UDim2.fromOffset(484,10),Size=UDim2.fromOffset(166,23),
@@ -6293,6 +6331,7 @@ do
             action("Refresh preset list from disk",function() local count=engine:read_saved_modules(); report("Read "..count.." presets / click a preset's Load to enable its modules"); rebuild() end)
             for i,item in ipairs(engine.saved_modules.presets) do
                 local index=i
+                toggle_action("Autoload on startup  /  "..item.name,function() return engine.saved_modules.autoload==item.name end,function(on) engine:set_preset_autoload(index,on); rebuild() end)
                 local button=action(item.name.." · "..#item.enabled.." modules · Load",function() engine:load_saved_modules(index); ui.set_theme(engine.settings.theme_mode); ui.edit_theme(engine.settings); rebuild() end)
                 button.Size=UDim2.new(1,-50,0,30)
                 local remove=own(ui.button(container,"×",function() engine:remove_saved_modules(index); rebuild() end)); remove.Position=UDim2.new(1,-42,0,y-36); remove.Size=UDim2.fromOffset(34,30)
