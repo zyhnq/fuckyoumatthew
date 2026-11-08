@@ -805,6 +805,31 @@ local function create_pivot_modules(ctx)
     local function finish_pulse(scope,state)
         if state.pulse and os.clock()>=state.release_at then hold(scope,state.pulse,false); state.pulse=nil end
     end
+    Engine.settings.guard_contest=true
+    function Core.guard_choose(list,origin,previous)
+        local best,distance,retained,has_handler
+        for _,item in ipairs(list) do if item.has_ball then has_handler=true; break end end
+        for _,item in ipairs(list) do if not has_handler or item.has_ball then
+            local d=(item.position-origin).Magnitude
+            if not distance or d<distance then best=item; distance=d end
+            if item.key==previous then retained=item end
+        end end
+        if retained and (retained.position-origin).Magnitude<=distance+3 then return retained end
+        return best
+    end
+    function Core.guard_motion(delta,velocity,arrived,target_speed)
+        delta=Vector3.new(delta.X,0,delta.Z); velocity=Vector3.new(velocity.X,0,velocity.Z)
+        local moving=(target_speed or 0)>4
+        local arrival=arrived and (moving and 1.1 or 1.7) or (moving and .65 or 1.05)
+        local settled=delta.Magnitude<arrival and velocity.Magnitude<3.5
+        if settled then return Vector3.zero,true,false end
+        local correction=velocity*.14
+        if correction.Magnitude>2 then correction=correction.Unit*2 end
+        local projected=delta-correction
+        local braking=velocity.Magnitude>4 and (delta.Magnitude<1 or projected:Dot(delta)<0)
+        if braking then return -velocity.Unit,false,true end
+        return projected.Magnitude>.01 and projected.Unit or Vector3.zero,false,false
+    end
     local function guard_holds(scope,state,guard,sprint)
         local failure
         for _,item in ipairs({{"guard",guard,"HoldG","G"},{"sprint",sprint,"Sprint","LeftShift"}}) do
@@ -822,7 +847,7 @@ local function create_pivot_modules(ctx)
     end
     local function guard_release(scope,state)
         local ok,err=pcall(guard_holds,scope,state,false,false); release_owned(scope)
-        state.steering=nil; state.keys=nil; state.arrived=nil; state.route=nil
+        state.steering=nil; state.keys=nil; state.arrived=nil; state.route=nil; state.pulse=nil; state.pending_contest=nil
         if not ok then ctx.report("Guard release: "..tostring(err)) end
     end
     local function guard_candidate(model,part,own,mine,a,s,state)
@@ -837,8 +862,9 @@ local function create_pivot_modules(ctx)
         return not state.bounds or Core.farm_relevant(part.Position,mine.Position,state.bounds,court,other,false)
     end
     add("guard","Guard selected player","Defense","Predicts cuts, holds guard and stays on the basket side with controlled movement",{start=function(scope,s)
-        assert(root(),"Enter a court before enabling Auto Guard"); local model,part=selected_target(s); assert(Engine.defensive_rim and Engine.defensive_rim.Parent,"Select your defensive rim first")
-        local state={model=model,part=part,history={},focused=true,next_target=0}
+        assert(root(),"Enter a court before enabling Auto Guard"); assert(Engine.defensive_rim and Engine.defensive_rim.Parent,"Select your defensive rim first")
+        local ok,model,part=pcall(selected_target,s)
+        local state={model=ok and model or nil,part=ok and part or nil,history={},focused=true,next_target=0,last_contest=-10,shot_seen=ok and model:GetAttribute("ShotStartTime") or nil}
         local _,actions=Engine:guard_context(state,root().Position); state.actions=actions
         scope:defer(function() guard_release(scope,state) end)
         local lost=input.WindowFocusReleased:Connect(function() state.focused=false; guard_release(scope,state) end)
@@ -853,28 +879,27 @@ local function create_pivot_modules(ctx)
         if not state.actions and actions then
             guard_release(scope,state); state.actions=actions
         end
-        if not state.focused or input:GetFocusedTextBox() or ctx.runner.current or a.CanMove==false or a.OnCourt==false or a.Fouled==true then guard_release(scope,state); return end
-        if os.clock()>=state.next_target or not state.part or not state.part.Parent then
+        if not state.focused or input:GetFocusedTextBox() or ctx.runner.current or a.CanMove==false or a.OnCourt==false or a.Fouled==true or held_ball(own) or own:GetAttribute("Basketball")==true then guard_release(scope,state); return end
+        finish_pulse(scope,state)
+        if os.clock()>=state.next_target or state.part and not state.part.Parent then
             state.next_target=os.clock()+.15
             local ok,model,part
             if s.guard_target=="" then
-                local distance
+                local list={}
                 for _,who in ipairs(players:GetPlayers()) do if who~=ctx.player then
                     local model2,part2=rig(who),root(who)
                     if guard_candidate(model2,part2,own,mine,a,s,state) then
-                        local d=(part2.Position-mine.Position).Magnitude
-                        if not distance or d<distance then model=model2; part=part2; distance=d end
+                        list[#list+1]={key=model2,part=part2,position=part2.Position,has_ball=held_ball(model2)~=nil or model2:GetAttribute("Basketball")==true}
                     end
                 end end
+                local chosen=Core.guard_choose(list,mine.Position,state.model)
+                if chosen then model=chosen.key; part=chosen.part end
                 ok=model~=nil
             else ok,model,part=pcall(selected_target,s) end
             if not ok then state.model=nil; state.part=nil; guard_release(scope,state); return end
-            if s.guard_target=="" and state.model and state.part and state.part.Parent then
-                local old=state.model
-                if guard_candidate(old,state.part,own,mine,a,s,state) and (state.part.Position-mine.Position).Magnitude<=(part.Position-mine.Position).Magnitude+3 then model=old; part=state.part end
-            end
             if model~=state.model or part~=state.part then
                 guard_release(scope,state); state.history={}; state.model=model; state.part=part
+                state.shot_seen=model:GetAttribute("ShotStartTime")
             end
         end
         if not state.model or not state.part or not state.part.Parent then guard_release(scope,state); return end
@@ -883,18 +908,24 @@ local function create_pivot_modules(ctx)
         local velocity=Core.farm_observe(state.history,"target",position,os.clock(),state.part.AssemblyLinearVelocity)
         local mine_velocity=Core.farm_observe(state.history,"self",mine.Position,os.clock(),mine.AssemblyLinearVelocity)
         local shooting=target:GetAttribute("InAir")==true and (target:GetAttribute("ShotStartTime")~=nil or target:GetAttribute("Action")=="Shooting")
+        local shot=target:GetAttribute("ShotStartTime")
+        if type(shot)=="number" and shot~=state.shot_seen then state.shot_seen=shot; state.pending_contest=os.clock() end
+        if state.pending_contest and os.clock()-state.pending_contest>.7 then state.pending_contest=nil end
+        if s.guard_contest and not registry.active.block and not registry.active.rebound and state.pending_contest and shooting and a.InAir~=true and os.clock()-state.pending_contest>=s.block_delay and os.clock()-state.last_contest>1.1 and (position-mine.Position).Magnitude<=math.min(s.block_range,9) then
+            if state.actions and state.actions.Jump then state.actions.Jump:Fire() else pulse(scope,state,jump_key(s)) end
+            state.last_contest=os.clock(); state.pending_contest=nil
+        end
         local desired=Core.farm_guard_goal(position,rim.Position,velocity,shooting)
         local radial=Vector3.new(rim.Position.X-position.X,0,rim.Position.Z-position.Z)
         if radial.Magnitude>.01 then desired=desired+radial.Unit*(s.guard_distance-3.5) end
         local waypoint,_,route=Core.farm_route(mine.Position,desired,{{key=target,position=position,velocity=velocity}},state.route,os.clock(),false,state.bounds)
         state.route=route
         local delta=Vector3.new(waypoint.X-mine.Position.X,0,waypoint.Z-mine.Position.Z)
-        local arrival=state.arrived and 1.7 or 1.05
-        state.arrived=delta.Magnitude<arrival
         local camera=camera_service(); local forward=Vector3.new(camera.CFrame.LookVector.X,0,camera.CFrame.LookVector.Z)
         local right=Vector3.new(camera.CFrame.RightVector.X,0,camera.CFrame.RightVector.Z)
         if forward.Magnitude<.01 or right.Magnitude<.01 then guard_release(scope,state); return end
-        local direction=not state.arrived and delta.Magnitude>.01 and delta.Unit or Vector3.zero
+        local direction,arrived,braking=Core.guard_motion(delta,mine_velocity,state.arrived,velocity.Magnitude)
+        state.arrived=arrived; state.braking=braking
         direction=Core.farm_smooth(state.steering,direction,dt); state.steering=direction
         local f=direction:Dot(forward.Unit); local r=direction:Dot(right.Unit)
         local threshold=.3/math.max(.5,s.guard_strength); local keys={}
@@ -907,7 +938,7 @@ local function create_pivot_modules(ctx)
         local stamina=tonumber(a.Stamina or own:GetAttribute("Stamina"))
         if stamina then if stamina<25 then state.fatigued=true elseif stamina>=40 then state.fatigued=false end end
         local _,_,edge=Core.farm_clamp(mine.Position,state.bounds)
-        guard_holds(scope,state,true,s.guard_sprint and next(keys)~=nil and delta.Magnitude>7 and not state.fatigued and (not state.bounds or edge>5))
+        guard_holds(scope,state,true,s.guard_sprint and next(keys)~=nil and delta.Magnitude>7 and not state.braking and not state.fatigued and (not state.bounds or edge>5))
     end,interval=1/60,conflicts={"fly","spin"}})
     add("block","Block selected shooter","Defense","Pulses your jump key after a new observed ShotStartTime and InAir state",{start=function(scope,s)
         character(); local model,part=selected_target(s); jump_key(s)
@@ -4555,7 +4586,7 @@ local function create_pivot_modules(ctx)
             farm_session=tostring(os.time())..":"..tostring(os.clock())
             farm_write(true)
             queue([[local ok,c=pcall(function() return game:GetService("HttpService"):JSONDecode(readfile("vanta_badge_farm.json")) end)
-if ok and c.enabled==true and c.session==]]..string.format("%q",farm_session)..[[ then loadstring(game:HttpGet("https://raw.githubusercontent.com/zyhnq/fuckyoumatthew/main/pivot_launcher.lua?v=20261108.01"))() end]])
+if ok and c.enabled==true and c.session==]]..string.format("%q",farm_session)..[[ then loadstring(game:HttpGet("https://raw.githubusercontent.com/zyhnq/fuckyoumatthew/main/pivot_launcher.lua?v=20261108.02"))() end]])
             Engine.farm_status="Starting"; return state
         end,
         step=function(scope,state,s,dt)
@@ -5353,7 +5384,7 @@ do
     local rail_line=frame(shell,20,97,660,1,theme.line)
     local top_line=frame(shell,20,54,660,1,theme.line)
     local logo=label(shell,"VANTA",20,12,140,28,19,theme.text); logo.Font=Enum.Font.GothamBold; logo.TextXAlignment=Enum.TextXAlignment.Left
-    local build_label=label(shell,"BUILD 2026.11.08.01",242,17,150,18,10,theme.muted); build_label.Name="PivotBuild"; build_label.Font=Enum.Font.RobotoMono; build_label.TextWrapped=false
+    local build_label=label(shell,"BUILD 2026.11.08.02",242,17,150,18,10,theme.muted); build_label.Name="PivotBuild"; build_label.Font=Enum.Font.RobotoMono; build_label.TextWrapped=false
     local heading=label(shell,"Practical Basketball",94,14,240,26,11,theme.muted); heading.Font=Enum.Font.GothamMedium
     close.BackgroundColor3=theme.rail; close.TextColor3=theme.muted; close.TextSize=14; corner(close,4)
     local search=make("TextBox",{Text="",PlaceholderText="Find a control...",PlaceholderColor3=theme.muted,Position=UDim2.fromOffset(484,10),Size=UDim2.fromOffset(166,23),
@@ -6408,6 +6439,7 @@ do
                         elseif id=="meter_style" then choice("meter_style","Meter style",{"Vertical","Rocket","Bat","Funnel","Hoop","Roblox","None"})
                         elseif id=="guard" then
                             toggle_action("Guard sprint",function() return engine.settings.guard_sprint end,function(on) engine.settings.guard_sprint=on end)
+                            toggle_action("Auto contest shots",function() return engine.settings.guard_contest end,function(on) engine.settings.guard_contest=on end)
                             toggle_action("Ball handler only",function() return engine.settings.ball_handler_only end,function(on) engine.settings.ball_handler_only=on end)
                             toggle_action("Team check",function() return engine.settings.team_check end,function(on) engine.settings.team_check=on end)
                         end
