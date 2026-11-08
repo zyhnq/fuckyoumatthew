@@ -4049,17 +4049,36 @@ local function create_pivot_modules(ctx)
         if q.ReadyButton then q.ReadyButton:SwitchConfig({Text=value and "UNREADY" or "READY",
             Color=value and Color3.fromRGB(6,85,255) or Color3.fromRGB(0,207,97)}) end
     end
-    local function farm_steer(scope,goal)
-        local mine=root(); if not mine or not goal then release_owned(scope); return end
+    local function farm_actions(state,guard,sprint)
+        if not state.actions then return end
+        local failure
+        for _,item in ipairs({{"guard",guard,"HoldG"},{"sprinting",sprint,"Sprint"}}) do
+            if (state[item[1]]==true)~=item[2] then
+                local ok,err=pcall(function()
+                    if item[3]=="HoldG" then state.actions.HoldG:Fire({HoldingG=item[2]})
+                    else state.actions.Sprint:Fire(item[2]) end
+                end)
+                if ok then state[item[1]]=item[2] else failure=tostring(err) end
+            end
+        end
+        if failure then error("Guard/sprint input failed: "..failure) end
+    end
+    local function farm_release(scope,state)
+        release_owned(scope); farm_actions(state,false,false)
+    end
+    local function farm_steer(scope,state,goal,guard)
+        local mine=root(); if not mine or not goal then farm_release(scope,state); return end
         local d=goal-mine.Position; d=Vector3.new(d.X,0,d.Z)
         local cam=workspace.CurrentCamera
-        if d.Magnitude<2 or not cam then release_owned(scope); return end
+        if not cam then farm_release(scope,state); return end
+        if d.Magnitude<2 then release_owned(scope); farm_actions(state,guard==true,false); return end
         local f=cam.CFrame.LookVector; f=Vector3.new(f.X,0,f.Z)
         local r=cam.CFrame.RightVector; r=Vector3.new(r.X,0,r.Z)
-        if f.Magnitude<.01 or r.Magnitude<.01 then release_owned(scope); return end
+        if f.Magnitude<.01 or r.Magnitude<.01 then farm_release(scope,state); return end
         local forward,right=d.Unit:Dot(f.Unit),d.Unit:Dot(r.Unit)
         hold(scope,"W",forward>.3); hold(scope,"S",forward<-.3)
         hold(scope,"D",right>.3); hold(scope,"A",right<-.3)
+        farm_actions(state,guard==true,true)
     end
     add("badge_farm","Blacktop badge farm","Player","Queues and plays Blacktop matches; badge rewards are decided by the game",{
         start=function(scope,s)
@@ -4069,7 +4088,7 @@ local function create_pivot_modules(ctx)
             assert(type(queue)=="function","Badge loop requires queue_on_teleport to continue between places")
             local state={alive=true,busy=false,next_at=0,owned={},last_shot=-10,teleporting=false,queue_owned=false,focused=true}
             local focus_lost=input.WindowFocusReleased:Connect(function()
-                state.focused=false; release_owned(scope)
+                state.focused=false; farm_release(scope,state)
                 if state.adapter and Engine.auto_shoot_held then pcall(state.adapter.release); Engine.auto_shoot_held=false end
             end)
             scope:defer(function() focus_lost:Disconnect() end)
@@ -4077,7 +4096,7 @@ local function create_pivot_modules(ctx)
             local teleport=ctx.player.OnTeleport
             if teleport then local c=teleport:Connect(function(phase) if phase==Enum.TeleportState.Started or phase==Enum.TeleportState.InProgress then state.teleporting=true end; if phase==Enum.TeleportState.Failed then state.teleporting=false end end); scope:defer(function() c:Disconnect() end) end
             scope:defer(function()
-                state.alive=false; release_owned(scope)
+                state.alive=false; local released,err=pcall(farm_release,scope,state); if not released then ctx.report(tostring(err)) end
                 if state.adapter and Engine.auto_shoot_held then pcall(state.adapter.release); Engine.auto_shoot_held=false end
                 for id in pairs(state.owned) do registry:disable(id) end
                 if not (state.teleporting and Engine.farm_closing) then pcall(farm_write,false) end
@@ -4091,20 +4110,20 @@ local function create_pivot_modules(ctx)
             farm_session=tostring(os.time())..":"..tostring(os.clock())
             farm_write(true)
             queue([[local ok,c=pcall(function() return game:GetService("HttpService"):JSONDecode(readfile("vanta_badge_farm.json")) end)
-if ok and c.enabled==true and c.session==]]..string.format("%q",farm_session)..[[ then loadstring(game:HttpGet("https://raw.githubusercontent.com/zyhnq/fuckyoumatthew/main/pivot_launcher.lua?v=20261107.03"))() end]])
+if ok and c.enabled==true and c.session==]]..string.format("%q",farm_session)..[[ then loadstring(game:HttpGet("https://raw.githubusercontent.com/zyhnq/fuckyoumatthew/main/pivot_launcher.lua?v=20261107.04"))() end]])
             Engine.farm_status="Starting"; return state
         end,
         step=function(scope,state,s)
             if state.busy or state.teleporting or os.clock()<state.next_at then return end
             local function status(value) if Engine.farm_status~=value then Engine.farm_status=value; ctx.report("Badge farm / "..value) end end
             if type(isrbxactive)=="function" then local ok,active=pcall(isrbxactive); if ok and type(active)=="boolean" then state.focused=active end end
-            if not state.focused then release_owned(scope); status("Paused while Roblox is unfocused"); return end
-            if input:GetFocusedTextBox() or ctx.runner.current then release_owned(scope); status("Paused while typing or running a combo"); return end
+            if not state.focused then farm_release(scope,state); status("Paused while Roblox is unfocused"); return end
+            if input:GetFocusedTextBox() or ctx.runner.current then farm_release(scope,state); status("Paused while typing or running a combo"); return end
             local signature=s.farm_mode..tostring(s.farm_any_region)..tostring(s.farm_auto_play)..tostring(s.farm_shot_range)
             if state.saved~=signature then farm_write(true); state.saved=signature end
             local mode=workspace:GetAttribute("Gamemode")
             local ok,gui=pcall(farm_controllers)
-            if not ok then release_owned(scope); status("Waiting for game controllers"); state.next_at=os.clock()+1; return end
+            if not ok then farm_release(scope,state); status("Waiting for game controllers"); state.next_at=os.clock()+1; return end
             local function request(label,call,done)
                 state.busy=true; status(label)
                 task.spawn(function()
@@ -4119,7 +4138,7 @@ if ok and c.enabled==true and c.session==]]..string.format("%q",farm_session)..[
                 end)
             end
             if mode=="BlacktopMatchmaking" then
-                release_owned(scope)
+                farm_release(scope,state)
                 local q=gui:GetComponent("Queue")
                 if not q or not q.Services or not q.Services.QueueService then status("Waiting for Blacktop queue"); return end
                 state.queue=q
@@ -4144,7 +4163,7 @@ if ok and c.enabled==true and c.session==]]..string.format("%q",farm_session)..[
                 end)
                 return
             end
-            if mode~="Blacktop" then release_owned(scope); status("Join public Blacktop matchmaking"); return end
+            if mode~="Blacktop" then farm_release(scope,state); status("Join public Blacktop matchmaking"); return end
             local summary=gui:GetComponent("Summary")
             if summary and summary.Active==true and not state.result_seen then
                 state.result_seen=true; state.return_at=math.max(os.clock()+15,(tonumber(summary.ActiveUntil) or 0)+2)
@@ -4159,7 +4178,7 @@ if ok and c.enabled==true and c.session==]]..string.format("%q",farm_session)..[
                 farm_write(true)
             end
             if state.result_seen then
-                release_owned(scope); status("Match complete / waiting for postgame display")
+                farm_release(scope,state); status("Match complete / waiting for postgame display")
                 if os.clock()>=state.return_at then
                     request("Returning to matchmaking",function()
                         game:GetService("TeleportService"):Teleport(78438427735992,ctx.player); return true
@@ -4167,28 +4186,34 @@ if ok and c.enabled==true and c.session==]]..string.format("%q",farm_session)..[
                 end
                 return
             end
-            if not s.farm_auto_play then release_owned(scope); status("Match active / auto play off"); return end
+            if not s.farm_auto_play then farm_release(scope,state); status("Match active / auto play off"); return end
             local success,c=pcall(local_state); local mine=root(); local model=rig()
-            if not success or not c or not c.data or not c.data.Attributes or not mine or not model then release_owned(scope); status("Waiting for spawned court character"); return end
+            if not success or not c or not c.data or not c.data.Attributes or not mine or not model then farm_release(scope,state); status("Waiting for spawned court character"); return end
+            if not state.actions then
+                local good,_,keyboard=pcall(client_parts)
+                local actions=good and keyboard and keyboard.Services and keyboard.Services.InputService
+                if not actions or not actions.HoldG or not actions.Sprint then farm_release(scope,state); status("Guard/sprint controls unavailable"); state.next_at=os.clock()+3; return end
+                state.actions=actions
+            end
             local a=c.data.Attributes
             if not state.adapter then local ready,adapter=pcall(shooting_adapter); if not ready then status("Waiting for shooting controls"); return end; state.adapter=adapter end
             if not registry.active.meter_release then
                 local enabled,err=registry:enable("meter_release",s)
-                if not enabled then release_owned(scope); status("Auto Green unavailable: "..tostring(err)); state.next_at=os.clock()+3; return end
+                if not enabled then farm_release(scope,state); status("Auto Green unavailable: "..tostring(err)); state.next_at=os.clock()+3; return end
                 state.owned.meter_release=true
             end
             if Engine.auto_shoot_held then
-                release_owned(scope)
+                farm_release(scope,state)
                 if os.clock()-state.last_shot>1.5 then state.adapter.release() end
                 status("Timing shot"); return
             end
-            if a.Action and a.Action~="" then release_owned(scope); status("Waiting for current action"); return end
+            if a.Action and a.Action~="" and a.Action~="Guard" and a.Action~="Guarding" then farm_release(scope,state); status("Waiting for current action"); return end
             if held_ball(model) or model:GetAttribute("Basketball")==true then
                 local basket,distance=nearest_rim(mine.Position)
-                if not basket then release_owned(scope); status("Waiting for a basket"); return end
-                if distance>s.farm_shot_range then farm_steer(scope,basket.Position); status("Moving into shot range")
+                if not basket then farm_release(scope,state); status("Waiting for a basket"); return end
+                if distance>s.farm_shot_range then farm_steer(scope,state,basket.Position,false); status("Moving into shot range")
                 else
-                    release_owned(scope); status("Setting up shot")
+                    farm_release(scope,state); status("Setting up shot")
                     if os.clock()-state.last_shot>=2 and not state.adapter.held() and a.ReleasedShot~=false then
                         state.last_shot=os.clock(); Engine.auto_shoot_held=true; state.adapter.begin()
                     end
@@ -4196,7 +4221,7 @@ if ok and c.enabled==true and c.session==]]..string.format("%q",farm_session)..[
             else
                 local ball,distance
                 for _,item in ipairs(candidates("balls")) do local p=item.object; if p:IsA("BasePart") then local d=(p.Position-mine.Position).Magnitude; if not distance or d<distance then ball=p; distance=d end end end
-                farm_steer(scope,ball and ball.Position); status(ball and "Following possession" or "Waiting for a ball")
+                farm_steer(scope,state,ball and ball.Position,true); status(ball and "Guarding / following possession" or "Waiting for a ball")
             end
         end,interval=.1,conflicts={"guard","auto_shoot","fly","spin","auto_ankle","dribble_library","dribble_macros"}})
     for _,id in ipairs({"guard","auto_shoot","fly","spin","auto_ankle","dribble_library","dribble_macros"}) do
@@ -4782,7 +4807,7 @@ do
     local rail_line=frame(shell,20,97,660,1,theme.line)
     local top_line=frame(shell,20,54,660,1,theme.line)
     local logo=label(shell,"VANTA",20,12,140,28,19,theme.text); logo.Font=Enum.Font.GothamBold; logo.TextXAlignment=Enum.TextXAlignment.Left
-    local build_label=label(shell,"BUILD 2026.11.07.03",242,17,150,18,10,theme.muted); build_label.Name="PivotBuild"; build_label.Font=Enum.Font.RobotoMono; build_label.TextWrapped=false
+    local build_label=label(shell,"BUILD 2026.11.07.04",242,17,150,18,10,theme.muted); build_label.Name="PivotBuild"; build_label.Font=Enum.Font.RobotoMono; build_label.TextWrapped=false
     local heading=label(shell,"Practical Basketball",94,14,240,26,11,theme.muted); heading.Font=Enum.Font.GothamMedium
     close.BackgroundColor3=theme.rail; close.TextColor3=theme.muted; close.TextSize=14; corner(close,4)
     local search=make("TextBox",{Text="",PlaceholderText="Find a control...",PlaceholderColor3=theme.muted,Position=UDim2.fromOffset(484,10),Size=UDim2.fromOffset(166,23),
