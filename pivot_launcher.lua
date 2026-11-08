@@ -1,4 +1,4 @@
--- Vanta Launcher 1.8 | automatically loads the current supported game.
+-- Vanta Launcher 1.9 | automatically loads the current supported game.
 local Players=game:GetService("Players")
 local Input=game:GetService("UserInputService")
 local player=assert(Players.LocalPlayer,"Run Vanta Launcher on the client")
@@ -18,7 +18,7 @@ local function matches(entry) return game.GameId==entry.universe or game.PlaceId
 local detected="Unsupported game"; local selected
 for _,entry in ipairs(games) do if matches(entry) then detected=entry.name; selected=entry; break end end
 local function download(entry)
-    local source=game:HttpGet(base..entry.file.."?v=20261107.02")
+    local source=game:HttpGet(base..entry.file.."?v=20261107.03")
     assert(type(source)=="string" and #source>100,"Empty script response")
     local run,err=loadstring(source,"@Vanta/"..entry.file)
     assert(run,err)
@@ -46,7 +46,7 @@ label(panel,"Subtitle","Choose your game",23,54,-46,22,16,Color3.fromRGB(152,165
 label(panel,"Detected","Detected: "..detected,23,84,-46,22,13,Color3.fromRGB(159,189,244))
 local status=label(panel,"Status",auto_error and "Auto-load failed — click your game to retry." or "Join a supported game, then run Vanta again.",23,435,-46,30,13,Color3.fromRGB(152,165,186))
 local close=make("TextButton",{Name="Close",Text="×",Position=UDim2.new(1,-50,0,20),Size=UDim2.fromOffset(28,28),BackgroundColor3=Color3.fromRGB(27,32,43),TextColor3=Color3.fromRGB(184,197,218),Font=Enum.Font.SourceSans,TextSize=23,BorderSizePixel=0},panel); round(close,6)
-local control={Version="1.8"}
+local control={Version="1.9"}
 function control:Unload()
     if not alive then return end
     alive=false

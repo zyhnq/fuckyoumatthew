@@ -4021,10 +4021,209 @@ local function create_pivot_modules(ctx)
     end
     if type(readfile)=="function" then pcall(function() Engine:read_saved_modules() end) end
 
+    -- Blacktop signatures verified against the user's queue and match captures.
+    Engine.settings.farm_mode="1v1"; Engine.settings.farm_any_region=false
+    Engine.settings.farm_auto_play=true; Engine.settings.farm_shot_range=22
+    Engine.ranges.farm_shot_range={10,34}
+    Engine.cosmetic_choices.badge_farm={{"farm_mode","Match mode",{"1v1","2v2","3v3","4v4","5v5"}}}
+    Engine.cosmetic_fields.badge_farm={{"farm_shot_range","Shoot within / studs"}}
+    Engine.cosmetic_toggles.badge_farm={{"farm_any_region","Any region"},{"farm_auto_play","Auto play matches"}}
+    Engine.farm_status="Off"; Engine.farm_matches=0; Engine.farm_badge_lines={}
+    local farm_file="vanta_badge_farm.json"; local farm_session
+    local farm_http=game:GetService("HttpService")
+    local function farm_write(enabled)
+        assert(type(writefile)=="function","Badge loop requires executor file access")
+        writefile(farm_file,farm_http:JSONEncode({version=1,session=farm_session,enabled=enabled,mode=Engine.settings.farm_mode,
+            anyRegion=Engine.settings.farm_any_region,autoPlay=Engine.settings.farm_auto_play,
+            shotRange=Engine.settings.farm_shot_range,matches=Engine.farm_matches,badgeLines=Engine.farm_badge_lines}))
+    end
+    local function farm_controllers()
+        local aero=ctx.player:FindFirstChild("PlayerScripts")
+        aero=aero and aero:FindFirstChild("Aero")
+        local modules=aero and aero:FindFirstChild("Controllers")
+        assert(modules and modules:FindFirstChild("Gui"),"Waiting for game controllers")
+        return require(modules:FindFirstChild("Gui"))
+    end
+    local function farm_ready(q,value)
+        q.Ready=value
+        if q.ReadyButton then q.ReadyButton:SwitchConfig({Text=value and "UNREADY" or "READY",
+            Color=value and Color3.fromRGB(6,85,255) or Color3.fromRGB(0,207,97)}) end
+    end
+    local function farm_steer(scope,goal)
+        local mine=root(); if not mine or not goal then release_owned(scope); return end
+        local d=goal-mine.Position; d=Vector3.new(d.X,0,d.Z)
+        local cam=workspace.CurrentCamera
+        if d.Magnitude<2 or not cam then release_owned(scope); return end
+        local f=cam.CFrame.LookVector; f=Vector3.new(f.X,0,f.Z)
+        local r=cam.CFrame.RightVector; r=Vector3.new(r.X,0,r.Z)
+        if f.Magnitude<.01 or r.Magnitude<.01 then release_owned(scope); return end
+        local forward,right=d.Unit:Dot(f.Unit),d.Unit:Dot(r.Unit)
+        hold(scope,"W",forward>.3); hold(scope,"S",forward<-.3)
+        hold(scope,"D",right>.3); hold(scope,"A",right<-.3)
+    end
+    add("badge_farm","Blacktop badge farm","Player","Queues and plays Blacktop matches; badge rewards are decided by the game",{
+        start=function(scope,s)
+            assert(s.farm_mode:match("^[1-5]v[1-5]$") and s.farm_mode:sub(1,1)==s.farm_mode:sub(3,3),"Choose 1v1–5v5")
+            assert(type(readfile)=="function" and type(writefile)=="function","Badge loop requires readfile/writefile")
+            local queue=queue_on_teleport or (syn and syn.queue_on_teleport)
+            assert(type(queue)=="function","Badge loop requires queue_on_teleport to continue between places")
+            local state={alive=true,busy=false,next_at=0,owned={},last_shot=-10,teleporting=false,queue_owned=false,focused=true}
+            local focus_lost=input.WindowFocusReleased:Connect(function()
+                state.focused=false; release_owned(scope)
+                if state.adapter and Engine.auto_shoot_held then pcall(state.adapter.release); Engine.auto_shoot_held=false end
+            end)
+            scope:defer(function() focus_lost:Disconnect() end)
+            if input.WindowFocused then local link=input.WindowFocused:Connect(function() state.focused=true end); scope:defer(function() link:Disconnect() end) end
+            local teleport=ctx.player.OnTeleport
+            if teleport then local c=teleport:Connect(function(phase) if phase==Enum.TeleportState.Started or phase==Enum.TeleportState.InProgress then state.teleporting=true end; if phase==Enum.TeleportState.Failed then state.teleporting=false end end); scope:defer(function() c:Disconnect() end) end
+            scope:defer(function()
+                state.alive=false; release_owned(scope)
+                if state.adapter and Engine.auto_shoot_held then pcall(state.adapter.release); Engine.auto_shoot_held=false end
+                for id in pairs(state.owned) do registry:disable(id) end
+                if not (state.teleporting and Engine.farm_closing) then pcall(farm_write,false) end
+                if not state.teleporting then
+                    if state.queue_owned and state.queue and workspace:GetAttribute("Gamemode")=="BlacktopMatchmaking" then
+                        task.spawn(function() pcall(function() local ok=state.queue.Services.QueueService:Ready(false); if ok then farm_ready(state.queue,false) end end) end)
+                    end
+                end
+                Engine.farm_status="Off"
+            end)
+            farm_session=tostring(os.time())..":"..tostring(os.clock())
+            farm_write(true)
+            queue([[local ok,c=pcall(function() return game:GetService("HttpService"):JSONDecode(readfile("vanta_badge_farm.json")) end)
+if ok and c.enabled==true and c.session==]]..string.format("%q",farm_session)..[[ then loadstring(game:HttpGet("https://raw.githubusercontent.com/zyhnq/fuckyoumatthew/main/pivot_launcher.lua?v=20261107.03"))() end]])
+            Engine.farm_status="Starting"; return state
+        end,
+        step=function(scope,state,s)
+            if state.busy or state.teleporting or os.clock()<state.next_at then return end
+            local function status(value) if Engine.farm_status~=value then Engine.farm_status=value; ctx.report("Badge farm / "..value) end end
+            if type(isrbxactive)=="function" then local ok,active=pcall(isrbxactive); if ok and type(active)=="boolean" then state.focused=active end end
+            if not state.focused then release_owned(scope); status("Paused while Roblox is unfocused"); return end
+            if input:GetFocusedTextBox() or ctx.runner.current then release_owned(scope); status("Paused while typing or running a combo"); return end
+            local signature=s.farm_mode..tostring(s.farm_any_region)..tostring(s.farm_auto_play)..tostring(s.farm_shot_range)
+            if state.saved~=signature then farm_write(true); state.saved=signature end
+            local mode=workspace:GetAttribute("Gamemode")
+            local ok,gui=pcall(farm_controllers)
+            if not ok then release_owned(scope); status("Waiting for game controllers"); state.next_at=os.clock()+1; return end
+            local function request(label,call,done)
+                state.busy=true; status(label)
+                task.spawn(function()
+                    local accepted,a,b=pcall(call)
+                    state.busy=false; state.next_at=os.clock()+(accepted and a~=false and 1.5 or 8)
+                    if not state.alive then
+                        if done and accepted and a==true then done(true) end
+                        return
+                    end
+                    if not accepted or a~=true then status("Request failed: "..tostring(accepted and (b or "rejected") or a))
+                    elseif done then local good,err=pcall(done,false); if not good then status("Request completion failed: "..tostring(err)) end end
+                end)
+            end
+            if mode=="BlacktopMatchmaking" then
+                release_owned(scope)
+                local q=gui:GetComponent("Queue")
+                if not q or not q.Services or not q.Services.QueueService then status("Waiting for Blacktop queue"); return end
+                state.queue=q
+                if q.partyInfo and q.partyInfo.Owner and q.partyInfo.Owner~=ctx.player then status("Waiting for the party leader"); return end
+                if q.InQueue or q.Ready then
+                    if state.queue_owned and (ctx.player:GetAttribute("QueueMode")~=s.farm_mode or (ctx.player:GetAttribute("AnyRegion")==true)~=s.farm_any_region) then
+                        request("Updating queue settings",function() return q.Services.QueueService:Ready(false) end,function() state.queue_owned=false; farm_ready(q,false) end)
+                    else status("Searching for "..tostring(ctx.player:GetAttribute("QueueMode") or s.farm_mode).." match") end
+                    return
+                end
+                if q.Active==false then status("Open the public Blacktop queue"); return end
+                local service=q.Services.QueueService
+                if ctx.player:GetAttribute("QueueMode")~=s.farm_mode then
+                    request("Selecting "..s.farm_mode,function() return service:SelectMode(s.farm_mode) end); return
+                end
+                if (ctx.player:GetAttribute("AnyRegion")==true)~=s.farm_any_region then
+                    request("Updating region",function() return service:SetAnyRegion(s.farm_any_region) end); return
+                end
+                request("Joining queue",function() return service:Ready(true) end,function(stopped)
+                    if stopped then pcall(function() service:Ready(false) end)
+                    else state.queue_owned=true; farm_ready(q,true); farm_write(true) end
+                end)
+                return
+            end
+            if mode~="Blacktop" then release_owned(scope); status("Join public Blacktop matchmaking"); return end
+            local summary=gui:GetComponent("Summary")
+            if summary and summary.Active==true and not state.result_seen then
+                state.result_seen=true; state.return_at=math.max(os.clock()+15,(tonumber(summary.ActiveUntil) or 0)+2)
+                Engine.farm_matches=Engine.farm_matches+1; Engine.farm_badge_lines={}
+                local pg=ctx.player:FindFirstChild("PlayerGui")
+                if pg then for _,o in ipairs(pg:GetDescendants()) do
+                    local path=o:GetFullName():lower()
+                    if o:IsA("TextLabel") and o.Visible and #Engine.farm_badge_lines<20 and (path:find("summary",1,true) or path:find("breakdown",1,true)) and (o.Text:lower():find("badge",1,true) or path:find("badge",1,true)) then
+                        Engine.farm_badge_lines[#Engine.farm_badge_lines+1]=o.Text:sub(1,120)
+                    end
+                end end
+                farm_write(true)
+            end
+            if state.result_seen then
+                release_owned(scope); status("Match complete / waiting for postgame display")
+                if os.clock()>=state.return_at then
+                    request("Returning to matchmaking",function()
+                        game:GetService("TeleportService"):Teleport(78438427735992,ctx.player); return true
+                    end)
+                end
+                return
+            end
+            if not s.farm_auto_play then release_owned(scope); status("Match active / auto play off"); return end
+            local success,c=pcall(local_state); local mine=root(); local model=rig()
+            if not success or not c or not c.data or not c.data.Attributes or not mine or not model then release_owned(scope); status("Waiting for spawned court character"); return end
+            local a=c.data.Attributes
+            if not state.adapter then local ready,adapter=pcall(shooting_adapter); if not ready then status("Waiting for shooting controls"); return end; state.adapter=adapter end
+            if not registry.active.meter_release then
+                local enabled,err=registry:enable("meter_release",s)
+                if not enabled then release_owned(scope); status("Auto Green unavailable: "..tostring(err)); state.next_at=os.clock()+3; return end
+                state.owned.meter_release=true
+            end
+            if Engine.auto_shoot_held then
+                release_owned(scope)
+                if os.clock()-state.last_shot>1.5 then state.adapter.release() end
+                status("Timing shot"); return
+            end
+            if a.Action and a.Action~="" then release_owned(scope); status("Waiting for current action"); return end
+            if held_ball(model) or model:GetAttribute("Basketball")==true then
+                local basket,distance=nearest_rim(mine.Position)
+                if not basket then release_owned(scope); status("Waiting for a basket"); return end
+                if distance>s.farm_shot_range then farm_steer(scope,basket.Position); status("Moving into shot range")
+                else
+                    release_owned(scope); status("Setting up shot")
+                    if os.clock()-state.last_shot>=2 and not state.adapter.held() and a.ReleasedShot~=false then
+                        state.last_shot=os.clock(); Engine.auto_shoot_held=true; state.adapter.begin()
+                    end
+                end
+            else
+                local ball,distance
+                for _,item in ipairs(candidates("balls")) do local p=item.object; if p:IsA("BasePart") then local d=(p.Position-mine.Position).Magnitude; if not distance or d<distance then ball=p; distance=d end end end
+                farm_steer(scope,ball and ball.Position); status(ball and "Following possession" or "Waiting for a ball")
+            end
+        end,interval=.1,conflicts={"guard","auto_shoot","fly","spin","auto_ankle","dribble_library","dribble_macros"}})
+    for _,id in ipairs({"guard","auto_shoot","fly","spin","auto_ankle","dribble_library","dribble_macros"}) do
+        local spec=registry.definitions[id]; if spec then spec.conflicts=spec.conflicts or {}; spec.conflicts[#spec.conflicts+1]="badge_farm" end
+    end
+    local resume_farm=false
+    local farm_close=Engine.close
+    function Engine:close()
+        self.farm_closing=true; farm_close(self); self.farm_closing=false
+    end
+    if type(readfile)=="function" then pcall(function()
+        local raw=readfile(farm_file); assert(#raw<16384); local saved=farm_http:JSONDecode(raw)
+        if saved.version~=1 then return end
+        if type(saved.mode)=="string" and saved.mode:match("^[1-5]v[1-5]$") and saved.mode:sub(1,1)==saved.mode:sub(3,3) then Engine.settings.farm_mode=saved.mode end
+        if type(saved.anyRegion)=="boolean" then Engine.settings.farm_any_region=saved.anyRegion end
+        if type(saved.autoPlay)=="boolean" then Engine.settings.farm_auto_play=saved.autoPlay end
+        Engine.settings.farm_shot_range=Core.bounded(saved.shotRange,10,34) or 22
+        Engine.farm_matches=Core.bounded(saved.matches,0,1000000) or 0
+        resume_farm=saved.enabled==true
+    end) end
+    if resume_farm then task.spawn(function() local ok,err=registry:enable("badge_farm",Engine.settings); if not ok then ctx.report("Badge farm resume failed: "..tostring(err)) end end) end
+
+
     local last_rig=rig()
     ctx.connect(run.Heartbeat,function(dt)
         local current=rig(); if current~=last_rig then
-            local ids={}; for id in pairs(registry.active) do if id~="meter_release" then ids[#ids+1]=id end end
+            local ids={}; for id in pairs(registry.active) do if id~="meter_release" and id~="badge_farm" then ids[#ids+1]=id end end
             for _,id in ipairs(ids) do registry:disable(id) end
             last_rig=current
         end
@@ -4583,7 +4782,7 @@ do
     local rail_line=frame(shell,20,97,660,1,theme.line)
     local top_line=frame(shell,20,54,660,1,theme.line)
     local logo=label(shell,"VANTA",20,12,140,28,19,theme.text); logo.Font=Enum.Font.GothamBold; logo.TextXAlignment=Enum.TextXAlignment.Left
-    local build_label=label(shell,"BUILD 2026.11.07.01",242,17,150,18,10,theme.muted); build_label.Name="PivotBuild"; build_label.Font=Enum.Font.RobotoMono; build_label.TextWrapped=false
+    local build_label=label(shell,"BUILD 2026.11.07.03",242,17,150,18,10,theme.muted); build_label.Name="PivotBuild"; build_label.Font=Enum.Font.RobotoMono; build_label.TextWrapped=false
     local heading=label(shell,"Practical Basketball",94,14,240,26,11,theme.muted); heading.Font=Enum.Font.GothamMedium
     close.BackgroundColor3=theme.rail; close.TextColor3=theme.muted; close.TextSize=14; corner(close,4)
     local search=make("TextBox",{Text="",PlaceholderText="Find a control...",PlaceholderColor3=theme.muted,Position=UDim2.fromOffset(484,10),Size=UDim2.fromOffset(166,23),
@@ -4981,10 +5180,10 @@ do
     local container=page
     local collapsed={}
     local expanded,choosing,section_button,record_tools,court_alignment
-    local dribble_editor_open=false; local character_open=false; local library_open=false; local module_selection_label; local shot_profile_label; local heatmap_status_label
+    local dribble_editor_open=false; local character_open=false; local library_open=false; local module_selection_label; local shot_profile_label; local farm_status_label; local heatmap_status_label
     local auxiliary={}; local capture_switch; local character_status; local library_status
     local function clear()
-        for _,object in ipairs(rows) do object:Destroy() end; rows={}; fields={}; auxiliary={}; character_status=nil; library_status=nil; module_selection_label=nil; shot_profile_label=nil; heatmap_status_label=nil; visual_status_label=nil; y=46
+        for _,object in ipairs(rows) do object:Destroy() end; rows={}; fields={}; auxiliary={}; character_status=nil; library_status=nil; module_selection_label=nil; shot_profile_label=nil; farm_status_label=nil; heatmap_status_label=nil; visual_status_label=nil; y=46
     end
     local function own(object) rows[#rows+1]=object; return object end
     local function text(value,size,color,height)
@@ -5099,6 +5298,7 @@ do
     end
     local buttons={}
     local function update_buttons()
+        if farm_status_label and farm_status_label.Parent then farm_status_label.Text=engine.farm_status.." / completed matches: "..engine.farm_matches end
         if heatmap_status_label and heatmap_status_label.Parent then heatmap_status_label.Text=engine.heatmap_status end
         if shot_profile_label and shot_profile_label.Parent then local summary=engine:shot_profile_summary(); if shot_profile_label.Text~=summary then shot_profile_label.Text=summary end end
         if visual_status_label and visual_status_label.Parent then
@@ -5477,7 +5677,7 @@ do
             local columns=category=="All" and (ui.content_width and ui.content_width() or window.Size.X.Offset)>=620 and 2 or 1
             local heights={46,46}
             local display_definitions={}; local priority={}
-            for _,id in ipairs({"shot_heatmap","shot_quality","open_teammates","rebound_estimate","possession_safeguards","dribble_library"}) do
+            for _,id in ipairs({"badge_farm","shot_heatmap","shot_quality","open_teammates","rebound_estimate","possession_safeguards","dribble_library"}) do
                 local definition=engine.registry.definitions[id]; if definition then display_definitions[#display_definitions+1]=definition; priority[id]=true end
             end
             for _,definition in ipairs(engine.definitions) do if not priority[definition.id] then display_definitions[#display_definitions+1]=definition end end
@@ -5572,7 +5772,10 @@ do
                         for _,entry in ipairs((engine.cosmetic_choices or {})[id] or {}) do if engine:show_cosmetic_control(entry[1]) then choice(entry[1],entry[2],entry[3]) end end
                         for _,entry in ipairs((engine.cosmetic_fields or {})[id] or {}) do if engine:show_cosmetic_control(entry[1]) and entry[1]~="model_asset" and (entry[1]~="model_height" or not engine.settings.model_fit_pb) then field(entry[1],entry[2]) end end
                         for _,entry in ipairs((engine.cosmetic_toggles or {})[id] or {}) do local key=entry[1]; if (key~="model_follow_pose" or not engine.settings.model_fit_pb) and engine:show_cosmetic_control(key) then toggle_action(entry[2],function() return engine.settings[key] end,function(on) engine.settings[key]=on; if key=="model_fit_pb" then local active=engine.registry.active.custom_model; if active then engine.registry:disable("custom_model"); local ok,err=engine.registry:enable("custom_model",engine.settings); if not ok then report(tostring(err)) end end; rebuild() end end) end end
-                        if id=="dribble_library" then
+                        if id=="badge_farm" then
+                            farm_status_label=text(engine.farm_status.." / completed matches: "..engine.farm_matches,12,theme.muted,46)
+                            text("Rewards come from the game. Keep Roblox focused for automatic movement. F8 stops the loop.",11,theme.muted,48)
+                        elseif id=="dribble_library" then
                             toggle_action("Sprint variants",function() return engine.settings.dribble_sprint end,function(on) engine.settings.dribble_sprint=on end)
                             text("Key: bind    +: add to chain    Run: play move",11,theme.muted,24)
                             action("Combo builder / "..#engine.dribble_draft.." moves"..(dribble_editor_open and "  −" or "  +"),function() dribble_editor_open=not dribble_editor_open; rebuild() end)
