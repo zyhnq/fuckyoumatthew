@@ -4389,7 +4389,8 @@ local function create_pivot_modules(ctx)
     Engine.farm_stats={shots=0,layups=0,dribbles=0,chains=0,clutches=0,contests=0,rebounds=0,recoveries=0,requeues=0}
     function Engine:farm_summary()
         local s=self.farm_stats
-        return self.farm_status.." / Clock "..(self.farm_clock and string.format("%.1fs",self.farm_clock) or "--").."\nMatches "..self.farm_matches.."  Shots "..s.shots.."  Dribbles "..s.dribbles.."\nContests "..s.contests.."  Rebound attempts "..s.rebounds.."  Recoveries "..s.recoveries.."\nLast move: "..self.farm_last_move.." / Finish attempts "..s.layups.." / Chains sent "..s.chains.." / Clutches "..s.clutches
+        local idle=self.farm_idle; local idle_text=idle and (idle.warning or idle.status).." / sent "..idle.pulses or "Off"
+        return self.farm_status.." / Clock "..(self.farm_clock and string.format("%.1fs",self.farm_clock) or "--").."\nMatches "..self.farm_matches.."  Shots "..s.shots.."  Dribbles "..s.dribbles.."\nContests "..s.contests.."  Rebound attempts "..s.rebounds.."  Recoveries "..s.recoveries.."\nLast move: "..self.farm_last_move.." / Finish attempts "..s.layups.." / Chains sent "..s.chains.." / Clutches "..s.clutches.."\nIdle protection: "..idle_text
     end
     local farm_file="vanta_badge_farm.json"; local farm_session
     local farm_http=game:GetService("HttpService")
@@ -4399,6 +4400,65 @@ local function create_pivot_modules(ctx)
             anyRegion=Engine.settings.farm_any_region,autoPlay=Engine.settings.farm_auto_play,
             shotRange=Engine.settings.farm_shot_range,dribble=Engine.settings.farm_dribble,openDrive=Engine.settings.farm_open_drive,allMoves=Engine.settings.farm_dribble_all,chains=Engine.settings.farm_chains,hopGathers=Engine.settings.farm_hop_gathers,jelly=Engine.settings.farm_jelly,variedShots=Engine.settings.farm_varied_shots,threeRange=Engine.settings.farm_three_range,matches=Engine.farm_matches,badgeLines=Engine.farm_badge_lines,stats=Engine.farm_stats}))
     end
+    function Core.farm_idle_guard(scope,deps)
+        local state={active=true,status="Listening",pulses=0,failures=0,next_at=deps.now()+60}
+        local function notify(message)
+            if deps.now()>=(state.next_report or 0) then
+                state.next_report=deps.now()+60; deps.report(message)
+            end
+        end
+        local function pulse(reason,elapsed)
+            if not state.active then return end
+            local now=deps.now()
+            if type(elapsed)=="number" then
+                state.idle_seconds=elapsed
+                if state.last_elapsed and elapsed>state.last_elapsed+5 then
+                    state.warning="Idle timer still increasing / client input needs checking"
+                    notify(state.warning)
+                elseif state.last_elapsed and elapsed<state.last_elapsed then state.warning=nil end
+                state.last_elapsed=elapsed
+            end
+            if now<(state.last_attempt or -100)+20 then return end
+            if deps.typing() then state.next_at=now+10; return end
+            state.last_attempt=now; state.next_at=now+60; state.reason=reason
+            local ok,method=pcall(deps.send)
+            if ok then
+                state.pulses=state.pulses+1; state.last_sent=now; state.status="Client input sent"; state.method=method
+            else
+                state.failures=state.failures+1; state.status="Client idle input failed"; state.error=tostring(method)
+                notify(state.status..": "..state.error)
+            end
+        end
+        local links={}
+        if deps.idled then links[#links+1]=deps.idled:Connect(function(elapsed) pulse("Idled",elapsed) end) end
+        links[#links+1]=deps.heartbeat:Connect(function()
+            if state.active and deps.now()>=state.next_at then pulse("Periodic") end
+        end)
+        scope:defer(function()
+            state.active=false; state.status="Off"
+            for _,link in ipairs(links) do link:Disconnect() end
+        end)
+        pulse("Enabled")
+        return state
+    end
+    local function farm_idle_input()
+        local camera=workspace.CurrentCamera
+        local vu_ok,vu=pcall(function() return game:GetService("VirtualUser") end)
+        if vu_ok and vu then
+            local sent=pcall(function()
+                vu:CaptureController()
+                vu:ClickButton2(Vector2.new(0,0),camera and camera.CFrame or CFrame.new())
+            end)
+            if sent then return "VirtualUser" end
+        end
+        -- Paired client mouse input; no OS keys or clicks go into the foreground app.
+        local manager=game:GetService("VirtualInputManager")
+        local down,err=pcall(function() manager:SendMouseButtonEvent(0,0,1,true,game,0) end)
+        local up,release_err=pcall(function() manager:SendMouseButtonEvent(0,0,1,false,game,0) end)
+        assert(down and up,tostring(err or release_err or "Client input unavailable"))
+        return "VirtualInputManager"
+    end
+
     local function farm_controllers()
         local aero=ctx.player:FindFirstChild("PlayerScripts")
         aero=aero and aero:FindFirstChild("Aero")
@@ -5038,7 +5098,7 @@ end]])
             local b=state.bounds
             if b then for _,marker in ipairs(b.markers or {}) do if not marker.Parent or not marker:IsDescendantOf(workspace) then b=nil; break end end end
             local point=b and origin and b.frame:PointToObjectSpace(origin)
-            writefile("vanta_badge_farm_runtime.json",farm_http:JSONEncode({build="2026.11.08.13",status=Engine.farm_status,focused=state.focused,returnReason=state.return_reason,returnAttempts=state.return_attempts,returnError=state.return_error,teleporting=state.teleporting,busy=state.busy,inputTransport=move_bridge and "PlayerModule" or "Roblox virtual input",postgame=state.result_seen==true,progressAge=state.health and os.clock()-(state.health.progress_at or state.health.entered),shotClock=state.shot_clock,role=state.role,basketSource=state.basket_source,shotClearance=state.shot_clearance and math.min(999,state.shot_clearance),stats=Engine.farm_stats,
+            writefile("vanta_badge_farm_runtime.json",farm_http:JSONEncode({build="2026.11.08.14",status=Engine.farm_status,focused=state.focused,returnReason=state.return_reason,returnAttempts=state.return_attempts,returnError=state.return_error,teleporting=state.teleporting,busy=state.busy,idle=Engine.farm_idle,inputTransport=move_bridge and "PlayerModule" or "Roblox virtual input",postgame=state.result_seen==true,progressAge=state.health and os.clock()-(state.health.progress_at or state.health.entered),shotClock=state.shot_clock,role=state.role,basketSource=state.basket_source,shotClearance=state.shot_clearance and math.min(999,state.shot_clearance),stats=Engine.farm_stats,
                 position=origin and {origin.X,origin.Y,origin.Z} or false,bounds=b and point and {source=b.source,x=b.x,z=b.z,localPosition={point.X,point.Y,point.Z}} or false,
                 boundaryBrake=state.boundary_braking==true,guard=state.guard==true,sprint=state.sprinting==true,keys=state.steering_keys or {}}))
         end)
@@ -5181,10 +5241,13 @@ end]])
                 end
                 Engine.farm_status="Off"
             end)
+            Engine.farm_idle=Core.farm_idle_guard(scope,{now=os.clock,idled=ctx.player.Idled,heartbeat=run.Heartbeat,
+                typing=function() return input:GetFocusedTextBox()~=nil end,send=farm_idle_input,
+                report=function(message) ctx.report("Idle protection / "..message) end})
             farm_session=tostring(os.time())..":"..tostring(os.clock())
             farm_write(true)
             queue([[local ok,c=pcall(function() return game:GetService("HttpService"):JSONDecode(readfile("vanta_badge_farm.json")) end)
-if ok and c.enabled==true and c.session==]]..string.format("%q",farm_session)..[[ then loadstring(game:HttpGet("https://raw.githubusercontent.com/zyhnq/fuckyoumatthew/main/pivot_launcher.lua?v=20261108.13"))() end]])
+if ok and c.enabled==true and c.session==]]..string.format("%q",farm_session)..[[ then loadstring(game:HttpGet("https://raw.githubusercontent.com/zyhnq/fuckyoumatthew/main/pivot_launcher.lua?v=20261108.14"))() end]])
             Engine.farm_status="Starting"; return state
         end,
         step=function(scope,state,s,dt)
@@ -6142,7 +6205,7 @@ do
     local rail_line=frame(shell,20,97,660,1,theme.line)
     local top_line=frame(shell,20,54,660,1,theme.line)
     local logo=label(shell,"VANTA",20,12,140,28,19,theme.text); logo.Font=Enum.Font.GothamBold; logo.TextXAlignment=Enum.TextXAlignment.Left
-    local build_label=label(shell,"BUILD 2026.11.08.13",242,17,150,18,10,theme.muted); build_label.Name="PivotBuild"; build_label.Font=Enum.Font.RobotoMono; build_label.TextWrapped=false
+    local build_label=label(shell,"BUILD 2026.11.08.14",242,17,150,18,10,theme.muted); build_label.Name="PivotBuild"; build_label.Font=Enum.Font.RobotoMono; build_label.TextWrapped=false
     local heading=label(shell,"Practical Basketball",94,14,240,26,11,theme.muted); heading.Font=Enum.Font.GothamMedium
     close.BackgroundColor3=theme.rail; close.TextColor3=theme.muted; close.TextSize=14; corner(close,4)
     local search=make("TextBox",{Text="",PlaceholderText="Find a control...",PlaceholderColor3=theme.muted,Position=UDim2.fromOffset(484,10),Size=UDim2.fromOffset(166,23),
