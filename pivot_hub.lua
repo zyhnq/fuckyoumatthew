@@ -4095,6 +4095,65 @@ local function create_pivot_modules(ctx)
         local world=bounds.frame:PointToWorldSpace(Vector3.new(x,local_point.Y,z))
         return world,farm_flat(world-point).Magnitude,math.min(bounds.x-math.abs(x),bounds.z-math.abs(z))
     end
+    function Core.farm_playable_area(parts,origin)
+        local reference=parts[1]; if not reference then return nil end
+        local frame=reference.CFrame; local xs,zs={},{}
+        for _,part in ipairs(parts) do
+            if part:IsA("BasePart") and math.abs(part.CFrame.UpVector.Y)>.98 then
+                local minx,minz,maxx,maxz=math.huge,math.huge,-math.huge,-math.huge
+                for _,x in ipairs({-part.Size.X/2,part.Size.X/2}) do for _,z in ipairs({-part.Size.Z/2,part.Size.Z/2}) do
+                    local p=frame:PointToObjectSpace(part.CFrame:PointToWorldSpace(Vector3.new(x,0,z)))
+                    minx=math.min(minx,p.X); maxx=math.max(maxx,p.X); minz=math.min(minz,p.Z); maxz=math.max(maxz,p.Z)
+                end end
+                if maxx-minx>(maxz-minz)*2.5 then zs[#zs+1]={low=minz,high=maxz}
+                elseif maxz-minz>(maxx-minx)*2.5 then xs[#xs+1]={low=minx,high=maxx} end
+            end
+        end
+        table.sort(xs,function(a,b) return a.low<b.low end); table.sort(zs,function(a,b) return a.low<b.low end)
+        local best,score
+        for i=1,#xs-1 do for j=1,#zs-1 do
+            local left,right,bottom,top=xs[i].high,xs[i+1].low,zs[j].high,zs[j+1].low
+            local width,depth=right-left,top-bottom
+            if width>=20 and depth>=20 and width<=250 and depth<=180 then
+                local centered=frame*CFrame.new((left+right)/2,0,(bottom+top)/2)
+                local b={part=reference,markers=parts,frame=centered,x=width/2-5,z=depth/2-5,verified=true}
+                local _,distance=Core.farm_clamp(origin,b)
+                local cost=distance*100+farm_flat(centered.Position-origin).Magnitude*.01
+                if distance<=5.5 and (not score or cost<score) then best=b; score=cost end
+            end
+        end end
+        return best
+    end
+    function Core.farm_safe_keys(requested,origin,forward,right,velocity,bounds)
+        if not bounds then return {},true end
+        velocity=farm_cap(farm_flat(velocity or Vector3.new(0,0,0)),45)
+        local drift=origin+velocity*.3; local correction,overflow=Core.farm_clamp(drift,bounds); correction=farm_flat(correction-drift)
+        local entries={{"W",forward},{"S",-forward},{"D",right},{"A",-right}}
+        local desired=Vector3.new(0,0,0)
+        for _,entry in ipairs(entries) do if requested[entry[1]] then desired=desired+entry[2] end end
+        if desired.Magnitude>.01 then desired=desired.Unit end
+        local chosen,best={},-math.huge
+        for mask=1,15 do
+            local keys={}; local direction=Vector3.new(0,0,0); local allowed=true
+            for i,entry in ipairs(entries) do if math.floor(mask/2^(i-1))%2==1 then
+                keys[entry[1]]=true; direction=direction+entry[2]
+                if not requested[entry[1]] and overflow<.05 then allowed=false end
+            end end
+            if keys.W and keys.S or keys.A and keys.D then allowed=false end
+            if allowed and direction.Magnitude>.01 then
+                direction=direction.Unit
+                local future=drift+direction*math.max(2.5,math.min(7,velocity.Magnitude*.2))
+                local _,error=Core.farm_clamp(future,bounds)
+                local recovering=overflow>.05 and error<overflow-.1 and direction:Dot(correction)>0
+                if error<.05 or recovering then
+                    local score=direction:Dot(desired)+(overflow-error)*10
+                    if score>best then best=score; chosen=keys end
+                end
+            end
+        end
+        local blocked=false; for _,entry in ipairs(entries) do if (requested[entry[1]]==true)~=(chosen[entry[1]]==true) then blocked=true end end
+        return chosen,blocked
+    end
     function Core.farm_clearance(origin,goal,opponents)
         local delta=farm_flat(goal-origin); local squared=delta:Dot(delta); local clearance=math.huge
         for _,other in ipairs(opponents) do
@@ -4167,64 +4226,84 @@ local function create_pivot_modules(ctx)
         for key,item in pairs(state.history) do if os.clock()-item.time>5 then state.history[key]=nil end end
         return list
     end
-    local function farm_bounds(state,s,origin)
-        if state.bounds and not state.bounds.part.Parent then state.bounds=nil end
-        if os.clock()<(state.next_bounds or 0) then return state.bounds end
-        state.next_bounds=os.clock()+5
+    local function farm_bounds(state,s,origin,court_number)
+        if state.boundary_court~=court_number then state.bounds=nil; state.next_bounds=0; state.boundary_court=court_number end
+        if state.bounds then
+            local valid=true
+            for _,marker in ipairs(state.bounds.markers or {}) do if not marker.Parent or not marker:IsDescendantOf(workspace) then valid=false; break end end
+            if valid and state.bounds.verified then return state.bounds end
+            state.bounds=nil
+        end
+        if os.clock()<(state.next_bounds or 0) then return nil end
+        state.next_bounds=os.clock()+2
+        local roots,seen,groups={}, {},{}
+        for _,name in ipairs({"Map","Courts","Court"}) do local folder=workspace:FindFirstChild(name); if folder then roots[#roots+1]=folder end end
         local assets=workspace:FindFirstChild("Assets"); local court=assets and assets:FindFirstChild("Court")
-        local floor=court and court:FindFirstChild("CourtFloor")
-        if floor and floor:IsA("BasePart") and floor.Size.X>=20 and floor.Size.Z>=20 and math.abs(floor.CFrame.UpVector.Y)>.98 and math.abs(origin.Y-floor.Position.Y)<20 then
-            state.bounds={part=floor,frame=floor.CFrame,x=floor.Size.X/2-2.8,z=floor.Size.Z/2-2.8}; return state.bounds
+        if court then roots[#roots+1]=court end
+        if #roots==0 then roots[1]=workspace end
+        local function collect(group)
+            if seen[group] or group.Name:lower()~="outofbounds" then return end
+            seen[group]=true; groups[#groups+1]=group
         end
-        local surfaces=named_court_parts(s); local groups={}
-        for _,part in ipairs(surfaces) do
-            local piece=tostring(part:GetAttribute("GymPiece") or ""):lower(); local name=part.Name:lower()
-            if part.Size.X>=18 and part.Size.Z>=18 and math.abs(part.CFrame.UpVector.Y)>.98 and math.abs(origin.Y-part.Position.Y)<20 and (piece:match("^outerzone") or name=="courtfloor" or name=="courtsurface" or name=="playingsurface") then
-                local group=part.Parent; local parent=group
-                while parent and parent~=workspace do if parent.Name:lower():match("^court%d*$") then group=parent; break end; parent=parent.Parent end
-                groups[group]=groups[group] or {}; groups[group][#groups[group]+1]=part
+        for _,folder in ipairs(roots) do collect(folder); for _,child in ipairs(folder:GetDescendants()) do collect(child) end end
+        local best,best_cost
+        for _,group in ipairs(groups) do
+            local parts={}
+            for _,part in ipairs(group:GetDescendants()) do
+                if part:IsA("BasePart") and math.abs(part.Position.Y-origin.Y)<20 and math.abs(part.CFrame.UpVector.Y)>.98 then parts[#parts+1]=part end
             end
-        end
-        local best,best_distance
-        for _,parts in pairs(groups) do
-            local frame=parts[1].CFrame; local minx,minz,maxx,maxz=math.huge,math.huge,-math.huge,-math.huge
-            for _,part in ipairs(parts) do for _,x in ipairs({-part.Size.X/2,part.Size.X/2}) do for _,z in ipairs({-part.Size.Z/2,part.Size.Z/2}) do
-                local point=frame:PointToObjectSpace(part.CFrame:PointToWorldSpace(Vector3.new(x,0,z)))
-                minx=math.min(minx,point.X); maxx=math.max(maxx,point.X); minz=math.min(minz,point.Z); maxz=math.max(maxz,point.Z)
-            end end end
-            local width,depth=maxx-minx,maxz-minz
-            if width>=20 and depth>=20 and width<=250 and depth<=160 then
-                local centered=frame*CFrame.new((minx+maxx)/2,0,(minz+maxz)/2)
-                local bounds={part=parts[1],frame=centered,x=width/2-3,z=depth/2-3}
+            local bounds=Core.farm_playable_area(parts,origin)
+            if bounds then
                 local _,distance=Core.farm_clamp(origin,bounds)
-                if not best_distance or distance<best_distance then best=bounds; best_distance=distance end
+                local cost=distance*100+farm_flat(bounds.frame.Position-origin).Magnitude*.01
+                if not best_cost or cost<best_cost then best=bounds; best_cost=cost; bounds.source=group:GetFullName() end
             end
         end
         state.bounds=best; return best
     end
+    local function farm_boundary_report(state,origin)
+        if os.clock()<(state.next_diagnostic or 0) then return end
+        state.next_diagnostic=os.clock()+2
+        pcall(function()
+            local b=state.bounds; local point=b and b.frame:PointToObjectSpace(origin)
+            writefile("vanta_badge_farm_runtime.json",farm_http:JSONEncode({build="2026.11.07.07",status=Engine.farm_status,
+                position={origin.X,origin.Y,origin.Z},bounds=b and {source=b.source,x=b.x,z=b.z,localPosition={point.X,point.Y,point.Z}} or false,
+                boundaryBrake=state.boundary_braking==true,guard=state.guard==true,sprint=state.sprinting==true,keys=state.steering_keys or {}}))
+        end)
+    end
     local function farm_steer(scope,state,goal,guard)
         local mine=root(); if not mine or not goal then farm_release(scope,state); return end
-        goal=Core.farm_clamp(goal,state.bounds)
+        if not state.bounds or not state.bounds.verified then farm_release(scope,state); state.boundary_braking=true; return end
+        local clamped_goal,_,target_edge=Core.farm_clamp(goal,state.bounds); goal=clamped_goal
+        local safe,overflow=Core.farm_clamp(mine.Position,state.bounds)
+        if overflow>.05 then goal=safe end
         local d=goal-mine.Position; d=Vector3.new(d.X,0,d.Z)
         local cam=workspace.CurrentCamera
         if not cam then farm_release(scope,state); return end
-        local arrival=guard and 1.3 or 1.7
-        state.arrived=d.Magnitude<arrival or state.arrived and d.Magnitude<arrival+.7
-        local velocity=state.velocity or Vector3.new(0,0,0)
-        local braking=d.Magnitude>0 and d.Magnitude<5 and velocity:Dot(d.Unit)>d.Magnitude*5
-        if state.arrived or braking then release_owned(scope); state.steering=nil; state.steering_keys=nil; farm_actions(state,guard==true,false); return end
         local f=cam.CFrame.LookVector; f=Vector3.new(f.X,0,f.Z)
         local r=cam.CFrame.RightVector; r=Vector3.new(r.X,0,r.Z)
         if f.Magnitude<.01 or r.Magnitude<.01 then farm_release(scope,state); return end
+        local arrival=overflow>.05 and .08 or target_edge<1 and 3.2 or guard and 1.3 or 1.7
+        state.arrived=d.Magnitude<arrival or state.arrived and d.Magnitude<arrival+.7
+        local velocity=state.velocity or Vector3.new(0,0,0)
+        local braking=d.Magnitude>0 and d.Magnitude<5 and velocity:Dot(d.Unit)>d.Magnitude*5
+        if state.arrived or braking then
+            local recovery,blocked=Core.farm_safe_keys({},mine.Position,f.Unit,r.Unit,velocity,state.bounds)
+            release_owned(scope); state.steering=nil; state.steering_keys=recovery; state.boundary_braking=blocked
+            for _,key in ipairs({"W","S","D","A"}) do hold(scope,key,recovery[key]==true) end
+            farm_actions(state,guard==true,false); return
+        end
         state.steering=Core.farm_smooth(state.steering,d.Unit,state.dt)
         local forward,right=state.steering:Dot(f.Unit),state.steering:Dot(r.Unit)
-        local keys=state.steering_keys or {}; state.steering_keys=keys
+        local previous=state.steering_keys or {}; local requested={}
         for _,entry in ipairs({{"W",forward},{"S",-forward},{"D",right},{"A",-right}}) do
-            local key,value=entry[1],entry[2]; local down=value>(keys[key] and .12 or .38)
-            hold(scope,key,down); keys[key]=down
+            local key,value=entry[1],entry[2]; requested[key]=value>(previous[key] and .12 or .38)
         end
+        local keys,blocked=Core.farm_safe_keys(requested,mine.Position,f.Unit,r.Unit,velocity,state.bounds)
+        state.steering_keys=keys; state.boundary_braking=blocked
+        for _,key in ipairs({"W","S","D","A"}) do hold(scope,key,keys[key]==true) end
         local _,_,edge=Core.farm_clamp(mine.Position,state.bounds)
-        farm_actions(state,guard==true,d.Magnitude>(guard and 8 or 5) and edge>3.5)
+        farm_actions(state,guard==true,next(keys)~=nil and not blocked and d.Magnitude>(guard and 8 or 5) and edge>5)
     end
     add("badge_farm","Blacktop badge farm","Player","Queues and plays Blacktop matches; badge rewards are decided by the game",{
         start=function(scope,s)
@@ -4256,7 +4335,7 @@ local function create_pivot_modules(ctx)
             farm_session=tostring(os.time())..":"..tostring(os.clock())
             farm_write(true)
             queue([[local ok,c=pcall(function() return game:GetService("HttpService"):JSONDecode(readfile("vanta_badge_farm.json")) end)
-if ok and c.enabled==true and c.session==]]..string.format("%q",farm_session)..[[ then loadstring(game:HttpGet("https://raw.githubusercontent.com/zyhnq/fuckyoumatthew/main/pivot_launcher.lua?v=20261107.06"))() end]])
+if ok and c.enabled==true and c.session==]]..string.format("%q",farm_session)..[[ then loadstring(game:HttpGet("https://raw.githubusercontent.com/zyhnq/fuckyoumatthew/main/pivot_launcher.lua?v=20261107.07"))() end]])
             Engine.farm_status="Starting"; return state
         end,
         step=function(scope,state,s,dt)
@@ -4337,7 +4416,9 @@ if ok and c.enabled==true and c.session==]]..string.format("%q",farm_session)..[
             local success,c=pcall(local_state); local mine=root(); local model=rig()
             if not success or not c or not c.data or not c.data.Attributes or not mine or not model then farm_release(scope,state); status("Waiting for spawned court character"); return end
             state.velocity=Core.farm_observe(state.history,"self",mine.Position,os.clock(),mine.AssemblyLinearVelocity)
-            farm_bounds(state,s,mine.Position)
+            farm_bounds(state,s,mine.Position,c.data.Attributes.CourtNumber)
+            farm_boundary_report(state,mine.Position)
+            if not state.bounds then state.shot_ready_since=nil; farm_release(scope,state); status("Movement paused / playable boundary markers unavailable"); return end
             if not state.actions then
                 local good,_,keyboard=pcall(client_parts)
                 local actions=good and keyboard and keyboard.Services and keyboard.Services.InputService
@@ -4350,6 +4431,14 @@ if ok and c.enabled==true and c.session==]]..string.format("%q",farm_session)..[
                 local enabled,err=registry:enable("meter_release",s)
                 if not enabled then farm_release(scope,state); status("Auto Green unavailable: "..tostring(err)); state.next_at=os.clock()+3; return end
                 state.owned.meter_release=true
+            end
+            local safe_drift,drift_error=Core.farm_clamp(mine.Position+state.velocity*.3,state.bounds)
+            local safe_position,position_error=Core.farm_clamp(mine.Position,state.bounds)
+            if drift_error>.1 or position_error>.05 then
+                state.shot_ready_since=nil
+                if Engine.auto_shoot_held then state.adapter.release(); Engine.auto_shoot_held=false end
+                farm_steer(scope,state,position_error>.05 and safe_position or safe_drift,not (held_ball(model) or model:GetAttribute("Basketball")==true))
+                status("Boundary brake / returning inside"); return
             end
             if Engine.auto_shoot_held then
                 farm_release(scope,state)
@@ -4991,7 +5080,7 @@ do
     local rail_line=frame(shell,20,97,660,1,theme.line)
     local top_line=frame(shell,20,54,660,1,theme.line)
     local logo=label(shell,"VANTA",20,12,140,28,19,theme.text); logo.Font=Enum.Font.GothamBold; logo.TextXAlignment=Enum.TextXAlignment.Left
-    local build_label=label(shell,"BUILD 2026.11.07.06",242,17,150,18,10,theme.muted); build_label.Name="PivotBuild"; build_label.Font=Enum.Font.RobotoMono; build_label.TextWrapped=false
+    local build_label=label(shell,"BUILD 2026.11.07.07",242,17,150,18,10,theme.muted); build_label.Name="PivotBuild"; build_label.Font=Enum.Font.RobotoMono; build_label.TextWrapped=false
     local heading=label(shell,"Practical Basketball",94,14,240,26,11,theme.muted); heading.Font=Enum.Font.GothamMedium
     close.BackgroundColor3=theme.rail; close.TextColor3=theme.muted; close.TextSize=14; corner(close,4)
     local search=make("TextBox",{Text="",PlaceholderText="Find a control...",PlaceholderColor3=theme.muted,Position=UDim2.fromOffset(484,10),Size=UDim2.fromOffset(166,23),
