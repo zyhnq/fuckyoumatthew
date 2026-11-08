@@ -4100,6 +4100,10 @@ local function create_pivot_modules(ctx)
 
     Engine.emit=emit; Engine.held=held
     function Engine:stop()
+        if not self.autoload_snapshot_stop then
+            self.autoload_state=nil; self.autoload_cancelled=true
+            if not (self.library_closed and self.autoload_teleporting) and self.disarm_autoload_resume then self:disarm_autoload_resume() end
+        end
         self.registry:stop_all(); for _,owner in pairs(held) do release_owned(owner) end
         self.capturing=false; self.pending_move=nil
         if next(held) then ctx.report("Input release pending / press F8 to retry") end
@@ -4197,7 +4201,9 @@ local function create_pivot_modules(ctx)
         local data,err=self:validate_saved_modules({version=1,presets={snapshot}}); assert(data,err)
         local item=data.presets[1]
         assert(ctx.runner:cancel(),"Input release pending; press F8 and retry")
-        assert(self:stop(),"Input release pending; press F8 and retry")
+        self.autoload_state=nil; self.autoload_snapshot_stop=true
+        local ok,stopped=pcall(self.stop,self); self.autoload_snapshot_stop=false
+        assert(ok,stopped); assert(stopped,"Input release pending; press F8 and retry")
         for key,value in pairs(item.settings) do self.settings[key]=value end
         local loaded,failures=0,{}
         for _,id in ipairs(item.enabled) do
@@ -4225,6 +4231,7 @@ local function create_pivot_modules(ctx)
         local previous=self.saved_modules; self.saved_modules=valid
         local ok,reason=pcall(function() self:write_saved_modules() end)
         if not ok then self.saved_modules=previous; error("Autoload could not be saved: "..tostring(reason)) end
+        if on then self.autoload_cancelled=false end
         self.module_preset_status=valid.autoload and "Autoload on startup: "..valid.autoload or "Preset autoload off"
         ctx.report(self.module_preset_status)
     end
@@ -4260,12 +4267,8 @@ local function create_pivot_modules(ctx)
     function Engine:autoload_saved_modules()
         if self.autoload_attempted or not self.saved_modules.autoload then return false end
         self.autoload_attempted=true
-        if self.registry.active.badge_farm then
-            self.module_preset_status="Skipped preset autoload / badge farm continuation is active"
-            return false
-        end
         for index,item in ipairs(self.saved_modules.presets) do if item.name==self.saved_modules.autoload then
-            local ok,loaded,failures=pcall(function() return self:load_saved_modules(index) end)
+            local ok,loaded,failures=pcall(function() return self:start_autoload(item) end)
             if not ok then self.module_preset_status="Autoload failed: "..tostring(loaded)
             else self.module_preset_status="Autoload / "..self.module_preset_status end
             ctx.report(self.module_preset_status)
@@ -4772,12 +4775,117 @@ local function create_pivot_modules(ctx)
         local good,_,keyboard=pcall(client_parts)
         return attrs,good and keyboard and keyboard.Services and keyboard.Services.InputService or nil
     end
+    function Engine:disarm_autoload_resume()
+        if self.autoload_resume_token and type(writefile)=="function" then
+            pcall(function() writefile("vanta_profile_resume.json",farm_http:JSONEncode({enabled=false,token=self.autoload_resume_token})) end)
+        end
+    end
+    function Engine:queue_profile_teleport()
+        if self.autoload_cancelled or self.autoload_queued or self.registry.active.badge_farm then return false end
+        local selected=false
+        if type(readfile)=="function" then
+            pcall(function()
+                local raw=readfile("c4_practical_hub_v2.json"); assert(#raw<=262144)
+                local saved=farm_http:JSONDecode(raw); local slot=tonumber(saved.autoloadSlot)
+                selected=saved.version==2 and slot and slot>=1 and slot<=3 and slot%1==0 and type(saved.profiles)=="table" and saved.profiles[tostring(slot)]~=nil and type(saved.modules)=="table" and saved.modules[tostring(slot)]~=nil or false
+            end)
+            if not selected then pcall(function()
+                local raw=readfile("pivot_saved_modules.json"); assert(#raw<=262144)
+                local saved=self:validate_saved_modules(farm_http:JSONDecode(raw)); selected=saved and saved.autoload~=nil or false
+            end) end
+        end
+        if not selected then return false end
+        local queue=queue_on_teleport or (syn and syn.queue_on_teleport)
+        if type(queue)~="function" or type(writefile)~="function" then ctx.report("Profile teleport reload unavailable / rerun the same loader after joining Blacktop"); return false end
+        self.autoload_queue_serial=(self.autoload_queue_serial or 0)+1
+        local token=tostring(os.time()).."-"..tostring(os.clock()).."-"..self.autoload_queue_serial
+        self.autoload_resume_token=token
+        local ok,err=pcall(function()
+            writefile("vanta_profile_resume.json",farm_http:JSONEncode({enabled=true,token=token}))
+            local verified=farm_http:JSONDecode(readfile("vanta_profile_resume.json")); assert(verified.enabled==true and verified.token==token,"Resume write could not be verified")
+            queue([[local ok,flag=pcall(function() return game:GetService("HttpService"):JSONDecode(readfile("vanta_profile_resume.json")) end)
+if ok and flag.enabled==true and flag.token==]]..string.format("%q",token)..[[ then
+    if not game:IsLoaded() then game.Loaded:Wait() end
+    if game.GameId==7529591378 then
+        local player=game:GetService("Players").LocalPlayer
+        if player and not player:WaitForChild("PlayerGui"):FindFirstChild("C4PracticalHub") then
+            loadstring(game:HttpGet("https://raw.githubusercontent.com/zyhnq/fuckyoumatthew/main/pivot_launcher.lua?profile_resume="..tostring(os.time())))()
+        end
+    end
+end]])
+        end)
+        if not ok then self:disarm_autoload_resume(); ctx.report("Profile teleport reload failed: "..tostring(err)); return false end
+        self.autoload_resume_token=token; self.autoload_queued=true
+        return true
+    end
+    function Engine:start_autoload(snapshot,extras)
+        local data,err=self:validate_saved_modules({version=1,presets={snapshot}}); assert(data,err)
+        local item=data.presets[1]
+        self.autoload_cancelled=false
+        self:restore_profile_extras(extras)
+        local preserving_farm=self.registry.active.badge_farm~=nil
+        if preserving_farm then
+            for key,value in pairs(item.settings) do if key:sub(1,5)~="farm_" then self.settings[key]=value end end
+            for _,id in ipairs(item.enabled) do if not self.registry.active[id] then self.registry:enable(id,self.settings) end end
+            self.module_preset_status="Autoload "..item.name.." / retained active badge farm"
+        else self:load_module_snapshot(item) end
+        local state={snapshot=item,extras=extras,wanted={},pending={},next_at=0,extras_pending=not root()}
+        local loaded=0
+        for _,id in ipairs(item.enabled) do state.wanted[id]=true; if self.registry.active[id] then loaded=loaded+1 else state.pending[id]=true end end
+        self.autoload_state=state
+        return loaded,{}
+    end
+    function Engine:step_autoload()
+        local state=self.autoload_state
+        if not state or self.autoload_cancelled or self.library_closed or os.clock()<state.next_at or ctx.runner.current or input:GetFocusedTextBox() then return end
+        if not next(state.pending) then return end
+        local function status(message)
+            self.module_preset_status=message
+            if message~=state.reported then state.reported=message; ctx.report(message) end
+        end
+        local mine=root()
+        if not mine then
+            state.next_at=os.clock()+.5; status("Autoload "..state.snapshot.name.." / waiting for court character")
+            return
+        end
+        state.next_at=os.clock()+1
+        local ok,c=pcall(local_state); local attrs=ok and c and c.data and c.data.Attributes or {}
+        if attrs.OnCourt==false then status("Autoload "..state.snapshot.name.." / waiting to enter court"); return end
+        if state.extras_pending then
+            local restored,reason=pcall(function() self:restore_profile_extras(state.extras) end)
+            if not restored then state.last_error=tostring(reason) end
+            state.extras_pending=false
+        end
+        if state.pending.guard then
+            local area={}; farm_bounds(area,self.settings,mine.Position,attrs.CourtNumber)
+            if area.bounds then
+                local existing=self.defensive_rim; local _,outside=Core.farm_clamp(existing and existing.Parent and existing.Position or mine.Position,area.bounds)
+                if not existing or not existing.Parent or outside>12 then self.defensive_rim=farm_basket(area,attrs,mine.Position,true) end
+            end
+        end
+        local pending,failures=0,{}
+        for id in pairs(state.pending) do
+            if self.registry.active[id] then state.pending[id]=nil
+            else
+                local accepted,reason=self.registry:enable(id,self.settings)
+                if accepted then state.pending[id]=nil else pending=pending+1; failures[#failures+1]=self.registry.definitions[id].title..": "..tostring(reason) end
+            end
+        end
+        status("Autoload "..state.snapshot.name..(pending>0 and " / waiting: "..table.concat(failures,"; ") or " / restored"))
+    end
+    if ctx.player.OnTeleport then ctx.connect(ctx.player.OnTeleport,function(phase)
+        if phase==Enum.TeleportState.Started or phase==Enum.TeleportState.InProgress then
+            Engine.autoload_teleporting=true; Engine:queue_profile_teleport()
+        elseif phase==Enum.TeleportState.Failed then
+            Engine.autoload_teleporting=false; Engine:disarm_autoload_resume(); Engine.autoload_queued=false
+        end
+    end) end
     local function farm_boundary_report(state,origin)
         if os.clock()<(state.next_diagnostic or 0) then return end
         state.next_diagnostic=os.clock()+2
         pcall(function()
             local b=state.bounds; local point=b and b.frame:PointToObjectSpace(origin)
-            writefile("vanta_badge_farm_runtime.json",farm_http:JSONEncode({build="2026.11.08.08",status=Engine.farm_status,role=state.role,basketSource=state.basket_source,shotClearance=state.shot_clearance and math.min(999,state.shot_clearance),stats=Engine.farm_stats,
+            writefile("vanta_badge_farm_runtime.json",farm_http:JSONEncode({build="2026.11.08.09",status=Engine.farm_status,role=state.role,basketSource=state.basket_source,shotClearance=state.shot_clearance and math.min(999,state.shot_clearance),stats=Engine.farm_stats,
                 position={origin.X,origin.Y,origin.Z},bounds=b and {source=b.source,x=b.x,z=b.z,localPosition={point.X,point.Y,point.Z}} or false,
                 boundaryBrake=state.boundary_braking==true,guard=state.guard==true,sprint=state.sprinting==true,keys=state.steering_keys or {}}))
         end)
@@ -4914,7 +5022,7 @@ local function create_pivot_modules(ctx)
             farm_session=tostring(os.time())..":"..tostring(os.clock())
             farm_write(true)
             queue([[local ok,c=pcall(function() return game:GetService("HttpService"):JSONDecode(readfile("vanta_badge_farm.json")) end)
-if ok and c.enabled==true and c.session==]]..string.format("%q",farm_session)..[[ then loadstring(game:HttpGet("https://raw.githubusercontent.com/zyhnq/fuckyoumatthew/main/pivot_launcher.lua?v=20261108.08"))() end]])
+if ok and c.enabled==true and c.session==]]..string.format("%q",farm_session)..[[ then loadstring(game:HttpGet("https://raw.githubusercontent.com/zyhnq/fuckyoumatthew/main/pivot_launcher.lua?v=20261108.09"))() end]])
             Engine.farm_status="Starting"; return state
         end,
         step=function(scope,state,s,dt)
@@ -5227,10 +5335,17 @@ if ok and c.enabled==true and c.session==]]..string.format("%q",farm_session)..[
     ctx.connect(run.Heartbeat,function(dt)
         local current=rig(); if current~=last_rig then
             local ids={}; for id in pairs(registry.active) do if id~="meter_release" and id~="badge_farm" then ids[#ids+1]=id end end
-            for _,id in ipairs(ids) do registry:disable(id) end
+            for _,id in ipairs(ids) do
+                local auto=Engine.autoload_state
+                if auto and auto.wanted[id] then auto.pending[id]=true end
+                registry:disable(id)
+            end
+            local auto=Engine.autoload_state
+            if auto then auto.next_at=0; auto.extras_pending=true end
             last_rig=current
         end
         registry:step(dt)
+        Engine:step_autoload()
     end)
     ctx.connect(input.TextBoxFocused,function() Engine:stop_controls() end)
     ctx.connect(input.InputBegan,function(event) if event.KeyCode==Enum.KeyCode.F8 then Engine:stop() end end)
@@ -5512,6 +5627,7 @@ autoload_button=button(profile_page,"Autoload this profile: OFF",protect(functio
     local previous=profile_autoload; profile_autoload=profile_autoload==slot and 0 or slot
     local ok,err=pcall(persist_profiles)
     if not ok then profile_autoload=previous; error("Autoload was not saved: "..tostring(err)) end
+    if PivotModules and profile_autoload>0 then PivotModules.autoload_cancelled=false end
     refresh_profile_autoload(); report(profile_autoload>0 and "Full profile "..profile_autoload.." will autoload on startup" or "Full-profile autoload off")
 end))
 refresh_profile_autoload()
@@ -5817,7 +5933,7 @@ do
     local rail_line=frame(shell,20,97,660,1,theme.line)
     local top_line=frame(shell,20,54,660,1,theme.line)
     local logo=label(shell,"VANTA",20,12,140,28,19,theme.text); logo.Font=Enum.Font.GothamBold; logo.TextXAlignment=Enum.TextXAlignment.Left
-    local build_label=label(shell,"BUILD 2026.11.08.08",242,17,150,18,10,theme.muted); build_label.Name="PivotBuild"; build_label.Font=Enum.Font.RobotoMono; build_label.TextWrapped=false
+    local build_label=label(shell,"BUILD 2026.11.08.09",242,17,150,18,10,theme.muted); build_label.Name="PivotBuild"; build_label.Font=Enum.Font.RobotoMono; build_label.TextWrapped=false
     local heading=label(shell,"Practical Basketball",94,14,240,26,11,theme.muted); heading.Font=Enum.Font.GothamMedium
     close.BackgroundColor3=theme.rail; close.TextColor3=theme.muted; close.TextSize=14; corner(close,4)
     local search=make("TextBox",{Text="",PlaceholderText="Find a control...",PlaceholderColor3=theme.muted,Position=UDim2.fromOffset(484,10),Size=UDim2.fromOffset(166,23),
@@ -6177,10 +6293,9 @@ do
     local ui=PivotUI
     local engine=Core.create_pivot_modules({players=players,player=player,input=input,run=run_service,runner=runner,gui=gui,connect=connect,report=report,skip_preset_autoload=profile_autoload>0,reserved_keys=function() return {config.shot,config.combo,config.menu,"F8"} end})
     PivotModules=engine
-    if profile_autoload>0 and not engine.registry.active.badge_farm then
+    if profile_autoload>0 then
         local ok,err=pcall(function()
-            engine:restore_profile_extras(profile_extras[profile_autoload])
-            engine:load_module_snapshot(module_profiles[profile_autoload])
+            engine:start_autoload(module_profiles[profile_autoload],profile_extras[profile_autoload])
             report("Autoload full profile "..profile_autoload.." / "..engine.module_preset_status)
         end)
         if not ok then report("Full-profile autoload failed: "..tostring(err)) end
