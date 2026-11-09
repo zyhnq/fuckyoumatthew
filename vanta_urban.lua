@@ -191,7 +191,7 @@ end
 Core.recoil_adapter=Core.weapon_adapter
 if DEEPHAT_REFINED_TEST then return Core end
 
--- Vanta Urban 3.9 | standalone client script, native UI, no Drawing dependency.
+-- Vanta Urban 4.0 | standalone client script, native UI, no Drawing dependency.
 local Players=game:GetService("Players")
 local Run=game:GetService("RunService")
 local Input=game:GetService("UserInputService")
@@ -202,14 +202,14 @@ if previous then local stop=previous:FindFirstChild("Unload"); assert(stop,"Clos
 -- Stop the old supplied script's camera callbacks if it is still active.
 Run:UnbindFromRenderStep("DeepHatRefined.Render"); Run:UnbindFromRenderStep("DeepHat_Aim"); Run:UnbindFromRenderStep("DeepHat_ESP")
 local cfg={enabled=true,espEnabled=true,teamCheck=true,ignoreTeams=false,checkLOS=true,espVisibleOnly=false,
-    hardLock=true,stickyTarget=true,centerFov=true,noRecoil=false,noSpread=false,vehicleTargets=true,
+    hardLock=true,stickyTarget=true,centerFov=true,noRecoil=false,noSpread=false,vehicleTargets=true,speedEnabled=false,walkSpeed=32,
     aimKey="E",aimMouseButton=false,response=10,fov=200,maxDistance=600,predictionEnabled=true,prediction=0,usePing=false,
     targetParts={"Head","UpperTorso","Torso","HumanoidRootPart"},espColor=Color3.fromRGB(235,111,129),espThickness=1.5,showFov=true,names=true,maxVisuals=24,switchBias=.25}
 -- Urban Reload's crew relationships are not verified by this generic Teams filter.
 -- Start unfiltered here; the user can still explicitly enable Team filter.
 local urban_reload=game.PlaceId==84448037861644 or game.GameId==10769552054
 if urban_reload then cfg.teamCheck=false end
-local ranges={response={1,35},fov={30,500},maxDistance={50,3000},prediction={0,.25},espThickness={1,3},maxVisuals={4,48},switchBias={0,.6}}
+local ranges={response={1,35},fov={30,500},maxDistance={50,3000},prediction={0,.25},espThickness={1,3},maxVisuals={4,48},switchBias={0,.6},walkSpeed={1,150}}
 local alive=true; local focused=true; local menu_open=true; local error_paused=false; local waiting_key=false
 local connections={}; local roster={}; local locked=nil; local selected=nil; local ping=0; local elapsed=1; local ping_elapsed=1
 local was_active=false
@@ -238,7 +238,7 @@ local content=make("ScrollingFrame",{Position=UDim2.fromOffset(198,128),Size=UDi
 local badge=make("TextButton",{Name="MenuButton",Text="Vanta",Position=UDim2.fromOffset(20,44),Size=UDim2.fromOffset(104,32),BackgroundColor3=theme.panel,TextColor3=theme.text,Font=Enum.Font.GothamMedium,TextSize=16,BorderSizePixel=0,AutoButtonColor=false,ZIndex=20},canvas); corner(badge,7)
 local live_status=text(canvas,"",136,44,460,32,14,theme.text)
 live_status.Name="LiveStatus"; live_status.TextStrokeTransparency=.3
-local control={Config=cfg,Version="3.9"}; local bindings={}; local y=0
+local control={Config=cfg,Version="4.0"}; local bindings={}; local y=0
 local recoil_module
 local function recoil_state_key(state)
     if not recoil_module or not recoil_module.Parent then
@@ -276,7 +276,7 @@ make("Frame",{Position=UDim2.fromOffset(0,74),Size=UDim2.new(1,0,0,1),Background
 local sidebar=make("Frame",{Position=UDim2.fromOffset(0,75),Size=UDim2.new(0,172,1,-75),BackgroundColor3=Color3.fromRGB(13,10,18),BorderSizePixel=0,ZIndex=20},panel)
 local sidebar_line=make("Frame",{Position=UDim2.fromOffset(176,75),Size=UDim2.new(0,1,1,-75),BackgroundColor3=theme.line,BorderSizePixel=0,ZIndex=21},panel)
 local section_title=text(panel,"Aim",202,88,400,30,21); section_title.Font=Enum.Font.GothamBold
-local build_label=text(panel,"BUILD 2026.11.08.22",0,0,140,18,10,theme.muted); build_label.Font=Enum.Font.RobotoMono
+local build_label=text(panel,"BUILD 2026.11.08.23",0,0,140,18,10,theme.muted); build_label.Font=Enum.Font.RobotoMono
 local search=make("TextBox",{Name="VantaSearch",Text="",PlaceholderText="Find a control...",ClearTextOnFocus=false,Position=UDim2.new(1,-280,0,23),Size=UDim2.fromOffset(192,27),BackgroundColor3=theme.input,TextColor3=theme.text,PlaceholderColor3=theme.muted,Font=Enum.Font.Gotham,TextSize=13,BorderSizePixel=0,ZIndex=24},panel); corner(search,7)
 make("UIPadding",{PaddingLeft=UDim.new(0,12),PaddingRight=UDim.new(0,8)},search)
 local group=make("Frame",{Name="VantaUrbanGroup",Size=UDim2.new(1,-6,0,52),BackgroundColor3=theme.panel,BorderSizePixel=0,ZIndex=22},content); corner(group,9)
@@ -284,7 +284,7 @@ make("UIStroke",{Color=theme.line,Transparency=.35,Thickness=1},group)
 local group_title=text(group,"Aim  −",14,0,500,44,18); group_title.Font=Enum.Font.GothamMedium; group_title.ZIndex=24
 make("Frame",{Position=UDim2.fromOffset(14,44),Size=UDim2.new(1,-28,0,1),BackgroundColor3=theme.line,BorderSizePixel=0,ZIndex=23},group)
 local ui_rows={}; local nav_buttons={}; local current_section="Aim"
-local section_map={["Player ESP"]="ESP",["Show FOV"]="ESP",["ESP names & distances"]="ESP",["ESP visible only"]="ESP",["Prediction"]="Prediction",["Use ping in lead"]="Prediction",["Prediction lead / seconds"]="Prediction",["Hold key"]="Settings",["RightShift menu · F8 stop"]="Settings"}
+local section_map={["Speed override"]="Movement",["Walk speed / studs per second"]="Movement",["Player ESP"]="ESP",["Show FOV"]="ESP",["ESP names & distances"]="ESP",["ESP visible only"]="ESP",["Prediction"]="Prediction",["Use ping in lead"]="Prediction",["Prediction lead / seconds"]="Prediction",["Hold key"]="Settings",["RightShift menu · F8 stop"]="Settings"}
 local function show_section(name,keep_scroll)
     current_section=name; local query=search.Text:lower(); local title=query~="" and "Search" or name
     section_title.Text=title; group_title.Text=title.."  −"; local offset=52
@@ -309,6 +309,7 @@ local function nav_icon(owner,kind)
         for _,p in ipairs({{3,3},{12,3},{3,12},{12,12}}) do local box=make("Frame",{Position=UDim2.fromOffset(p[1],p[2]),Size=UDim2.fromOffset(5,5),BackgroundTransparency=1,ZIndex=24},root); make("UIStroke",{Color=theme.muted,Thickness=1},box) end
     elseif kind=="Settings" then
         for _,y in ipairs({5,10,15}) do line(3,y,17,y) end; line(7,3,7,7); line(13,8,13,12); line(6,13,6,17)
+    elseif kind=="Movement" then line(3,4,10,10); line(10,10,3,16); line(10,4,17,10); line(17,10,10,16)
     elseif kind=="Prediction" then line(3,15,8,10); line(8,10,12,12); line(12,12,17,4); line(12,4,17,4); line(17,4,17,9)
     else
         local ring=make("Frame",{Position=UDim2.fromOffset(4,4),Size=UDim2.fromOffset(12,12),BackgroundTransparency=1,ZIndex=24},root); corner(ring,8); make("UIStroke",{Color=theme.muted,Thickness=1},ring)
@@ -316,7 +317,7 @@ local function nav_icon(owner,kind)
     end
     return root
 end
-for i,name in ipairs({"Aim","ESP","Prediction","Settings"}) do
+for i,name in ipairs({"Aim","ESP","Movement","Prediction","Settings"}) do
     local b=make("TextButton",{Name="VantaTab_"..name,Text="",AutoButtonColor=false,Position=UDim2.fromOffset(10,90+(i-1)*43),Size=UDim2.fromOffset(156,38),BackgroundColor3=theme.panel,BorderSizePixel=0,ZIndex=22},panel); corner(b,5)
     local symbol=nav_icon(b,name)
     local caption=text(b,name,40,0,112,38,13,theme.muted); caption.ZIndex=24
@@ -351,6 +352,37 @@ local function actor_character(who)
     return found
 end
 local function humanoid(character) return character and character:FindFirstChildWhichIsA("Humanoid",true) end
+local speed_humanoid,original_speed,applied_speed
+local speed_reason="Off"
+local function restore_speed()
+    local hum,saved,last=speed_humanoid,original_speed,applied_speed
+    speed_humanoid=nil; original_speed=nil; applied_speed=nil
+    if hum then
+        local ok,err=pcall(function()
+            if hum.Parent and hum.WalkSpeed==last then hum.WalkSpeed=saved end
+        end)
+        if not ok then warn("Vanta Urban speed restore: "..tostring(err)) end
+    end
+end
+local function stop_speed()
+    cfg.speedEnabled=false; restore_speed(); speed_reason="Off"
+end
+local function update_speed()
+    if not cfg.speedEnabled then return end
+    local hum=humanoid(actor_character(player))
+    if hum~=speed_humanoid then restore_speed() end
+    if not hum or hum.Health<=0 then restore_speed(); speed_reason="Waiting for character"; return end
+    if hum.Sit or hum.SeatPart then restore_speed(); speed_reason="Paused while seated"; return end
+    local current=hum.WalkSpeed
+    if type(current)~="number" or current~=current or math.abs(current)==math.huge then
+        restore_speed(); speed_reason="Unsupported movement state"; return
+    end
+    if not speed_humanoid then speed_humanoid=hum; original_speed=current end
+    if applied_speed and current~=applied_speed then original_speed=current end
+    applied_speed=cfg.walkSpeed
+    if current~=applied_speed then hum.WalkSpeed=applied_speed end
+    speed_reason="Active"
+end
 local function root(character)
     if not character then return nil end
     for _,name in ipairs({"HumanoidRootPart","RootPart","Torso","UpperTorso"}) do
@@ -486,16 +518,17 @@ function control:Set(key,value)
     cfg[key]=value
     local adapter=weapon_controls[key]
     if adapter then if value then adapter:enable(os.clock()) else adapter:disable() end end
+    if key=="speedEnabled" and not value then stop_speed() end
     error_paused=false; reset_lock(); elapsed=1; refresh_controls(); return true
 end
 function control:Stop()
-    cfg.enabled=false; cfg.espEnabled=false; stop_weapon_controls(); reset_lock(); circle.Visible=false; hide_visuals(); refresh_controls(); set_status("Stopped · enable controls to resume")
+    cfg.enabled=false; cfg.espEnabled=false; stop_weapon_controls(); stop_speed(); reset_lock(); circle.Visible=false; hide_visuals(); refresh_controls(); set_status("Stopped · enable controls to resume")
 end
 local binding_name="VantaUrban.Render"
 function control:Unload()
     if not alive then return end; alive=false; reset_lock()
     Run:UnbindFromRenderStep(binding_name)
-    Run:UnbindFromRenderStep("VantaUrban.Recoil"); stop_weapon_controls()
+    Run:UnbindFromRenderStep("VantaUrban.Recoil"); stop_weapon_controls(); stop_speed()
     for _,link in ipairs(connections) do link:Disconnect() end; connections={}
     for _,entry in pairs(roster) do dispose_visual(entry) end; roster={}
     gui:Destroy()
@@ -540,6 +573,7 @@ local function field(caption,key,format)
 end
 toggle("Aim assist","enabled"); toggle("Player ESP","espEnabled")
 toggle("No recoil","noRecoil"); toggle("No Spread","noSpread"); toggle("Target vehicle occupants","vehicleTargets")
+toggle("Speed override","speedEnabled"); field("Walk speed / studs per second","walkSpeed")
 toggle("Hard lock / no smoothing","hardLock"); toggle("Keep target while held","stickyTarget"); toggle("Center FOV on crosshair","centerFov")
 toggle("Team filter","teamCheck",function() return cfg.teamCheck and not cfg.ignoreTeams end,function(value) cfg.teamCheck=value; cfg.ignoreTeams=false; reset_lock() end)
 toggle("Line of sight","checkLOS"); toggle("Show FOV","showFov")
@@ -747,7 +781,15 @@ Run:BindToRenderStep(binding_name,Enum.RenderPriority.Last.Value+1,function(dt)
         local camera=workspace.CurrentCamera
         if camera then draw_esp(camera) end
     end)
-    if not ok then error_paused=true; stop_weapon_controls(); reset_lock(); hide_visuals(); circle.Visible=false; refresh_controls(); set_status("Paused: "..tostring(err)); warn("Vanta Urban paused: "..tostring(err)) end
+    if not ok then error_paused=true; stop_weapon_controls(); stop_speed(); reset_lock(); hide_visuals(); circle.Visible=false; refresh_controls(); set_status("Paused: "..tostring(err)); warn("Vanta Urban paused: "..tostring(err)) end
+end)
+connect(Run.Heartbeat,function()
+    if not alive or not cfg.speedEnabled then return end
+    local ok,err=pcall(update_speed)
+    if not ok then
+        stop_speed(); speed_reason="Movement update failed"; refresh_controls()
+        set_status("Speed override failed: "..tostring(err))
+    end
 end)
 Run:BindToRenderStep("VantaUrban.Recoil",Enum.RenderPriority.Camera.Value-1,function()
     local now=os.clock()
@@ -779,7 +821,7 @@ local function weapon_status(adapter)
     return {enabled=adapter.enabled,states=adapter.count,reason=adapter.reason,mode=adapter.mode,
         weaponConfigs=adapter.configs,clientStates=adapter.clients,writeError=adapter.lastError}
 end
-function control:GetStatus() local count=0; for _ in pairs(roster) do count=count+1 end; return {alive=alive,paused=error_paused,target=locked and locked.Name,players=count,menu=menu_open,reason=last_reason,diagnostics=diagnostics,placeId=game.PlaceId,recoil=weapon_status(recoil),spread=weapon_status(spread)} end
+function control:GetStatus() local count=0; for _ in pairs(roster) do count=count+1 end; return {alive=alive,paused=error_paused,target=locked and locked.Name,players=count,menu=menu_open,reason=last_reason,diagnostics=diagnostics,placeId=game.PlaceId,recoil=weapon_status(recoil),spread=weapon_status(spread),speed={enabled=cfg.speedEnabled,value=cfg.walkSpeed,reason=speed_reason}} end
 refresh_controls(); menu(true)
 print("Vanta Urban "..control.Version.." loaded · Hold E · RightShift menu · F8 stop · Delete unload")
 return control
