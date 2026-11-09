@@ -189,9 +189,67 @@ function Core.weapon_adapter(discover,options)
     return self
 end
 Core.recoil_adapter=Core.weapon_adapter
+function Core.movement_adapter(discover,write)
+    local self={records={},count=0,next_scan=0,reason="Waiting for movement settings"}
+    local keys={"WalkSpeed","SprintSpeed","CrouchSpeed","MoveSpeedMul"}
+    local function finite(value) return type(value)=="number" and value==value and math.abs(value)<math.huge end
+    local function restore(object,record)
+        for key,field in pairs(record) do
+            if rawget(object,key)==field.applied then
+                local ok,err=write(object,key,field.original)
+                if not ok then self.reason="Movement restore failed: "..tostring(err):sub(1,120) end
+            end
+        end
+    end
+    function self:restore()
+        for object,record in pairs(self.records) do restore(object,record) end
+        self.records={}; self.count=0; self.next_scan=0
+    end
+    function self:step(speed,now)
+        if now>=self.next_scan then
+            self.next_scan=now+(self.count>0 and 10 or 2)
+            local ok,objects=pcall(function() return discover and discover() end)
+            if ok and type(objects)=="table" then
+                for _,object in pairs(objects) do
+                    -- Captured Urban movement settings also contain health and roll/jump rules.
+                    if type(object)=="table" and not self.records[object] and self.count<32
+                        and finite(rawget(object,"MaxHealth")) and finite(rawget(object,"RollCooldown"))
+                        and finite(rawget(object,"JumpCooldown")) then
+                        local fields={}
+                        for _,key in ipairs(keys) do
+                            local value=rawget(object,key)
+                            if finite(value) then fields[key]={original=value} end
+                        end
+                        if fields.WalkSpeed and fields.SprintSpeed and fields.CrouchSpeed and fields.MoveSpeedMul then
+                            self.records[object]=fields; self.count=self.count+1
+                        end
+                    end
+                end
+            end
+        end
+        local blocked
+        for object,record in pairs(self.records) do
+            for key,field in pairs(record) do
+                local value=rawget(object,key)
+                local desired=key=="MoveSpeedMul" and 1 or speed
+                if finite(value) and value~=desired then
+                    if value~=field.applied then field.original=value end
+                    field.applied=desired
+                    local ok,err=write(object,key,desired)
+                    if not ok then
+                        restore(object,record); self.records[object]=nil; self.count=self.count-1
+                        blocked=tostring(err):sub(1,120); break
+                    end
+                end
+            end
+        end
+        self.reason=blocked and ("Movement write blocked: "..blocked) or self.count>0 and "Game movement settings active" or "Humanoid mode / movement settings not found"
+    end
+    return self
+end
 if DEEPHAT_REFINED_TEST then return Core end
 
--- Vanta Urban 4.0 | standalone client script, native UI, no Drawing dependency.
+-- Vanta Urban 4.1 | standalone client script, native UI, no Drawing dependency.
 local Players=game:GetService("Players")
 local Run=game:GetService("RunService")
 local Input=game:GetService("UserInputService")
@@ -238,7 +296,7 @@ local content=make("ScrollingFrame",{Position=UDim2.fromOffset(198,128),Size=UDi
 local badge=make("TextButton",{Name="MenuButton",Text="Vanta",Position=UDim2.fromOffset(20,44),Size=UDim2.fromOffset(104,32),BackgroundColor3=theme.panel,TextColor3=theme.text,Font=Enum.Font.GothamMedium,TextSize=16,BorderSizePixel=0,AutoButtonColor=false,ZIndex=20},canvas); corner(badge,7)
 local live_status=text(canvas,"",136,44,460,32,14,theme.text)
 live_status.Name="LiveStatus"; live_status.TextStrokeTransparency=.3
-local control={Config=cfg,Version="4.0"}; local bindings={}; local y=0
+local control={Config=cfg,Version="4.1"}; local bindings={}; local y=0
 local recoil_module
 local function recoil_state_key(state)
     if not recoil_module or not recoil_module.Parent then
@@ -276,7 +334,7 @@ make("Frame",{Position=UDim2.fromOffset(0,74),Size=UDim2.new(1,0,0,1),Background
 local sidebar=make("Frame",{Position=UDim2.fromOffset(0,75),Size=UDim2.new(0,172,1,-75),BackgroundColor3=Color3.fromRGB(13,10,18),BorderSizePixel=0,ZIndex=20},panel)
 local sidebar_line=make("Frame",{Position=UDim2.fromOffset(176,75),Size=UDim2.new(0,1,1,-75),BackgroundColor3=theme.line,BorderSizePixel=0,ZIndex=21},panel)
 local section_title=text(panel,"Aim",202,88,400,30,21); section_title.Font=Enum.Font.GothamBold
-local build_label=text(panel,"BUILD 2026.11.08.23",0,0,140,18,10,theme.muted); build_label.Font=Enum.Font.RobotoMono
+local build_label=text(panel,"BUILD 2026.11.08.24",0,0,140,18,10,theme.muted); build_label.Font=Enum.Font.RobotoMono
 local search=make("TextBox",{Name="VantaSearch",Text="",PlaceholderText="Find a control...",ClearTextOnFocus=false,Position=UDim2.new(1,-280,0,23),Size=UDim2.fromOffset(192,27),BackgroundColor3=theme.input,TextColor3=theme.text,PlaceholderColor3=theme.muted,Font=Enum.Font.Gotham,TextSize=13,BorderSizePixel=0,ZIndex=24},panel); corner(search,7)
 make("UIPadding",{PaddingLeft=UDim.new(0,12),PaddingRight=UDim.new(0,8)},search)
 local group=make("Frame",{Name="VantaUrbanGroup",Size=UDim2.new(1,-6,0,52),BackgroundColor3=theme.panel,BorderSizePixel=0,ZIndex=22},content); corner(group,9)
@@ -354,6 +412,8 @@ end
 local function humanoid(character) return character and character:FindFirstChildWhichIsA("Humanoid",true) end
 local speed_humanoid,original_speed,applied_speed
 local speed_reason="Off"
+local speed_label
+local movement=Core.movement_adapter(discover_weapons,write_weapon)
 local function restore_speed()
     local hum,saved,last=speed_humanoid,original_speed,applied_speed
     speed_humanoid=nil; original_speed=nil; applied_speed=nil
@@ -365,23 +425,24 @@ local function restore_speed()
     end
 end
 local function stop_speed()
-    cfg.speedEnabled=false; restore_speed(); speed_reason="Off"
+    cfg.speedEnabled=false; restore_speed(); movement:restore(); speed_reason="Off"
 end
 local function update_speed()
     if not cfg.speedEnabled then return end
     local hum=humanoid(actor_character(player))
-    if hum~=speed_humanoid then restore_speed() end
-    if not hum or hum.Health<=0 then restore_speed(); speed_reason="Waiting for character"; return end
-    if hum.Sit or hum.SeatPart then restore_speed(); speed_reason="Paused while seated"; return end
+    if hum~=speed_humanoid then restore_speed(); movement:restore() end
+    if not hum or hum.Health<=0 then restore_speed(); movement:restore(); speed_reason="Waiting for character"; return end
+    if hum.Sit or hum.SeatPart then restore_speed(); movement:restore(); speed_reason="Paused while seated"; return end
     local current=hum.WalkSpeed
     if type(current)~="number" or current~=current or math.abs(current)==math.huge then
-        restore_speed(); speed_reason="Unsupported movement state"; return
+        restore_speed(); movement:restore(); speed_reason="Unsupported movement state"; return
     end
     if not speed_humanoid then speed_humanoid=hum; original_speed=current end
     if applied_speed and current~=applied_speed then original_speed=current end
+    movement:step(cfg.walkSpeed,os.clock())
     applied_speed=cfg.walkSpeed
     if current~=applied_speed then hum.WalkSpeed=applied_speed end
-    speed_reason="Active"
+    speed_reason=movement.reason
 end
 local function root(character)
     if not character then return nil end
@@ -519,6 +580,7 @@ function control:Set(key,value)
     local adapter=weapon_controls[key]
     if adapter then if value then adapter:enable(os.clock()) else adapter:disable() end end
     if key=="speedEnabled" and not value then stop_speed() end
+    if key=="speedEnabled" and value then speed_reason="Waiting for character" end
     error_paused=false; reset_lock(); elapsed=1; refresh_controls(); return true
 end
 function control:Stop()
@@ -540,6 +602,12 @@ local function toggle(caption,key,get,set)
         local label=text(r,"Off",10,29,400,18,11,theme.muted)
         label.Size=UDim2.new(1,-84,0,18); label.Name=key=="noRecoil" and "RecoilStatus" or "SpreadStatus"
         weapon_labels[key]=label
+    end
+    if key=="speedEnabled" then
+        r:FindFirstChild("Caption").Size=UDim2.new(1,-110,0,28)
+        speed_label=text(r,"Off",10,29,400,18,11,theme.muted)
+        speed_label.Name="SpeedStatus"; speed_label.Size=UDim2.new(1,-84,0,18)
+        bindings[#bindings+1]=function() speed_label.Text=speed_reason end
     end
     local function read() if get then return get() end; return cfg[key] end
     b=button(r,"",function() local value=not read(); if set then set(value); elapsed=1; refresh_controls() else control:Set(key,value) end end)
@@ -783,13 +851,14 @@ Run:BindToRenderStep(binding_name,Enum.RenderPriority.Last.Value+1,function(dt)
     end)
     if not ok then error_paused=true; stop_weapon_controls(); stop_speed(); reset_lock(); hide_visuals(); circle.Visible=false; refresh_controls(); set_status("Paused: "..tostring(err)); warn("Vanta Urban paused: "..tostring(err)) end
 end)
-connect(Run.Heartbeat,function()
+connect(Run.Stepped,function()
     if not alive or not cfg.speedEnabled then return end
     local ok,err=pcall(update_speed)
     if not ok then
         stop_speed(); speed_reason="Movement update failed"; refresh_controls()
         set_status("Speed override failed: "..tostring(err))
     end
+    if speed_label and speed_label.Text~=speed_reason then speed_label.Text=speed_reason end
 end)
 Run:BindToRenderStep("VantaUrban.Recoil",Enum.RenderPriority.Camera.Value-1,function()
     local now=os.clock()
@@ -821,7 +890,7 @@ local function weapon_status(adapter)
     return {enabled=adapter.enabled,states=adapter.count,reason=adapter.reason,mode=adapter.mode,
         weaponConfigs=adapter.configs,clientStates=adapter.clients,writeError=adapter.lastError}
 end
-function control:GetStatus() local count=0; for _ in pairs(roster) do count=count+1 end; return {alive=alive,paused=error_paused,target=locked and locked.Name,players=count,menu=menu_open,reason=last_reason,diagnostics=diagnostics,placeId=game.PlaceId,recoil=weapon_status(recoil),spread=weapon_status(spread),speed={enabled=cfg.speedEnabled,value=cfg.walkSpeed,reason=speed_reason}} end
+function control:GetStatus() local count=0; for _ in pairs(roster) do count=count+1 end; return {alive=alive,paused=error_paused,target=locked and locked.Name,players=count,menu=menu_open,reason=last_reason,diagnostics=diagnostics,placeId=game.PlaceId,recoil=weapon_status(recoil),spread=weapon_status(spread),speed={enabled=cfg.speedEnabled,value=cfg.walkSpeed,reason=speed_reason,settings=movement.count}} end
 refresh_controls(); menu(true)
 print("Vanta Urban "..control.Version.." loaded · Hold E · RightShift menu · F8 stop · Delete unload")
 return control
