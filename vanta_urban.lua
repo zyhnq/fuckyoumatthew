@@ -78,8 +78,11 @@ function Core.table_writer(api)
         return true
     end
 end
-function Core.recoil_adapter(discover,options)
+function Core.weapon_adapter(discover,options)
     options=options or {}
+    local spread_only=options.spread==true
+    local bloom_keys={"Hip","Aim","Air","Move","Max","PerShot"}
+    local spread_keys={"SpreadRest","Spread"}
     local self={enabled=false,records={},next_scan=0,reason="Off",count=0,configs=0,clients=0,mode="None",lastError=nil}
     local write=options.write or function(object,key,value) local ok,err=pcall(rawset,object,key,value); return ok,err end
     local function finite(n) return type(n)=="number" and n==n and math.abs(n)<math.huge end
@@ -101,14 +104,36 @@ function Core.recoil_adapter(discover,options)
         if type(object)~="table" then return end
         -- Each weapon's data entry has Recoil/Bloom/Fire; unrelated camera,
         -- animation and vehicle spring tables do not match this schema.
-        local weapon=rawget(object,"Recoil")
-        if type(weapon)=="table" and type(rawget(object,"Bloom"))=="table" and type(rawget(object,"Fire"))=="table" then
-            local up,side=rawget(weapon,"Up"),rawget(weapon,"Side")
-            if finite(up) and finite(side) then add(weapon,{{key="Up",original=up,zero=0},{key="Side",original=side,zero=0}},"weapon") end
+        local recoil,bloom=rawget(object,"Recoil"),rawget(object,"Bloom")
+        if type(recoil)=="table" and type(bloom)=="table" and type(rawget(object,"Fire"))=="table" then
+            if spread_only then
+                if finite(rawget(bloom,"Hip")) and finite(rawget(bloom,"Aim")) then
+                    local fields={}
+                    for _,key in ipairs(bloom_keys) do
+                        local value=rawget(bloom,key)
+                        if finite(value) then fields[#fields+1]={key=key,original=value,zero=0} end
+                    end
+                    add(bloom,fields,"weapon")
+                end
+            else
+                local up,side=rawget(recoil,"Up"),rawget(recoil,"Side")
+                if finite(up) and finite(side) then add(recoil,{{key="Up",original=up,zero=0},{key="Side",original=side,zero=0}},"weapon") end
+            end
         end
-        if type(rawget(object,"RecoilKey"))=="function" and finite(rawget(object,"CamYaw")) and finite(rawget(object,"SpreadMultiplier")) then
-            local field=client_field(object); if field then add(object,{field},"client") end
+        local multiplier=rawget(object,"SpreadMultiplier")
+        if type(rawget(object,"RecoilKey"))=="function" and finite(rawget(object,"CamYaw")) and finite(multiplier) then
+            if spread_only then
+                local fields={{key="SpreadMultiplier",original=multiplier,zero=0}}
+                for _,key in ipairs(spread_keys) do
+                    local value=rawget(object,key)
+                    if finite(value) then fields[#fields+1]={key=key,original=value,zero=0,transient=key=="Spread"} end
+                end
+                add(object,fields,"client")
+            else
+                local field=client_field(object); if field then add(object,{field},"client") end
+            end
         end
+        if spread_only then return end
         local pitch,yaw=rawget(object,"RecoilPitch"),rawget(object,"RecoilYaw")
         if finite(pitch) and finite(yaw) then add(object,{{key="RecoilPitch",original=pitch,zero=0},{key="RecoilYaw",original=yaw,zero=0}},"legacy") end
     end
@@ -132,7 +157,7 @@ function Core.recoil_adapter(discover,options)
         if not self.enabled then return end
         if now>=self.next_scan then self:scan(); self.next_scan=now+((self.clients>0 or self.configs>0) and 10 or 2) end
         for object,record in pairs(self.records) do
-            if record.kind=="client" then
+            if record.kind=="client" and not spread_only then
                 local field=client_field(object)
                 if field and field.key~=record.fields[1].key then record.fields={field} end
             end
@@ -141,6 +166,8 @@ function Core.recoil_adapter(discover,options)
                 local value=rawget(object,field.key); local kind=options.kind and options.kind(value) or type(value)
                 local supported=field.value_kind and kind==field.value_kind or not field.value_kind and finite(value)
                 if supported and value~=field.zero then
+                    -- A weapon change can update the resting spread in a reused client table.
+                    if spread_only and not field.transient then field.original=value end
                     local ok,err=write(object,field.key,field.zero)
                     if not ok then self.lastError=tostring(err):gsub("^.-:%d+:%s*",""):sub(1,200); writable=false; break end
                 end
@@ -150,7 +177,9 @@ function Core.recoil_adapter(discover,options)
                 if record.kind=="weapon" then self.configs=self.configs-1 elseif record.kind=="client" then self.clients=self.clients-1 end
             end
         end
-        if self.count==0 and self.reason=="Active" then self.reason=self.lastError and ("Write blocked: "..self.lastError) or "No writable recoil state found" end
+        if self.count==0 and self.reason=="Active" then
+            self.reason=self.lastError and ("Write blocked: "..self.lastError) or (spread_only and "No writable spread state found" or "No writable recoil state found")
+        end
     end
     function self:disable()
         for object,record in pairs(self.records) do restore(object,record) end
@@ -159,9 +188,10 @@ function Core.recoil_adapter(discover,options)
     function self:enable(now) self.enabled=true; self.lastError=nil; self.next_scan=0; self:step(now or 0) end
     return self
 end
+Core.recoil_adapter=Core.weapon_adapter
 if DEEPHAT_REFINED_TEST then return Core end
 
--- Vanta Urban 3.8 | standalone client script, native UI, no Drawing dependency.
+-- Vanta Urban 3.9 | standalone client script, native UI, no Drawing dependency.
 local Players=game:GetService("Players")
 local Run=game:GetService("RunService")
 local Input=game:GetService("UserInputService")
@@ -172,7 +202,7 @@ if previous then local stop=previous:FindFirstChild("Unload"); assert(stop,"Clos
 -- Stop the old supplied script's camera callbacks if it is still active.
 Run:UnbindFromRenderStep("DeepHatRefined.Render"); Run:UnbindFromRenderStep("DeepHat_Aim"); Run:UnbindFromRenderStep("DeepHat_ESP")
 local cfg={enabled=true,espEnabled=true,teamCheck=true,ignoreTeams=false,checkLOS=true,espVisibleOnly=false,
-    hardLock=true,stickyTarget=true,centerFov=true,noRecoil=false,vehicleTargets=true,
+    hardLock=true,stickyTarget=true,centerFov=true,noRecoil=false,noSpread=false,vehicleTargets=true,
     aimKey="E",aimMouseButton=false,response=10,fov=200,maxDistance=600,predictionEnabled=true,prediction=0,usePing=false,
     targetParts={"Head","UpperTorso","Torso","HumanoidRootPart"},espColor=Color3.fromRGB(235,111,129),espThickness=1.5,showFov=true,names=true,maxVisuals=24,switchBias=.25}
 -- Urban Reload's crew relationships are not verified by this generic Teams filter.
@@ -208,7 +238,7 @@ local content=make("ScrollingFrame",{Position=UDim2.fromOffset(198,128),Size=UDi
 local badge=make("TextButton",{Name="MenuButton",Text="Vanta",Position=UDim2.fromOffset(20,44),Size=UDim2.fromOffset(104,32),BackgroundColor3=theme.panel,TextColor3=theme.text,Font=Enum.Font.GothamMedium,TextSize=16,BorderSizePixel=0,AutoButtonColor=false,ZIndex=20},canvas); corner(badge,7)
 local live_status=text(canvas,"",136,44,460,32,14,theme.text)
 live_status.Name="LiveStatus"; live_status.TextStrokeTransparency=.3
-local control={Config=cfg,Version="3.8"}; local bindings={}; local y=0
+local control={Config=cfg,Version="3.9"}; local bindings={}; local y=0
 local recoil_module
 local function recoil_state_key(state)
     if not recoil_module or not recoil_module.Parent then
@@ -224,19 +254,29 @@ local function recoil_state_key(state)
     if type(getter)=="function" then local ok,value=pcall(getter); if ok and type(value)=="string" then return value end end
     return "RecoilKick"
 end
-local recoil=Core.recoil_adapter(type(getgc)=="function" and function() return getgc(true) end or nil,{
+local discover_weapons=type(getgc)=="function" and function() return getgc(true) end or nil
+local write_weapon=Core.table_writer({is_readonly=isreadonly or is_readonly or table.isfrozen,set_readonly=setreadonly or set_readonly,
+    make_writable=makewritable or makewriteable or makereadwrite,make_readonly=makereadonly})
+local recoil=Core.weapon_adapter(discover_weapons,{
     state_key=recoil_state_key,kind=typeof or type,zero2=Vector2.new(0,0),zero3=Vector3.zero or Vector3.new(0,0,0),
-    write=Core.table_writer({is_readonly=isreadonly or is_readonly or table.isfrozen,set_readonly=setreadonly or set_readonly,
-        make_writable=makewritable or makewriteable or makereadwrite,make_readonly=makereadonly})
+    write=write_weapon
 })
-local recoil_label; local logged_recoil_error
+local spread=Core.weapon_adapter(discover_weapons,{spread=true,write=write_weapon})
+local weapon_controls={noRecoil=recoil,noSpread=spread}
+local weapon_labels={}; local logged_recoil_error
+local function stop_weapon_controls()
+    for key,adapter in pairs(weapon_controls) do
+        cfg[key]=false
+        adapter:disable()
+    end
+end
 local panel_scale=make("UIScale",{Scale=1},panel)
 local saved_position=nil; local minimized=false
 make("Frame",{Position=UDim2.fromOffset(0,74),Size=UDim2.new(1,0,0,1),BackgroundColor3=theme.line,BorderSizePixel=0,ZIndex=21},panel)
 local sidebar=make("Frame",{Position=UDim2.fromOffset(0,75),Size=UDim2.new(0,172,1,-75),BackgroundColor3=Color3.fromRGB(13,10,18),BorderSizePixel=0,ZIndex=20},panel)
 local sidebar_line=make("Frame",{Position=UDim2.fromOffset(176,75),Size=UDim2.new(0,1,1,-75),BackgroundColor3=theme.line,BorderSizePixel=0,ZIndex=21},panel)
 local section_title=text(panel,"Aim",202,88,400,30,21); section_title.Font=Enum.Font.GothamBold
-local build_label=text(panel,"BUILD 2026.11.06.16",0,0,140,18,10,theme.muted); build_label.Font=Enum.Font.RobotoMono
+local build_label=text(panel,"BUILD 2026.11.08.22",0,0,140,18,10,theme.muted); build_label.Font=Enum.Font.RobotoMono
 local search=make("TextBox",{Name="VantaSearch",Text="",PlaceholderText="Find a control...",ClearTextOnFocus=false,Position=UDim2.new(1,-280,0,23),Size=UDim2.fromOffset(192,27),BackgroundColor3=theme.input,TextColor3=theme.text,PlaceholderColor3=theme.muted,Font=Enum.Font.Gotham,TextSize=13,BorderSizePixel=0,ZIndex=24},panel); corner(search,7)
 make("UIPadding",{PaddingLeft=UDim.new(0,12),PaddingRight=UDim.new(0,8)},search)
 local group=make("Frame",{Name="VantaUrbanGroup",Size=UDim2.new(1,-6,0,52),BackgroundColor3=theme.panel,BorderSizePixel=0,ZIndex=22},content); corner(group,9)
@@ -444,24 +484,30 @@ function control:Set(key,value)
         for _,name in ipairs(value) do assert(name=="Head" or name=="UpperTorso" or name=="Torso" or name=="HumanoidRootPart","Unsupported target part") end
     else error("Unknown or non-editable setting: "..tostring(key)) end
     cfg[key]=value
-    if key=="noRecoil" then if value then recoil:enable(os.clock()) else recoil:disable() end end
+    local adapter=weapon_controls[key]
+    if adapter then if value then adapter:enable(os.clock()) else adapter:disable() end end
     error_paused=false; reset_lock(); elapsed=1; refresh_controls(); return true
 end
 function control:Stop()
-    cfg.enabled=false; cfg.espEnabled=false; cfg.noRecoil=false; recoil:disable(); reset_lock(); circle.Visible=false; hide_visuals(); refresh_controls(); set_status("Stopped · enable controls to resume")
+    cfg.enabled=false; cfg.espEnabled=false; stop_weapon_controls(); reset_lock(); circle.Visible=false; hide_visuals(); refresh_controls(); set_status("Stopped · enable controls to resume")
 end
 local binding_name="VantaUrban.Render"
 function control:Unload()
     if not alive then return end; alive=false; reset_lock()
     Run:UnbindFromRenderStep(binding_name)
-    Run:UnbindFromRenderStep("VantaUrban.Recoil"); recoil:disable()
+    Run:UnbindFromRenderStep("VantaUrban.Recoil"); stop_weapon_controls()
     for _,link in ipairs(connections) do link:Disconnect() end; connections={}
     for _,entry in pairs(roster) do dispose_visual(entry) end; roster={}
     gui:Destroy()
 end
 local function toggle(caption,key,get,set)
     local r=row(caption); local b
-    if key=="noRecoil" then r:FindFirstChild("Caption").Size=UDim2.new(1,-110,0,28); recoil_label=text(r,"Off",10,29,400,18,11,theme.muted); recoil_label.Size=UDim2.new(1,-84,0,18); recoil_label.Name="RecoilStatus" end
+    if weapon_controls[key] then
+        r:FindFirstChild("Caption").Size=UDim2.new(1,-110,0,28)
+        local label=text(r,"Off",10,29,400,18,11,theme.muted)
+        label.Size=UDim2.new(1,-84,0,18); label.Name=key=="noRecoil" and "RecoilStatus" or "SpreadStatus"
+        weapon_labels[key]=label
+    end
     local function read() if get then return get() end; return cfg[key] end
     b=button(r,"",function() local value=not read(); if set then set(value); elapsed=1; refresh_controls() else control:Set(key,value) end end)
     b.Position=UDim2.new(1,-64,0,12); b.Size=UDim2.fromOffset(44,24); b.TextTransparency=1; b.BackgroundTransparency=1
@@ -493,7 +539,7 @@ local function field(caption,key,format)
 
 end
 toggle("Aim assist","enabled"); toggle("Player ESP","espEnabled")
-toggle("No recoil","noRecoil"); toggle("Target vehicle occupants","vehicleTargets")
+toggle("No recoil","noRecoil"); toggle("No Spread","noSpread"); toggle("Target vehicle occupants","vehicleTargets")
 toggle("Hard lock / no smoothing","hardLock"); toggle("Keep target while held","stickyTarget"); toggle("Center FOV on crosshair","centerFov")
 toggle("Team filter","teamCheck",function() return cfg.teamCheck and not cfg.ignoreTeams end,function(value) cfg.teamCheck=value; cfg.ignoreTeams=false; reset_lock() end)
 toggle("Line of sight","checkLOS"); toggle("Show FOV","showFov")
@@ -701,18 +747,26 @@ Run:BindToRenderStep(binding_name,Enum.RenderPriority.Last.Value+1,function(dt)
         local camera=workspace.CurrentCamera
         if camera then draw_esp(camera) end
     end)
-    if not ok then error_paused=true; cfg.noRecoil=false; recoil:disable(); reset_lock(); hide_visuals(); circle.Visible=false; set_status("Paused: "..tostring(err)); warn("Vanta Urban paused: "..tostring(err)) end
+    if not ok then error_paused=true; stop_weapon_controls(); reset_lock(); hide_visuals(); circle.Visible=false; refresh_controls(); set_status("Paused: "..tostring(err)); warn("Vanta Urban paused: "..tostring(err)) end
 end)
 Run:BindToRenderStep("VantaUrban.Recoil",Enum.RenderPriority.Camera.Value-1,function()
-    local ok,err=pcall(function() recoil:step(os.clock()) end)
-    if not ok then recoil:disable(); cfg.noRecoil=false; recoil.reason="Client state update failed"; warn("Vanta Urban recoil: "..tostring(err)) end
-    if recoil_label then recoil_label.Text=recoil.reason..(recoil.count>0 and " · "..recoil.mode.." · "..recoil.count.." states" or "") end
+    local now=os.clock()
+    for key,adapter in pairs(weapon_controls) do
+        local ok,err=pcall(adapter.step,adapter,now)
+        if not ok then
+            adapter:disable(); cfg[key]=false; adapter.reason="Client state update failed"
+            refresh_controls(); warn("Vanta Urban "..key..": "..tostring(err))
+        end
+        local label=weapon_labels[key]
+        local value=adapter.reason..(adapter.count>0 and " · "..adapter.mode.." · "..adapter.count.." states" or "")
+        if label.Text~=value then label.Text=value end
+    end
     if recoil.lastError and recoil.lastError~=logged_recoil_error then
         logged_recoil_error=recoil.lastError
         warn("Vanta Urban recoil write: "..recoil.lastError)
         if type(writefile)=="function" then pcall(function()
             local http=game:GetService("HttpService")
-            writefile("vanta_recoil_write_error.json",http:JSONEncode({version="3.8",placeId=game.PlaceId,
+            writefile("vanta_recoil_write_error.json",http:JSONEncode({version=control.Version,placeId=game.PlaceId,
                 error=recoil.lastError,reason=recoil.reason,states=recoil.count,weaponConfigs=recoil.configs,clientStates=recoil.clients,
                 apis={isreadonly=type(isreadonly or is_readonly)=="function",setreadonly=type(setreadonly or set_readonly)=="function",
                     makewritable=type(makewritable or makewriteable or makereadwrite)=="function",makereadonly=type(makereadonly)=="function"}}))
@@ -721,7 +775,11 @@ Run:BindToRenderStep("VantaUrban.Recoil",Enum.RenderPriority.Camera.Value-1,func
 end)
 local stop_event=make("BindableEvent",{Name="Unload"},gui); connect(stop_event.Event,function() control:Unload() end)
 connect(gui.Destroying,function() control:Unload() end)
-function control:GetStatus() local count=0; for _ in pairs(roster) do count=count+1 end; return {alive=alive,paused=error_paused,target=locked and locked.Name,players=count,menu=menu_open,reason=last_reason,diagnostics=diagnostics,placeId=game.PlaceId,recoil={enabled=recoil.enabled,states=recoil.count,reason=recoil.reason,mode=recoil.mode,weaponConfigs=recoil.configs,clientStates=recoil.clients,writeError=recoil.lastError}} end
+local function weapon_status(adapter)
+    return {enabled=adapter.enabled,states=adapter.count,reason=adapter.reason,mode=adapter.mode,
+        weaponConfigs=adapter.configs,clientStates=adapter.clients,writeError=adapter.lastError}
+end
+function control:GetStatus() local count=0; for _ in pairs(roster) do count=count+1 end; return {alive=alive,paused=error_paused,target=locked and locked.Name,players=count,menu=menu_open,reason=last_reason,diagnostics=diagnostics,placeId=game.PlaceId,recoil=weapon_status(recoil),spread=weapon_status(spread)} end
 refresh_controls(); menu(true)
-print("Vanta Urban 3.8 loaded · Hold E · RightShift menu · F8 stop · Delete unload")
+print("Vanta Urban "..control.Version.." loaded · Hold E · RightShift menu · F8 stop · Delete unload")
 return control

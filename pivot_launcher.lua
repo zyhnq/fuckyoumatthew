@@ -1,4 +1,4 @@
--- Vanta Launcher 1.37 | automatically loads the current supported game.
+-- Vanta Launcher 1.38 | automatically loads the current supported game.
 local Players=game:GetService("Players")
 local Input=game:GetService("UserInputService")
 local RunService=game:GetService("RunService")
@@ -19,14 +19,14 @@ end
 local base="https://raw.githubusercontent.com/zyhnq/fuckyoumatthew/main/"
 local games={
     {id="basketball",name="Practical Basketball",module="Vanta Basketball",file="pivot_hub.lua",universe=7529591378,place=80681221431821,description="Shooting, modules, outfits & court visuals",color=Color3.fromRGB(182,66,235)},
-    {id="urban",name="Urban Reload",module="Vanta Urban",file="vanta_urban.lua",universe=10769552054,place=84448037861644,description="Aim settings, player ESP & visibility controls",color=Color3.fromRGB(182,66,235)},
+    {id="urban",name="Urban Reload",module="Vanta Urban",file="vanta_urban.lua",cacheTag="20261108.22",universe=10769552054,place=84448037861644,description="Aim settings, player ESP & visibility controls",color=Color3.fromRGB(182,66,235)},
     {id="aotr",name="Attack on Titan Revolution",module="Vanta AOTR",file="vanta_aotr.lua",universe=4658598196,place=13379208636,description="Mission farm, blade reload, titan outlines & retry",color=Color3.fromRGB(182,66,235)}
 }
 local function matches(entry) return game.GameId==entry.universe or game.PlaceId==entry.place end
 local detected="Unsupported game"; local selected
 for _,entry in ipairs(games) do if matches(entry) then detected=entry.name; selected=entry; break end end
 local function download(entry)
-    local source=game:HttpGet(base..entry.file.."?v=20261108.21")
+    local source=game:HttpGet(base..entry.file.."?v="..(entry.cacheTag or "20261108.21"))
     assert(type(source)=="string" and #source>100,"Empty script response")
     local run,err=loadstring(source,"@Vanta/"..entry.file)
     assert(run,err)
