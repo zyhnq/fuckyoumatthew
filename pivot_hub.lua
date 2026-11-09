@@ -4726,12 +4726,12 @@ local function create_pivot_modules(ctx)
     end
     function Core.farm_clearance(origin,goal,opponents)
         local delta=farm_flat(goal-origin); local squared=delta:Dot(delta); local clearance=math.huge
-        for _,other in ipairs(opponents) do
+        for _,other in ipairs(opponents) do if not other.down then
             local predicted=other.position+farm_cap(farm_flat(other.velocity or Vector3.new(0,0,0))*.18,3)
             local offset=farm_flat(predicted-origin)
             local t=squared>.01 and math.max(0,math.min(1,offset:Dot(delta)/squared)) or 0
             clearance=math.min(clearance,(offset-delta*t).Magnitude)
-        end
+        end end
         return clearance
     end
     function Core.farm_smooth(previous,direction,dt)
@@ -4889,29 +4889,52 @@ local function create_pivot_modules(ctx)
         end
         return selected or origin,move or "X"
     end
+    function Core.farm_pocket_in_range(point,basket,range,minimum)
+        if not point or (point-basket).Magnitude>range+.001 then return false end
+        return not minimum or farm_flat(point-basket).Magnitude>=minimum
+    end
     function Core.farm_attack_target(origin,basket,opponents,bounds,range,previous,minimum)
-        local radius=math.sqrt(math.max(16,range*range-(basket.Y-origin.Y)^2))*.92
-        if minimum then radius=math.max(radius,minimum+3) end
+        local vertical=basket.Y-origin.Y
+        local maximum=math.sqrt(math.max(0,range*range-vertical*vertical))
         local function score(point)
-            local threat=Core.farm_shot_clearance(point,opponents,.45)
+            local threat=Core.farm_shot_clearance(point,opponents,.55)
             local path=Core.farm_clearance(origin,point,opponents)
             return farm_flat(point-origin).Magnitude*.65+math.max(0,10-threat)*7+math.max(0,3.5-path)*8-(threat>=10 and 25 or 0)
         end
-        local chosen,best
-        if (not minimum or farm_flat(basket-origin).Magnitude>=minimum) and (basket-origin).Magnitude<=range and Core.farm_shot_clearance(origin,opponents,.4)>=10 then return origin end
-        for _,distance in ipairs({radius,math.max(5,radius*.65),math.max(4,radius*.4)}) do for i=0,11 do
-            local angle=i*math.pi/6; local point=Vector3.new(basket.X+math.cos(angle)*distance,origin.Y,basket.Z+math.sin(angle)*distance)
-            local clipped,error,edge=Core.farm_clamp(point,bounds)
-            if error<.25 and edge>1 and (not minimum or distance>=minimum+2) and (clipped-basket).Magnitude<=range*1.01 and farm_flat(clipped-origin).Magnitude>2 then
-                local cost=score(clipped)
-                if not best or cost<best then chosen=clipped; best=cost end
-            end
-        end end
-        if previous and chosen then
-            local _,error=Core.farm_clamp(previous,bounds)
-            if error<.1 and (not minimum or farm_flat(previous-basket).Magnitude>=minimum) and score(previous)<=best+2 then return previous end
+        local _,outside=Core.farm_clamp(origin,bounds)
+        if outside<.1 and Core.farm_pocket_in_range(origin,basket,range,minimum) and Core.farm_shot_clearance(origin,opponents,.55)>=10 then
+            return origin,true
         end
-        return chosen or Core.farm_clamp(basket,bounds)
+        local preferred=maximum*.92
+        local radii={preferred,preferred*.65,preferred*.4}
+        if minimum then
+            preferred=math.min(maximum,math.max(preferred,minimum+1.5))
+            radii={preferred,math.min(maximum,minimum+.45),maximum}
+        end
+        local toward_origin=farm_flat(origin-basket)
+        local radial=toward_origin.Magnitude>.01 and toward_origin.Unit or Vector3.new(1,0,0)
+        local side=Vector3.new(-radial.Z,0,radial.X)
+        local chosen,best
+        for _,radius in ipairs(radii) do
+            if not minimum or radius>=minimum then
+                for i=0,23 do
+                    local angle=i*math.pi/12
+                    local offset=(radial*math.cos(angle)+side*math.sin(angle))*radius
+                    local point=Vector3.new(basket.X+offset.X,origin.Y,basket.Z+offset.Z)
+                    local clipped,overflow,edge=Core.farm_clamp(point,bounds)
+                    if overflow<.25 and edge>1 and Core.farm_pocket_in_range(clipped,basket,range,minimum) then
+                        local cost=score(clipped)
+                        if not best or cost<best then chosen=clipped; best=cost end
+                    end
+                end
+            end
+        end
+        if Core.farm_pocket_in_range(previous,basket,range,minimum) then
+            local _,overflow,edge=Core.farm_clamp(previous,bounds)
+            if overflow<.1 and edge>1 and (not best or score(previous)<=best+2) then return previous,true end
+        end
+        if chosen then return chosen,true end
+        return Core.farm_clamp(basket,bounds),false
     end
     function Core.farm_shot_clearance(origin,opponents,horizon)
         local clearance=math.huge
@@ -4972,7 +4995,7 @@ local function create_pivot_modules(ctx)
         local forward=delta.Unit; local side=Vector3.new(-forward.Z,0,forward.X)
         if route then
             local present
-            for _,other in ipairs(opponents) do if other.key==route.key then present=other; break end end
+            for _,other in ipairs(opponents) do if other.key==route.key and not other.down then present=other; break end end
             local safe=not avoid_close or now-(route.created or now)<.3 or Core.farm_clearance(origin,route.point,opponents)>=3.2
             if safe and present and now<route.until_time and farm_flat(origin-route.point).Magnitude>2.2 and farm_flat(present.position-route.blocker).Magnitude<7 then
                 if not avoid_close then route.point=route.point+farm_flat(present.position-route.blocker); route.blocker=present.position end
@@ -4986,7 +5009,7 @@ local function create_pivot_modules(ctx)
             local offset=farm_flat(predicted-origin); local along=offset:Dot(forward)
             local lateral=(offset-forward*along).Magnitude
             local in_lane=along>0 and along<math.min(delta.Magnitude+1,avoid_close and 11 or 16) and lateral<5
-            if (in_lane or avoid_close and offset.Magnitude<7) and (not best or offset.Magnitude<best) then blocker=other; best=offset.Magnitude end
+            if not other.down and (in_lane or avoid_close and offset.Magnitude<7) and (not best or offset.Magnitude<best) then blocker=other; best=offset.Magnitude end
         end
         if not blocker then return goal,false,nil end
         local chosen,cost,chosen_side
@@ -5270,7 +5293,7 @@ end]])
         local now=os.clock()
         if not force and now<(state.next_history_sample or 0) then return end
         state.next_history_sample=now+2
-        self.farm_decisions=self.farm_decisions or {version=1,build="2026.11.08.20",place=game.PlaceId,rows={}}
+        self.farm_decisions=self.farm_decisions or {version=1,build="2026.11.08.21",place=game.PlaceId,rows={}}
         local ok,c=pcall(local_state); local a=ok and c and c.data and c.data.Attributes or {}
         local court=state.clock_controller and state.clock_controller.CurrentCourt
         local s=self.farm_stats
@@ -5299,12 +5322,12 @@ end]])
             local b=state.bounds
             if b then for _,marker in ipairs(b.markers or {}) do if not marker.Parent or not marker:IsDescendantOf(workspace) then b=nil; break end end end
             local point=b and origin and b.frame:PointToObjectSpace(origin)
-            writefile("vanta_badge_farm_runtime.json",farm_http:JSONEncode({build="2026.11.08.20",status=Engine.farm_status,focused=state.focused,returnReason=state.return_reason,returnAttempts=state.return_attempts,returnError=state.return_error,teleporting=state.teleporting,busy=state.busy,attackDecision=state.attack_decision,retainedShooter=state.contest_shooter and state.contest_shooter.shot,gatherMotion=state.shot_motion and state.shot_motion.kind,stepbackStarted=state.stepback_started,ballCandidates=state.ball_candidates,visibleOpponents=state.visible_opponents,hasPossession=state.has_possession,boundaryReselections=state.boundary_reselections,idle=Engine.farm_idle,inputTransport=move_bridge and "PlayerModule" or "Roblox virtual input",postgame=state.result_seen==true,progressAge=state.health and os.clock()-(state.health.progress_at or state.health.entered),shotClock=state.shot_clock,role=state.role,basketSource=state.basket_source,shotClearance=state.shot_clearance and math.min(999,state.shot_clearance),stats=Engine.farm_stats,
+            writefile("vanta_badge_farm_runtime.json",farm_http:JSONEncode({build="2026.11.08.21",status=Engine.farm_status,focused=state.focused,returnReason=state.return_reason,returnAttempts=state.return_attempts,returnError=state.return_error,teleporting=state.teleporting,busy=state.busy,attackDecision=state.attack_decision,retainedShooter=state.contest_shooter and state.contest_shooter.shot,gatherMotion=state.shot_motion and state.shot_motion.kind,stepbackStarted=state.stepback_started,ballCandidates=state.ball_candidates,visibleOpponents=state.visible_opponents,hasPossession=state.has_possession,boundaryReselections=state.boundary_reselections,idle=Engine.farm_idle,inputTransport=move_bridge and "PlayerModule" or "Roblox virtual input",postgame=state.result_seen==true,progressAge=state.health and os.clock()-(state.health.progress_at or state.health.entered),shotClock=state.shot_clock,role=state.role,basketSource=state.basket_source,shotClearance=state.shot_clearance and math.min(999,state.shot_clearance),stats=Engine.farm_stats,
                 position=origin and {origin.X,origin.Y,origin.Z} or false,bounds=b and point and {source=b.source,x=b.x,z=b.z,localPosition={point.X,point.Y,point.Z}} or false,
                 boundaryBrake=state.boundary_braking==true,guard=state.guard==true,sprint=state.sprinting==true,keys=state.steering_keys or {}}))
         end)
     end
-    local function farm_steer(scope,state,goal,guard)
+    local function farm_steer(scope,state,goal,guard,precision)
         local mine=root(); if not mine or not goal then farm_release(scope,state); return end
         if not state.bounds or not state.bounds.verified then farm_release(scope,state); state.boundary_braking=true; return end
         local clamped_goal,_,target_edge=Core.farm_clamp(goal,state.bounds); goal=clamped_goal
@@ -5325,7 +5348,8 @@ end]])
         local r=cam.CFrame.RightVector; r=Vector3.new(r.X,0,r.Z)
         if f.Magnitude<.01 or r.Magnitude<.01 then farm_release(scope,state); return end
         local arrival=overflow>.05 and .08 or target_edge<1 and 3.2 or guard and .65 or (state.finish_approach or state.gather_approach) and .3 or state.stepback_target and .55 or 1.7
-        state.arrived=d.Magnitude<arrival or state.arrived and d.Magnitude<arrival+.7
+        if precision and overflow<=.05 then arrival=math.min(arrival,precision) end
+        state.arrived=d.Magnitude<arrival or not precision and state.arrived and d.Magnitude<arrival+.7
         local velocity=state.velocity or Vector3.new(0,0,0)
         local braking=not (state.finish_approach or state.gather_approach) and d.Magnitude>0 and d.Magnitude<5 and velocity:Dot(d.Unit)>d.Magnitude*5
         if state.arrived or braking then
@@ -5362,16 +5386,23 @@ end]])
         return target,distance
     end
     function Core.farm_takeback_target(origin,basket,opponents,bounds,radius)
-        local best,cost
-        for i=0,23 do
-            local angle=i*math.pi/12; local target=Vector3.new(basket.X+math.cos(angle)*(radius+3),origin.Y,basket.Z+math.sin(angle)*(radius+3))
-            local clipped,error,edge=Core.farm_clamp(target,bounds)
-            if error<.1 and edge>1 then
-                local score=farm_flat(target-origin).Magnitude+math.max(0,5-Core.farm_clearance(origin,target,opponents))*5
-                if not cost or score<cost then best=clipped; cost=score end
+        local offset=farm_flat(origin-basket)
+        local radial=offset.Magnitude>.01 and offset.Unit or Vector3.new(1,0,0)
+        local side=Vector3.new(-radial.Z,0,radial.X)
+        for _,distance in ipairs({radius+3,radius+1.6}) do
+            local best,cost
+            for i=0,23 do
+                local angle=i*math.pi/12
+                local shift=(radial*math.cos(angle)+side*math.sin(angle))*distance
+                local target=Vector3.new(basket.X+shift.X,origin.Y,basket.Z+shift.Z)
+                local clipped,overflow,edge=Core.farm_clamp(target,bounds)
+                if overflow<.1 and edge>.5 then
+                    local score=farm_flat(target-origin).Magnitude+math.max(0,5-Core.farm_clearance(origin,target,opponents))*5
+                    if not cost or score<cost then best=clipped; cost=score end
+                end
             end
+            if best then return best end
         end
-        return best
     end
     local function farm_clear_radius(state)
         if state.clear_radius then return state.clear_radius end
@@ -5405,7 +5436,7 @@ end]])
             state.clear_target=target
             if target then
                 local waypoint,_,route=Core.farm_route(mine.Position,target,opponents,state.offense_route,os.clock(),true,state.bounds)
-                state.offense_route=route; farm_steer(scope,state,waypoint,false)
+                state.offense_route=route; farm_steer(scope,state,waypoint,false,not route and .12 or nil)
             else farm_release(scope,state) end
         end
         state.takeback_phase="Taking ball back beyond three-point line"
@@ -5453,7 +5484,7 @@ end]])
             farm_session=tostring(os.time())..":"..tostring(os.clock())
             farm_write(true)
             queue([[local ok,c=pcall(function() return game:GetService("HttpService"):JSONDecode(readfile("vanta_badge_farm.json")) end)
-if ok and c.enabled==true and c.session==]]..string.format("%q",farm_session)..[[ then loadstring(game:HttpGet("https://raw.githubusercontent.com/zyhnq/fuckyoumatthew/main/pivot_launcher.lua?v=20261108.20"))() end]])
+if ok and c.enabled==true and c.session==]]..string.format("%q",farm_session)..[[ then loadstring(game:HttpGet("https://raw.githubusercontent.com/zyhnq/fuckyoumatthew/main/pivot_launcher.lua?v=20261108.21"))() end]])
             Engine.farm_status="Starting"; return state
         end,
         step=function(scope,state,s,dt)
@@ -5711,9 +5742,20 @@ if ok and c.enabled==true and c.session==]]..string.format("%q",farm_session)..[
                     state.next_separation=os.clock()+1.45; state.offense_route=nil
                 end
                 local pocket_blocked=state.attack_pocket and Core.farm_clearance(mine.Position,state.attack_pocket,opponents)<3
-                if not state.attack_pocket or os.clock()>=(state.next_pocket or 0) or pocket_blocked then
-                    state.attack_pocket=Core.farm_attack_target(mine.Position,basket.Position,opponents,state.bounds,active_range,state.attack_pocket,minimum)
-                    state.next_pocket=os.clock()+1.1
+                local range_changed=state.pocket_range~=active_range or state.pocket_minimum~=minimum
+                local now=os.clock()
+                local recheck_blocked=pocket_blocked and now>=(state.next_blocked_pocket or 0)
+                if range_changed or not state.attack_pocket or now>=(state.next_pocket or 0) or recheck_blocked then
+                    local pocket,legal=Core.farm_attack_target(mine.Position,basket.Position,opponents,state.bounds,active_range,state.attack_pocket,minimum)
+                    if range_changed then state.offense_route=nil end
+                    if minimum and not legal and not state.stepback_target then
+                        attack_plan="Mid"; state.attack_plan=attack_plan; state.attack_plan_until=os.clock()+2.5
+                        minimum=nil; active_range=s.farm_shot_range; state.offense_route=nil
+                        state.attack_decision="No legal three-point pocket / finding a middy"
+                        pocket=Core.farm_attack_target(mine.Position,basket.Position,opponents,state.bounds,active_range)
+                    end
+                    state.attack_pocket=pocket; state.pocket_range=active_range; state.pocket_minimum=minimum
+                    state.next_pocket=now+1.1; state.next_blocked_pocket=now+.25
                 end
                 local separating=clock_policy.dribble and not clock_policy.simple and state.attack_escape and os.clock()<state.attack_escape_until
                 local destination=state.stepback_target or separating and state.attack_escape or state.attack_pocket
@@ -5739,7 +5781,8 @@ if ok and c.enabled==true and c.session==]]..string.format("%q",farm_session)..[
                     end
                 else
                     state.shot_ready_since=nil
-                    farm_steer(scope,state,goal,false)
+                    local precision=minimum and not blocked and not separating and farm_flat(mine.Position-basket.Position).Magnitude<minimum and .08 or nil
+                    farm_steer(scope,state,goal,false,precision)
                     if not opportunity and clock_policy.dribble and s.farm_dribble and state.actions.Dribble then
                         local direction=farm_flat(goal-mine.Position)
                         if direction.Magnitude>.1 then
@@ -6482,7 +6525,7 @@ do
     local rail_line=frame(shell,20,97,660,1,theme.line)
     local top_line=frame(shell,20,54,660,1,theme.line)
     local logo=label(shell,"VANTA",20,12,140,28,19,theme.text); logo.Font=Enum.Font.GothamBold; logo.TextXAlignment=Enum.TextXAlignment.Left
-    local build_label=label(shell,"BUILD 2026.11.08.20",242,17,150,18,10,theme.muted); build_label.Name="PivotBuild"; build_label.Font=Enum.Font.RobotoMono; build_label.TextWrapped=false
+    local build_label=label(shell,"BUILD 2026.11.08.21",242,17,150,18,10,theme.muted); build_label.Name="PivotBuild"; build_label.Font=Enum.Font.RobotoMono; build_label.TextWrapped=false
     local heading=label(shell,"Practical Basketball",94,14,240,26,11,theme.muted); heading.Font=Enum.Font.GothamMedium
     close.BackgroundColor3=theme.rail; close.TextColor3=theme.muted; close.TextSize=14; corner(close,4)
     local search=make("TextBox",{Text="",PlaceholderText="Find a control...",PlaceholderColor3=theme.muted,Position=UDim2.fromOffset(484,10),Size=UDim2.fromOffset(166,23),

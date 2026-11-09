@@ -1,4 +1,4 @@
--- Vanta Launcher 1.36 | automatically loads the current supported game.
+-- Vanta Launcher 1.37 | automatically loads the current supported game.
 local Players=game:GetService("Players")
 local Input=game:GetService("UserInputService")
 local RunService=game:GetService("RunService")
@@ -26,7 +26,7 @@ local function matches(entry) return game.GameId==entry.universe or game.PlaceId
 local detected="Unsupported game"; local selected
 for _,entry in ipairs(games) do if matches(entry) then detected=entry.name; selected=entry; break end end
 local function download(entry)
-    local source=game:HttpGet(base..entry.file.."?v=20261108.20")
+    local source=game:HttpGet(base..entry.file.."?v=20261108.21")
     assert(type(source)=="string" and #source>100,"Empty script response")
     local run,err=loadstring(source,"@Vanta/"..entry.file)
     assert(run,err)
