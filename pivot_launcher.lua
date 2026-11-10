@@ -1,4 +1,4 @@
--- Vanta Launcher 1.43 | automatically loads the current supported game.
+-- Vanta Launcher 1.44 | automatically loads the current supported game.
 local Players=game:GetService("Players")
 local Input=game:GetService("UserInputService")
 local RunService=game:GetService("RunService")
@@ -19,7 +19,7 @@ end
 local base="https://raw.githubusercontent.com/zyhnq/fuckyoumatthew/main/"
 local games={
     {id="basketball",name="Practical Basketball",module="Vanta Basketball",file="pivot_hub.lua",cacheTag="20261109.01",universe=7529591378,place=80681221431821,description="Shooting, modules, outfits & court visuals",color=Color3.fromRGB(182,66,235)},
-    {id="urban",name="Urban Reload",module="Vanta Urban",file="vanta_urban.lua",cacheTag="20261109.03",universe=10769552054,place=84448037861644,description="Aim, weapon settings, movement & player ESP",color=Color3.fromRGB(182,66,235)},
+    {id="urban",name="Urban Reload",module="Vanta Urban",file="vanta_urban.lua",cacheTag="20261109.04",universe=10769552054,place=84448037861644,description="Aim, weapon settings, movement & player ESP",color=Color3.fromRGB(182,66,235)},
     {id="aotr",name="Attack on Titan Revolution",module="Vanta AOTR",file="vanta_aotr.lua",universe=4658598196,place=13379208636,description="Mission farm, blade reload, titan outlines & retry",color=Color3.fromRGB(182,66,235)}
 }
 local function matches(entry) return game.GameId==entry.universe or game.PlaceId==entry.place end

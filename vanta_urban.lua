@@ -254,6 +254,68 @@ function Core.weapon_adapter(discover,options)
     return self
 end
 Core.recoil_adapter=Core.weapon_adapter
+function Core.magazine_adapter(equipped)
+    local self={enabled=false,count=0,configs=0,clients=0,automatic=0,mode="Local Tool.Ammo",reason="Off",next_poll=0}
+    local tool,original,applied,writing,reloading
+    local links={}
+    local function detach()
+        for _,link in ipairs(links) do link:Disconnect() end
+        links={}
+        if tool and applied~=nil then
+            local ok,err=pcall(function()
+                if tool.Parent and tool:GetAttribute("Ammo")==applied then tool:SetAttribute("Ammo",original) end
+            end)
+            if not ok then self.lastError=tostring(err) end
+        end
+        tool=nil; original=nil; applied=nil; reloading=nil; self.count=0
+    end
+    local function refill()
+        if not self.enabled or writing or not tool or not tool.Parent or equipped()~=tool then return end
+        local capacity=Core.bounded(tool:GetAttribute("MagSize"),1,10000)
+        local ammo=Core.bounded(tool:GetAttribute("Ammo"),0,10000)
+        if not capacity or not ammo then self.reason="Waiting for Ammo / MagSize attributes"; return end
+        if tool:GetAttribute("Reloading")==true then
+            original=ammo; applied=nil; reloading=true; self.reason="Waiting for current reload"; return
+        end
+        if reloading then original=ammo; applied=nil; reloading=false end
+        if ammo~=applied then original=ammo end
+        self.reason="Local magazine active / "..tostring(capacity).." rounds"
+        if ammo>=capacity then return end
+        applied=capacity; writing=true
+        local ok,err=pcall(tool.SetAttribute,tool,"Ammo",capacity)
+        writing=false
+        if not ok then error(err) end
+    end
+    local function update()
+        local ok,err=pcall(refill)
+        if not ok then self.lastError=tostring(err); self.reason="Magazine write failed: "..self.lastError end
+    end
+    function self:step(now)
+        if not self.enabled or now<self.next_poll then return end
+        self.next_poll=now+.2
+        local current=equipped()
+        if current~=tool then
+            detach(); tool=current
+            if tool then
+                local ok,err=pcall(function()
+                    for _,key in ipairs({"Ammo","MagSize","Reloading"}) do
+                        links[#links+1]=tool:GetAttributeChangedSignal(key):Connect(update)
+                    end
+                end)
+                if not ok then detach(); self.lastError=tostring(err); self.reason="Magazine signals unavailable"; return end
+                self.count=1
+            end
+        end
+        if tool then update() else self.reason="Waiting for equipped weapon" end
+    end
+    function self:enable(now)
+        self.enabled=true; self.lastError=nil; self.next_poll=0; self:step(now or 0)
+    end
+    function self:disable()
+        self.enabled=false; detach(); self.next_poll=0; self.reason="Off"
+    end
+    return self
+end
 function Core.movement_adapter(discover,write)
     local self={records={},count=0,next_scan=0,reason="Waiting for movement settings"}
     local keys={"WalkSpeed","SprintSpeed","CrouchSpeed","MoveSpeedMul"}
@@ -314,7 +376,7 @@ function Core.movement_adapter(discover,write)
 end
 if DEEPHAT_REFINED_TEST then return Core end
 
--- Vanta Urban 4.3 | standalone client script, native UI, no Drawing dependency.
+-- Vanta Urban 4.4 | standalone client script, native UI, no Drawing dependency.
 local Players=game:GetService("Players")
 local Run=game:GetService("RunService")
 local Input=game:GetService("UserInputService")
@@ -326,7 +388,7 @@ if previous then local stop=previous:FindFirstChild("Unload"); assert(stop,"Clos
 Run:UnbindFromRenderStep("DeepHatRefined.Render"); Run:UnbindFromRenderStep("DeepHat_Aim"); Run:UnbindFromRenderStep("DeepHat_ESP")
 local cfg={enabled=true,espEnabled=true,teamCheck=true,ignoreTeams=false,checkLOS=true,espVisibleOnly=false,
     hardLock=true,stickyTarget=true,centerFov=true,noRecoil=false,noSpread=false,vehicleTargets=true,speedEnabled=false,walkSpeed=32,
-    rapidFire=false,fireRateMultiplier=2,infiniteAmmo=false,
+    rapidFire=false,fireRateMultiplier=2,infiniteAmmo=false,infiniteMagazine=false,
     aimKey="E",aimMouseButton=false,response=10,fov=200,maxDistance=600,predictionEnabled=true,prediction=0,usePing=false,
     targetParts={"Head","UpperTorso","Torso","HumanoidRootPart"},espColor=Color3.fromRGB(235,111,129),espThickness=1.5,showFov=true,names=true,maxVisuals=24,switchBias=.25}
 -- Urban Reload's crew relationships are not verified by this generic Teams filter.
@@ -362,7 +424,7 @@ local content=make("ScrollingFrame",{Position=UDim2.fromOffset(198,128),Size=UDi
 local badge=make("TextButton",{Name="MenuButton",Text="Vanta",Position=UDim2.fromOffset(20,44),Size=UDim2.fromOffset(104,32),BackgroundColor3=theme.panel,TextColor3=theme.text,Font=Enum.Font.GothamMedium,TextSize=16,BorderSizePixel=0,AutoButtonColor=false,ZIndex=20},canvas); corner(badge,7)
 local live_status=text(canvas,"",136,44,460,32,14,theme.text)
 live_status.Name="LiveStatus"; live_status.TextStrokeTransparency=.3
-local control={Config=cfg,Version="4.3"}; local bindings={}; local y=0
+local control={Config=cfg,Version="4.4"}; local bindings={}; local y=0
 local recoil_module
 local function recoil_state_key(state)
     if not recoil_module or not recoil_module.Parent then
@@ -378,7 +440,59 @@ local function recoil_state_key(state)
     if type(getter)=="function" then local ok,value=pcall(getter); if ok and type(value)=="string" then return value end end
     return "RecoilKick"
 end
-local discover_weapons=type(getgc)=="function" and function() return getgc(true) end or nil
+local discovery_mode="Waiting"
+local discovery_cache,discovery_next,fallback_tables=nil,0,nil
+local fallback_next=0
+local module_exports=setmetatable({},{__mode="k"})
+local function discover_weapons()
+    local now=os.clock()
+    if discovery_cache and now<discovery_next then return discovery_cache end
+    discovery_next=now+10
+    local objects={}
+    local replicated=game:GetService("ReplicatedStorage")
+    local folder=replicated and replicated:FindFirstChild("Weapons")
+    if folder then
+        for _,name in ipairs({"WeaponData","Config","ClientState"}) do
+            local module=folder:FindFirstChild(name)
+            local value=module and module_exports[module]
+            if module and not value then
+                local ok,result=pcall(require,module)
+                if ok and type(result)=="table" then value=result; module_exports[module]=result end
+            end
+            if type(value)=="table" then
+                if name=="WeaponData" then
+                    for _,weapon in pairs(value) do
+                        if type(weapon)=="table" and type(rawget(weapon,"Fire"))=="table" then objects[#objects+1]=weapon end
+                    end
+                else objects[#objects+1]=value end
+            end
+        end
+    end
+    if #objects>0 then
+        discovery_mode="Native weapon modules"; discovery_cache=objects
+        return objects
+    end
+    -- Older layouts share one filtered fallback snapshot across all controls.
+    if not fallback_tables or now>=fallback_next then
+        fallback_next=now+60
+        fallback_tables={}
+        if type(getgc)=="function" then
+            local ok,all=pcall(getgc,true)
+            if ok and type(all)=="table" then
+                for _,object in pairs(all) do
+                    if type(object)=="table" and (type(rawget(object,"Fire"))=="table"
+                        or type(rawget(object,"RecoilKey"))=="function" or rawget(object,"MaxHealth")~=nil
+                        or rawget(object,"RecoilPitch")~=nil and rawget(object,"RecoilYaw")~=nil) then
+                        fallback_tables[#fallback_tables+1]=object
+                        if #fallback_tables>=256 then break end
+                    end
+                end
+            end
+        end
+    end
+    discovery_mode="Shared fallback snapshot"; discovery_cache=fallback_tables
+    return discovery_cache
+end
 local write_weapon=Core.table_writer({is_readonly=isreadonly or is_readonly or table.isfrozen,set_readonly=setreadonly or set_readonly,
     make_writable=makewritable or makewriteable or makereadwrite,make_readonly=makereadonly})
 local recoil=Core.weapon_adapter(discover_weapons,{
@@ -389,7 +503,7 @@ local spread=Core.weapon_adapter(discover_weapons,{spread=true,write=write_weapo
 local fire_rate=Core.weapon_adapter(discover_weapons,{mode="rate",write=write_weapon,multiplier=function() return cfg.fireRateMultiplier end})
 local ammo=Core.weapon_adapter(discover_weapons,{mode="ammo",write=write_weapon})
 local weapon_controls={noRecoil=recoil,noSpread=spread,rapidFire=fire_rate,infiniteAmmo=ammo}
-local weapon_status_names={noRecoil="RecoilStatus",noSpread="SpreadStatus",rapidFire="FireRateStatus",infiniteAmmo="AmmoStatus"}
+local weapon_status_names={noRecoil="RecoilStatus",noSpread="SpreadStatus",rapidFire="FireRateStatus",infiniteAmmo="AmmoStatus",infiniteMagazine="MagazineStatus"}
 local weapon_labels={}; local logged_recoil_error
 local function stop_weapon_controls()
     for key,adapter in pairs(weapon_controls) do
@@ -403,7 +517,7 @@ make("Frame",{Position=UDim2.fromOffset(0,74),Size=UDim2.new(1,0,0,1),Background
 local sidebar=make("Frame",{Position=UDim2.fromOffset(0,75),Size=UDim2.new(0,172,1,-75),BackgroundColor3=Color3.fromRGB(13,10,18),BorderSizePixel=0,ZIndex=20},panel)
 local sidebar_line=make("Frame",{Position=UDim2.fromOffset(176,75),Size=UDim2.new(0,1,1,-75),BackgroundColor3=theme.line,BorderSizePixel=0,ZIndex=21},panel)
 local section_title=text(panel,"Aim",202,88,400,30,21); section_title.Font=Enum.Font.GothamBold
-local build_label=text(panel,"BUILD 2026.11.09.03",0,0,140,18,10,theme.muted); build_label.Font=Enum.Font.RobotoMono
+local build_label=text(panel,"BUILD 2026.11.09.04",0,0,140,18,10,theme.muted); build_label.Font=Enum.Font.RobotoMono
 local search=make("TextBox",{Name="VantaSearch",Text="",PlaceholderText="Find a control...",ClearTextOnFocus=false,Position=UDim2.new(1,-280,0,23),Size=UDim2.fromOffset(192,27),BackgroundColor3=theme.input,TextColor3=theme.text,PlaceholderColor3=theme.muted,Font=Enum.Font.Gotham,TextSize=13,BorderSizePixel=0,ZIndex=24},panel); corner(search,7)
 make("UIPadding",{PaddingLeft=UDim.new(0,12),PaddingRight=UDim.new(0,8)},search)
 local group=make("Frame",{Name="VantaUrbanGroup",Size=UDim2.new(1,-6,0,52),BackgroundColor3=theme.panel,BorderSizePixel=0,ZIndex=22},content); corner(group,9)
@@ -411,7 +525,7 @@ make("UIStroke",{Color=theme.line,Transparency=.35,Thickness=1},group)
 local group_title=text(group,"Aim  −",14,0,500,44,18); group_title.Font=Enum.Font.GothamMedium; group_title.ZIndex=24
 make("Frame",{Position=UDim2.fromOffset(14,44),Size=UDim2.new(1,-28,0,1),BackgroundColor3=theme.line,BorderSizePixel=0,ZIndex=23},group)
 local ui_rows={}; local nav_buttons={}; local current_section="Aim"
-local section_map={["Rapid fire"]="Weapons",["Fire rate / multiplier"]="Weapons",["Infinite Ammo"]="Weapons",["Speed override"]="Movement",["Walk speed / studs per second"]="Movement",["Player ESP"]="ESP",["Show FOV"]="ESP",["ESP names & distances"]="ESP",["ESP visible only"]="ESP",["Prediction"]="Prediction",["Use ping in lead"]="Prediction",["Prediction lead / seconds"]="Prediction",["Hold key"]="Settings",["RightShift menu · F8 stop"]="Settings"}
+local section_map={["Infinite magazine"]="Weapons",["Rapid fire"]="Weapons",["Fire rate / multiplier"]="Weapons",["Infinite Ammo"]="Weapons",["Speed override"]="Movement",["Walk speed / studs per second"]="Movement",["Player ESP"]="ESP",["Show FOV"]="ESP",["ESP names & distances"]="ESP",["ESP visible only"]="ESP",["Prediction"]="Prediction",["Use ping in lead"]="Prediction",["Prediction lead / seconds"]="Prediction",["Hold key"]="Settings",["RightShift menu · F8 stop"]="Settings"}
 local function show_section(name,keep_scroll)
     current_section=name; local query=search.Text:lower(); local title=query~="" and "Search" or name
     section_title.Text=title; group_title.Text=title.."  −"; local offset=52
@@ -479,6 +593,16 @@ local function actor_character(who)
     return found
 end
 local function humanoid(character) return character and character:FindFirstChildWhichIsA("Humanoid",true) end
+local magazine=Core.magazine_adapter(function()
+    local model=actor_character(player)
+    if model then
+        for _,tool in ipairs(model:GetChildren()) do
+            if tool:IsA("Tool") and type(tool:GetAttribute("Weapon"))=="string"
+                and tool:GetAttribute("MagSize")~=nil and tool:GetAttribute("Ammo")~=nil then return tool end
+        end
+    end
+end)
+weapon_controls.infiniteMagazine=magazine
 local speed_humanoid,original_speed,applied_speed
 local speed_reason="Off"
 local speed_label
@@ -714,6 +838,7 @@ end
 toggle("Aim assist","enabled"); toggle("Player ESP","espEnabled")
 toggle("No recoil","noRecoil"); toggle("No Spread","noSpread"); toggle("Target vehicle occupants","vehicleTargets")
 toggle("Rapid fire","rapidFire"); field("Fire rate / multiplier","fireRateMultiplier","%.1f"); toggle("Infinite Ammo","infiniteAmmo")
+toggle("Infinite magazine","infiniteMagazine")
 toggle("Speed override","speedEnabled"); field("Walk speed / studs per second","walkSpeed")
 toggle("Hard lock / no smoothing","hardLock"); toggle("Keep target while held","stickyTarget"); toggle("Center FOV on crosshair","centerFov")
 toggle("Team filter","teamCheck",function() return cfg.teamCheck and not cfg.ignoreTeams end,function(value) cfg.teamCheck=value; cfg.ignoreTeams=false; reset_lock() end)
@@ -963,7 +1088,7 @@ local function weapon_status(adapter)
     return {enabled=adapter.enabled,states=adapter.count,reason=adapter.reason,mode=adapter.mode,
         weaponConfigs=adapter.configs,clientStates=adapter.clients,automaticProfiles=adapter.automatic,writeError=adapter.lastError}
 end
-function control:GetStatus() local count=0; for _ in pairs(roster) do count=count+1 end; return {alive=alive,paused=error_paused,target=locked and locked.Name,players=count,menu=menu_open,reason=last_reason,diagnostics=diagnostics,placeId=game.PlaceId,recoil=weapon_status(recoil),spread=weapon_status(spread),fireRate=weapon_status(fire_rate),ammo=weapon_status(ammo),speed={enabled=cfg.speedEnabled,value=cfg.walkSpeed,reason=speed_reason,settings=movement.count}} end
+function control:GetStatus() local count=0; for _ in pairs(roster) do count=count+1 end; return {alive=alive,paused=error_paused,target=locked and locked.Name,players=count,menu=menu_open,reason=last_reason,diagnostics=diagnostics,placeId=game.PlaceId,recoil=weapon_status(recoil),spread=weapon_status(spread),fireRate=weapon_status(fire_rate),ammo=weapon_status(ammo),magazine=weapon_status(magazine),weaponDiscovery=discovery_mode,speed={enabled=cfg.speedEnabled,value=cfg.walkSpeed,reason=speed_reason,settings=movement.count}} end
 refresh_controls(); menu(true)
 print("Vanta Urban "..control.Version.." loaded · Hold E · RightShift menu · F8 stop · Delete unload")
 return control
