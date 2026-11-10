@@ -206,6 +206,26 @@ function Core.clean_release_bounds(profile,resolution)
     end
     return false
 end
+function Core.repair_release_profile(profile,resolution)
+    local changed=Core.clean_release_bounds(profile,resolution)
+    if profile.perfect then return changed end
+    local ratio=profile.ratio
+    if profile.early and ratio<=profile.early then
+        ratio=profile.late and (profile.early+profile.late)/2 or profile.early+.02
+    elseif profile.late and ratio>=profile.late then
+        ratio=profile.early and (profile.early+profile.late)/2 or profile.late-.02
+    end
+    ratio=math.max(.25,math.min(.85,ratio))
+    if ratio~=profile.ratio then profile.ratio=ratio; changed=true end
+    return changed
+end
+function Core.release_feedback_code(value)
+    local code=tonumber(value)
+    if code and code%1==0 and code>=1 and code<=8 then return code end
+    if type(value)~="string" then return nil end
+    local labels={veryearly=1,early=2,slightlyearly=3,good=4,perfect=5,slightlylate=6,late=7,verylate=8}
+    return labels[value:gsub("<.->",""):lower():gsub("[%s%p]","")]
+end
 function Core.animation_release(scope,deps)
     local state={watched={},sent={},metadata=setmetatable({},{__mode="k"}),profiles=deps.profiles or {},pending={},closed=false,good_trials={},good_streak={},good_exhausted={},metadata_identity=setmetatable({},{__mode="k"}),feedback_runs=setmetatable({},{__mode="k"}),unverified_inherited=setmetatable({},{__mode="k"}),frame_dt=1/60}
     local function telemetry(event) if deps.telemetry then pcall(deps.telemetry,event) end end
@@ -237,14 +257,22 @@ function Core.animation_release(scope,deps)
         local duration=state.metadata[track]
         local speed=type(track.Speed)=="number" and track.Speed>0 and track.Speed or 1
         local resolution=duration and math.max(.003,math.min(.02,state.frame_dt*speed/duration*.5)) or .004
-        Core.clean_release_bounds(p,resolution)
+        if not deps.calibrate or deps.calibrate() then Core.repair_release_profile(p,resolution)
+        else Core.clean_release_bounds(p,resolution) end
         if p.perfect and not p.last_perfect and not state.unverified_inherited[p] then p.last_perfect=p.ratio end
         return p
     end
-    function state:feedback(code)
-        code=tonumber(code)
-        if not code or code%1~=0 or code<1 or code>8 or #self.pending==0 then return end
-        local pending=table.remove(self.pending,1)
+    function state:feedback(code,shot)
+        if self.closed then return end
+        code=Core.release_feedback_code(code)
+        if not code or #self.pending==0 then return end
+        local index=1
+        if shot~=nil then
+            index=nil
+            for i,pending in ipairs(self.pending) do if pending.shot==shot then index=i; break end end
+            if not index then return end
+        end
+        local pending=table.remove(self.pending,index)
         telemetry({kind="feedback",code=code,shot=pending.shot,name=pending.name,shot_type=pending.shot_type,ratio=pending.ratio,locked=pending.profile.perfect})
         if deps.calibrate and not deps.calibrate() then
             self.good_trials[pending.profile]=nil; self.good_streak[pending.profile]=nil
@@ -1345,14 +1373,54 @@ local function create_pivot_modules(ctx)
                 Engine.auto_shoot_held=false
             end,
             feedback=function(scope,callback)
-                local service=services.InterfaceService
-                local signal=service and service.ShowFeedback
-                if not signal or type(signal.Connect)~="function" then return false end
-                local connection=signal:Connect(function(model,_,timing)
-                    local c=current()
-                    if c and c.data and model==c.data.model then callback(tonumber(timing)) end
+                local watch={available=false,next_at=0}
+                local native_signal,native_link,label,label_link
+                local closed=false
+                local function deliver(value)
+                    if closed then return end
+                    local c=current(); local a=c and c.data and c.data.Attributes
+                    local shot=a and Core.bounded(a.ShotStartTime,0,math.huge)
+                    local code=Core.release_feedback_code(value)
+                    if code and shot then callback(code,shot) end
+                end
+                function watch:step(now)
+                    if closed or now<self.next_at then return end
+                    self.next_at=now+.25
+                    local live_services=keyboard.Services
+                    local service=live_services and live_services.InterfaceService
+                    local signal=service and service.ShowFeedback
+                    if signal~=native_signal then
+                        if native_link then native_link:Disconnect(); native_link=nil end
+                        native_signal=signal
+                        if signal and type(signal.Connect)=="function" then
+                            native_link=signal:Connect(function(model,_,timing)
+                                local c=current()
+                                if c and c.data and model==c.data.model then deliver(timing) end
+                            end)
+                        end
+                    end
+                    local c=current(); local data=c and c.data
+                    local root=data and (data.HumanoidRootPart or data.model and data.model:FindFirstChild("HumanoidRootPart"))
+                    local feedback=root and root:FindFirstChild("ShotFeedback")
+                    local value=feedback and feedback:FindFirstChild("ReleaseTiming")
+                    if value and not value:IsA("TextLabel") then value=nil end
+                    if value~=label then
+                        if label_link then label_link:Disconnect(); label_link=nil end
+                        label=value
+                        if label then
+                            local observed=label
+                            label_link=label:GetPropertyChangedSignal("Text"):Connect(function() deliver(observed.Text) end)
+                        end
+                    end
+                    self.available=native_link~=nil or label_link~=nil
+                end
+                scope:defer(function()
+                    closed=true
+                    if native_link then native_link:Disconnect() end
+                    if label_link then label_link:Disconnect() end
                 end)
-                scope:defer(function() connection:Disconnect() end); return true
+                watch:step(os.clock())
+                return watch
             end,
         }
     end
@@ -1423,11 +1491,14 @@ local function create_pivot_modules(ctx)
         adapter.changed=function() Engine:timing_changed() end
         local state=Core.animation_release(scope,adapter)
         if Engine.attach_shot_hud then Engine:attach_shot_hud(scope) end
-        local feedback=adapter.feedback(scope,function(code) state:feedback(code) end)
-        ctx.report("Auto Green on / "..Engine.release_storage_status..(feedback and "" or " / feedback unavailable"))
+        state.feedback_watch=adapter.feedback(scope,function(code,shot) state:feedback(code,shot) end)
+        ctx.report("Auto Green on / "..Engine.release_storage_status..(state.feedback_watch.available and "" or " / feedback unavailable"))
         return state
     end,step=function(_,state,_,dt)
-        local ok,err=pcall(state.step,state,dt)
+        local ok,err=pcall(function()
+            state.feedback_watch:step(os.clock())
+            state:step(dt)
+        end)
         if not ok and os.clock()>=(state.next_error_report or 0) then
             state.next_error_report=os.clock()+2
             ctx.report("Auto Green waiting for shooting state / "..tostring(err))
@@ -5303,7 +5374,7 @@ end]])
         local now=os.clock()
         if not force and now<(state.next_history_sample or 0) then return end
         state.next_history_sample=now+2
-        self.farm_decisions=self.farm_decisions or {version=1,build="2026.11.09.01",place=game.PlaceId,rows={}}
+        self.farm_decisions=self.farm_decisions or {version=1,build="2026.11.10.01",place=game.PlaceId,rows={}}
         local ok,c=pcall(local_state); local a=ok and c and c.data and c.data.Attributes or {}
         local court=state.clock_controller and state.clock_controller.CurrentCourt
         local s=self.farm_stats
@@ -5332,7 +5403,7 @@ end]])
             local b=state.bounds
             if b then for _,marker in ipairs(b.markers or {}) do if not marker.Parent or not marker:IsDescendantOf(workspace) then b=nil; break end end end
             local point=b and origin and b.frame:PointToObjectSpace(origin)
-            writefile("vanta_badge_farm_runtime.json",farm_http:JSONEncode({build="2026.11.09.01",status=Engine.farm_status,focused=state.focused,returnReason=state.return_reason,returnAttempts=state.return_attempts,returnError=state.return_error,teleporting=state.teleporting,busy=state.busy,attackDecision=state.attack_decision,retainedShooter=state.contest_shooter and state.contest_shooter.shot,gatherMotion=state.shot_motion and state.shot_motion.kind,stepbackStarted=state.stepback_started,ballCandidates=state.ball_candidates,visibleOpponents=state.visible_opponents,hasPossession=state.has_possession,boundaryReselections=state.boundary_reselections,idle=Engine.farm_idle,inputTransport=move_bridge and "PlayerModule" or "Roblox virtual input",postgame=state.result_seen==true,progressAge=state.health and os.clock()-(state.health.progress_at or state.health.entered),shotClock=state.shot_clock,role=state.role,basketSource=state.basket_source,shotClearance=state.shot_clearance and math.min(999,state.shot_clearance),stats=Engine.farm_stats,
+            writefile("vanta_badge_farm_runtime.json",farm_http:JSONEncode({build="2026.11.10.01",status=Engine.farm_status,focused=state.focused,returnReason=state.return_reason,returnAttempts=state.return_attempts,returnError=state.return_error,teleporting=state.teleporting,busy=state.busy,attackDecision=state.attack_decision,retainedShooter=state.contest_shooter and state.contest_shooter.shot,gatherMotion=state.shot_motion and state.shot_motion.kind,stepbackStarted=state.stepback_started,ballCandidates=state.ball_candidates,visibleOpponents=state.visible_opponents,hasPossession=state.has_possession,boundaryReselections=state.boundary_reselections,idle=Engine.farm_idle,inputTransport=move_bridge and "PlayerModule" or "Roblox virtual input",postgame=state.result_seen==true,progressAge=state.health and os.clock()-(state.health.progress_at or state.health.entered),shotClock=state.shot_clock,role=state.role,basketSource=state.basket_source,shotClearance=state.shot_clearance and math.min(999,state.shot_clearance),stats=Engine.farm_stats,
                 position=origin and {origin.X,origin.Y,origin.Z} or false,bounds=b and point and {source=b.source,x=b.x,z=b.z,localPosition={point.X,point.Y,point.Z}} or false,
                 boundaryBrake=state.boundary_braking==true,guard=state.guard==true,sprint=state.sprinting==true,keys=state.steering_keys or {}}))
         end)
@@ -5494,7 +5565,7 @@ end]])
             farm_session=tostring(os.time())..":"..tostring(os.clock())
             farm_write(true)
             queue([[local ok,c=pcall(function() return game:GetService("HttpService"):JSONDecode(readfile("vanta_badge_farm.json")) end)
-if ok and c.enabled==true and c.session==]]..string.format("%q",farm_session)..[[ then loadstring(game:HttpGet("https://raw.githubusercontent.com/zyhnq/fuckyoumatthew/main/pivot_launcher.lua?v=20261109.01"))() end]])
+if ok and c.enabled==true and c.session==]]..string.format("%q",farm_session)..[[ then loadstring(game:HttpGet("https://raw.githubusercontent.com/zyhnq/fuckyoumatthew/main/pivot_launcher.lua?v=20261110.01"))() end]])
             Engine.farm_status="Starting"; return state
         end,
         step=function(scope,state,s,dt)
@@ -6535,7 +6606,7 @@ do
     local rail_line=frame(shell,20,97,660,1,theme.line)
     local top_line=frame(shell,20,54,660,1,theme.line)
     local logo=label(shell,"VANTA",20,12,140,28,19,theme.text); logo.Font=Enum.Font.GothamBold; logo.TextXAlignment=Enum.TextXAlignment.Left
-    local build_label=label(shell,"BUILD 2026.11.09.01",242,17,150,18,10,theme.muted); build_label.Name="PivotBuild"; build_label.Font=Enum.Font.RobotoMono; build_label.TextWrapped=false
+    local build_label=label(shell,"BUILD 2026.11.10.01",242,17,150,18,10,theme.muted); build_label.Name="PivotBuild"; build_label.Font=Enum.Font.RobotoMono; build_label.TextWrapped=false
     local heading=label(shell,"Practical Basketball",94,14,240,26,11,theme.muted); heading.Font=Enum.Font.GothamMedium
     close.BackgroundColor3=theme.rail; close.TextColor3=theme.muted; close.TextSize=14; corner(close,4)
     local search=make("TextBox",{Text="",PlaceholderText="Find a control...",PlaceholderColor3=theme.muted,Position=UDim2.fromOffset(484,10),Size=UDim2.fromOffset(166,23),
