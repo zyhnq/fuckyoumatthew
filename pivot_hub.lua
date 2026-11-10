@@ -213,7 +213,7 @@ function Core.animation_release(scope,deps)
         local enabled=deps.good_correction and deps.good_correction() and (not deps.calibrate or deps.calibrate())
         if not enabled then state.good_trials[p]=nil; state.good_streak[p]=nil; state.good_exhausted[p]=nil end
         local trial=enabled and state.good_trials[p] or nil
-        return math.max(.25,math.min(p.ceiling or .85,trial and trial.ratio or p.ratio)),trial
+        return math.max(.25,math.min(.85,trial and trial.ratio or p.ratio)),trial
     end
     local function profile(track,name)
         local animation=track.Animation
@@ -227,11 +227,13 @@ function Core.animation_release(scope,deps)
             if name=="InsideHandLayup1R" then initial=.70 end
             local inherited=bucket and state.profiles[base]
             if inherited then
-                local copy={ratio=inherited.ratio,perfect=inherited.perfect,dunk=inherited.dunk,ceiling=inherited.ceiling}
+                local copy={ratio=inherited.ratio,perfect=inherited.perfect,dunk=inherited.dunk}
                 state.profiles[key]=copy; state.unverified_inherited[copy]=true
             else state.profiles[key]={ratio=initial,dunk=attributes and attributes.Action=="Dunking"} end
         end
         local p=state.profiles[key]
+        -- Older saves mistook a paused pose for the latest valid release phase.
+        p.ceiling=nil
         local duration=state.metadata[track]
         local speed=type(track.Speed)=="number" and track.Speed>0 and track.Speed or 1
         local resolution=duration and math.max(.003,math.min(.02,state.frame_dt*speed/duration*.5)) or .004
@@ -269,7 +271,7 @@ function Core.animation_release(scope,deps)
                     trial.attempt=trial.attempt+1
                     local offset=math.ceil(trial.attempt/2)*.003*(trial.attempt%2==1 and 1 or -1)
                     local minimum=math.max(.25,(p.early or .24)+.001)
-                    local maximum=math.min(p.ceiling or .85,(p.late or .86)-.001)
+                    local maximum=math.min(.85,(p.late or .86)-.001)
                     if minimum<=maximum then trial.ratio=math.max(minimum,math.min(maximum,trial.center+offset)); self.good_trials[p]=trial end
                     deps.report("Good release / testing a small nearby phase")
                     telemetry({kind="refinement",reason="Good · testing nearby timing ("..trial.attempt.."/6)",shot=pending.shot,name=pending.name,shot_type=pending.shot_type,ratio=trial.ratio or p.ratio})
@@ -301,7 +303,7 @@ function Core.animation_release(scope,deps)
                 local attempt=p.good_attempt
                 local offset=math.ceil(attempt/2)*.01*(attempt%2==1 and 1 or -1)
                 local minimum=math.max(.25,(p.early or .24)+.001)
-                local maximum=math.min(p.ceiling or .85,(p.late or .86)-.001)
+                local maximum=math.min(.85,(p.late or .86)-.001)
                 if minimum<=maximum then p.ratio=math.max(minimum,math.min(maximum,p.good_center+offset)) end
                 if attempt>=6 then p.good_attempt=0 end
                 deps.report("Good release / testing a nearby release phase")
@@ -315,13 +317,13 @@ function Core.animation_release(scope,deps)
         end
         local resolution=pending.resolution or .004
         if Core.clean_release_bounds(p,resolution) then
-            p.ratio=math.max(.25,math.min(p.ceiling or .85,(p.last_perfect or pending.ratio)+(early and 1 or -1)*math.max(.003,math.min(.01,resolution/2))))
+            p.ratio=math.max(.25,math.min(.85,(p.last_perfect or pending.ratio)+(early and 1 or -1)*math.max(.003,math.min(.01,resolution/2))))
         elseif p.early and p.late then p.ratio=(p.early+p.late)/2
         else
             local step=(code==1 or code==8) and .06 or (code==2 or code==7) and .04 or .02
-            p.ratio=math.max(.25,math.min(p.ceiling or .85,pending.ratio+(early and step or -step)))
+            p.ratio=math.max(.25,math.min(.85,pending.ratio+(early and step or -step)))
         end
-        p.ratio=math.max(.25,math.min(p.ceiling or .85,p.ratio))
+        p.ratio=math.max(.25,math.min(.85,p.ratio))
         deps.report(late and "Late feedback / next release earlier" or "Early feedback / next release later")
         if deps.changed then deps.changed() end
     end
@@ -440,11 +442,18 @@ function Core.animation_release(scope,deps)
                 local attributes=deps.attributes()
                 if attributes and type(attributes.BaseAnimation)=="string" then
                     local p=profile(track,attributes.BaseAnimation)
-                    if track.Speed==0 and track.TimePosition<entry.release_time then
-                        p.ceiling=math.max(.25,math.min(.85,track.TimePosition/entry.release_time))
-                        p.ratio=math.min(p.ratio,p.ceiling)
-                    end
                     local position=track.TimePosition
+                    local speed=Core.bounded(track.Speed,.001,10)
+                    if speed then
+                        entry.last_speed=speed; entry.hold_at=nil
+                    elseif track.Speed==0 and position<entry.release_time then
+                        if not entry.hold_at or entry.hold_position~=position then
+                            entry.hold_at=os.clock(); entry.hold_position=position
+                        end
+                        -- Continue the shot phase through its held pose at the last observed rate.
+                        -- This lets Early feedback move the target beyond that pose.
+                        position=position+math.max(0,os.clock()-entry.hold_at)*(entry.last_speed or 1)
+                    else entry.hold_at=nil end
                     if deps.lead and type(track.Speed)=="number" and track.Speed>0 then position=position+track.Speed*deps.lead() end
                     if attributes.Action=="Dunking" and type(track.Speed)=="number" and track.Speed>0 then
                         position=position+track.Speed*math.min(1/60,math.max(0,tonumber(dt) or 0))
@@ -1368,6 +1377,7 @@ local function create_pivot_modules(ctx)
             for _,field in ipairs({"early","late","ceiling","good_center","last_perfect"}) do if item[field]~=nil then copy[field]=assert(Core.bounded(item[field],.25,.85),"Invalid timing bound") end end
             for _,field in ipairs({"perfect","dunk"}) do if item[field]~=nil then assert(type(item[field])=="boolean","Invalid timing flag"); copy[field]=item[field] end end
             if item.good_attempt~=nil then assert(type(item.good_attempt)=="number" and item.good_attempt%1==0 and item.good_attempt>=0 and item.good_attempt<=6,"Invalid refinement count"); copy.good_attempt=item.good_attempt end
+            copy.ceiling=nil
             Core.clean_release_bounds(copy,.004)
             if copy.perfect and not copy.last_perfect then copy.last_perfect=copy.ratio end
             result[key]=copy
@@ -5293,7 +5303,7 @@ end]])
         local now=os.clock()
         if not force and now<(state.next_history_sample or 0) then return end
         state.next_history_sample=now+2
-        self.farm_decisions=self.farm_decisions or {version=1,build="2026.11.08.21",place=game.PlaceId,rows={}}
+        self.farm_decisions=self.farm_decisions or {version=1,build="2026.11.09.01",place=game.PlaceId,rows={}}
         local ok,c=pcall(local_state); local a=ok and c and c.data and c.data.Attributes or {}
         local court=state.clock_controller and state.clock_controller.CurrentCourt
         local s=self.farm_stats
@@ -5322,7 +5332,7 @@ end]])
             local b=state.bounds
             if b then for _,marker in ipairs(b.markers or {}) do if not marker.Parent or not marker:IsDescendantOf(workspace) then b=nil; break end end end
             local point=b and origin and b.frame:PointToObjectSpace(origin)
-            writefile("vanta_badge_farm_runtime.json",farm_http:JSONEncode({build="2026.11.08.21",status=Engine.farm_status,focused=state.focused,returnReason=state.return_reason,returnAttempts=state.return_attempts,returnError=state.return_error,teleporting=state.teleporting,busy=state.busy,attackDecision=state.attack_decision,retainedShooter=state.contest_shooter and state.contest_shooter.shot,gatherMotion=state.shot_motion and state.shot_motion.kind,stepbackStarted=state.stepback_started,ballCandidates=state.ball_candidates,visibleOpponents=state.visible_opponents,hasPossession=state.has_possession,boundaryReselections=state.boundary_reselections,idle=Engine.farm_idle,inputTransport=move_bridge and "PlayerModule" or "Roblox virtual input",postgame=state.result_seen==true,progressAge=state.health and os.clock()-(state.health.progress_at or state.health.entered),shotClock=state.shot_clock,role=state.role,basketSource=state.basket_source,shotClearance=state.shot_clearance and math.min(999,state.shot_clearance),stats=Engine.farm_stats,
+            writefile("vanta_badge_farm_runtime.json",farm_http:JSONEncode({build="2026.11.09.01",status=Engine.farm_status,focused=state.focused,returnReason=state.return_reason,returnAttempts=state.return_attempts,returnError=state.return_error,teleporting=state.teleporting,busy=state.busy,attackDecision=state.attack_decision,retainedShooter=state.contest_shooter and state.contest_shooter.shot,gatherMotion=state.shot_motion and state.shot_motion.kind,stepbackStarted=state.stepback_started,ballCandidates=state.ball_candidates,visibleOpponents=state.visible_opponents,hasPossession=state.has_possession,boundaryReselections=state.boundary_reselections,idle=Engine.farm_idle,inputTransport=move_bridge and "PlayerModule" or "Roblox virtual input",postgame=state.result_seen==true,progressAge=state.health and os.clock()-(state.health.progress_at or state.health.entered),shotClock=state.shot_clock,role=state.role,basketSource=state.basket_source,shotClearance=state.shot_clearance and math.min(999,state.shot_clearance),stats=Engine.farm_stats,
                 position=origin and {origin.X,origin.Y,origin.Z} or false,bounds=b and point and {source=b.source,x=b.x,z=b.z,localPosition={point.X,point.Y,point.Z}} or false,
                 boundaryBrake=state.boundary_braking==true,guard=state.guard==true,sprint=state.sprinting==true,keys=state.steering_keys or {}}))
         end)
@@ -5484,7 +5494,7 @@ end]])
             farm_session=tostring(os.time())..":"..tostring(os.clock())
             farm_write(true)
             queue([[local ok,c=pcall(function() return game:GetService("HttpService"):JSONDecode(readfile("vanta_badge_farm.json")) end)
-if ok and c.enabled==true and c.session==]]..string.format("%q",farm_session)..[[ then loadstring(game:HttpGet("https://raw.githubusercontent.com/zyhnq/fuckyoumatthew/main/pivot_launcher.lua?v=20261108.21"))() end]])
+if ok and c.enabled==true and c.session==]]..string.format("%q",farm_session)..[[ then loadstring(game:HttpGet("https://raw.githubusercontent.com/zyhnq/fuckyoumatthew/main/pivot_launcher.lua?v=20261109.01"))() end]])
             Engine.farm_status="Starting"; return state
         end,
         step=function(scope,state,s,dt)
@@ -6525,7 +6535,7 @@ do
     local rail_line=frame(shell,20,97,660,1,theme.line)
     local top_line=frame(shell,20,54,660,1,theme.line)
     local logo=label(shell,"VANTA",20,12,140,28,19,theme.text); logo.Font=Enum.Font.GothamBold; logo.TextXAlignment=Enum.TextXAlignment.Left
-    local build_label=label(shell,"BUILD 2026.11.08.21",242,17,150,18,10,theme.muted); build_label.Name="PivotBuild"; build_label.Font=Enum.Font.RobotoMono; build_label.TextWrapped=false
+    local build_label=label(shell,"BUILD 2026.11.09.01",242,17,150,18,10,theme.muted); build_label.Name="PivotBuild"; build_label.Font=Enum.Font.RobotoMono; build_label.TextWrapped=false
     local heading=label(shell,"Practical Basketball",94,14,240,26,11,theme.muted); heading.Font=Enum.Font.GothamMedium
     close.BackgroundColor3=theme.rail; close.TextColor3=theme.muted; close.TextSize=14; corner(close,4)
     local search=make("TextBox",{Text="",PlaceholderText="Find a control...",PlaceholderColor3=theme.muted,Position=UDim2.fromOffset(484,10),Size=UDim2.fromOffset(166,23),
