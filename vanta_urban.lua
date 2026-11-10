@@ -80,7 +80,8 @@ function Core.table_writer(api)
 end
 function Core.weapon_adapter(discover,options)
     options=options or {}
-    local spread_only=options.spread==true
+    local mode=options.mode or (options.spread and "spread" or "recoil")
+    local spread_only=mode=="spread"
     local bloom_keys={"Hip","Aim","Air","Move","Max","PerShot"}
     local spread_keys={"SpreadRest","Spread"}
     local self={enabled=false,records={},next_scan=0,reason="Off",count=0,configs=0,clients=0,mode="None",lastError=nil}
@@ -102,10 +103,28 @@ function Core.weapon_adapter(discover,options)
     end
     local function inspect(object)
         if type(object)~="table" then return end
+        if mode=="ammo" then
+            -- The captured native Config contains this flag alongside movement and health rules.
+            local infinite=rawget(object,"InfiniteAmmo")
+            if type(infinite)=="boolean" and finite(rawget(object,"MaxHealth"))
+                and finite(rawget(object,"WalkSpeed")) and finite(rawget(object,"SprintSpeed"))
+                and finite(rawget(object,"JumpCooldown")) and finite(rawget(object,"RollCooldown")) then
+                add(object,{{key="InfiniteAmmo",original=infinite,zero=true,value_kind="boolean"}},"client")
+            end
+            return
+        end
         -- Each weapon's data entry has Recoil/Bloom/Fire; unrelated camera,
         -- animation and vehicle spring tables do not match this schema.
-        local recoil,bloom=rawget(object,"Recoil"),rawget(object,"Bloom")
-        if type(recoil)=="table" and type(bloom)=="table" and type(rawget(object,"Fire"))=="table" then
+        local recoil,bloom,fire=rawget(object,"Recoil"),rawget(object,"Bloom"),rawget(object,"Fire")
+        local weapon=type(recoil)=="table" and type(bloom)=="table" and type(fire)=="table"
+        if mode=="rate" then
+            local rpm=weapon and rawget(fire,"RPM")
+            if finite(rpm) and rpm>0 then
+                add(fire,{{key="RPM",original=rpm,zero=rpm,relative=true}},"weapon")
+            end
+            return
+        end
+        if weapon then
             if spread_only then
                 if finite(rawget(bloom,"Hip")) and finite(rawget(bloom,"Aim")) then
                     local fields={}
@@ -150,14 +169,15 @@ function Core.weapon_adapter(discover,options)
         local ok,objects=pcall(discover)
         if not ok or type(objects)~="table" then self.reason="Client state scan unavailable"; return end
         for _,object in pairs(objects) do inspect(object) end
-        self.reason=self.count>0 and "Active" or "Waiting for supported weapon state"
+        local waiting=mode=="ammo" and "Waiting for native InfiniteAmmo flag" or mode=="rate" and "Waiting for weapon Fire.RPM" or "Waiting for supported weapon state"
+        self.reason=self.count>0 and (mode=="ammo" and "Client infinite-ammo flag active" or "Active") or waiting
         self.mode=self.clients>0 and (self.configs>0 and "Urban client + weapon data" or "Urban client state") or self.configs>0 and "Urban weapon data" or self.count>0 and "Legacy fields" or "None"
     end
     function self:step(now)
         if not self.enabled then return end
         if now>=self.next_scan then self:scan(); self.next_scan=now+((self.clients>0 or self.configs>0) and 10 or 2) end
         for object,record in pairs(self.records) do
-            if record.kind=="client" and not spread_only then
+            if record.kind=="client" and mode=="recoil" then
                 local field=client_field(object)
                 if field and field.key~=record.fields[1].key then record.fields={field} end
             end
@@ -165,10 +185,18 @@ function Core.weapon_adapter(discover,options)
             for _,field in ipairs(record.fields) do
                 local value=rawget(object,field.key); local kind=options.kind and options.kind(value) or type(value)
                 local supported=field.value_kind and kind==field.value_kind or not field.value_kind and finite(value)
-                if supported and value~=field.zero then
+                local desired=field.zero
+                if supported and field.relative then
+                    if value~=field.zero then field.original=value end
+                    local multiplier=Core.bounded(options.multiplier(),1,5)
+                    assert(multiplier,"Invalid fire-rate multiplier")
+                    desired=field.original*multiplier
+                end
+                if supported and value~=desired then
                     -- A weapon change can update the resting spread in a reused client table.
-                    if spread_only and not field.transient then field.original=value end
-                    local ok,err=write(object,field.key,field.zero)
+                    if mode~="recoil" and not field.relative and not field.transient then field.original=value end
+                    field.zero=desired
+                    local ok,err=write(object,field.key,desired)
                     if not ok then self.lastError=tostring(err):gsub("^.-:%d+:%s*",""):sub(1,200); writable=false; break end
                 end
             end
@@ -177,8 +205,8 @@ function Core.weapon_adapter(discover,options)
                 if record.kind=="weapon" then self.configs=self.configs-1 elseif record.kind=="client" then self.clients=self.clients-1 end
             end
         end
-        if self.count==0 and self.reason=="Active" then
-            self.reason=self.lastError and ("Write blocked: "..self.lastError) or (spread_only and "No writable spread state found" or "No writable recoil state found")
+        if self.count==0 and self.lastError then
+            self.reason="Write blocked: "..self.lastError
         end
     end
     function self:disable()
@@ -249,7 +277,7 @@ function Core.movement_adapter(discover,write)
 end
 if DEEPHAT_REFINED_TEST then return Core end
 
--- Vanta Urban 4.1 | standalone client script, native UI, no Drawing dependency.
+-- Vanta Urban 4.2 | standalone client script, native UI, no Drawing dependency.
 local Players=game:GetService("Players")
 local Run=game:GetService("RunService")
 local Input=game:GetService("UserInputService")
@@ -261,13 +289,14 @@ if previous then local stop=previous:FindFirstChild("Unload"); assert(stop,"Clos
 Run:UnbindFromRenderStep("DeepHatRefined.Render"); Run:UnbindFromRenderStep("DeepHat_Aim"); Run:UnbindFromRenderStep("DeepHat_ESP")
 local cfg={enabled=true,espEnabled=true,teamCheck=true,ignoreTeams=false,checkLOS=true,espVisibleOnly=false,
     hardLock=true,stickyTarget=true,centerFov=true,noRecoil=false,noSpread=false,vehicleTargets=true,speedEnabled=false,walkSpeed=32,
+    rapidFire=false,fireRateMultiplier=2,infiniteAmmo=false,
     aimKey="E",aimMouseButton=false,response=10,fov=200,maxDistance=600,predictionEnabled=true,prediction=0,usePing=false,
     targetParts={"Head","UpperTorso","Torso","HumanoidRootPart"},espColor=Color3.fromRGB(235,111,129),espThickness=1.5,showFov=true,names=true,maxVisuals=24,switchBias=.25}
 -- Urban Reload's crew relationships are not verified by this generic Teams filter.
 -- Start unfiltered here; the user can still explicitly enable Team filter.
 local urban_reload=game.PlaceId==84448037861644 or game.GameId==10769552054
 if urban_reload then cfg.teamCheck=false end
-local ranges={response={1,35},fov={30,500},maxDistance={50,3000},prediction={0,.25},espThickness={1,3},maxVisuals={4,48},switchBias={0,.6},walkSpeed={1,150}}
+local ranges={response={1,35},fov={30,500},maxDistance={50,3000},prediction={0,.25},espThickness={1,3},maxVisuals={4,48},switchBias={0,.6},walkSpeed={1,150},fireRateMultiplier={1,5}}
 local alive=true; local focused=true; local menu_open=true; local error_paused=false; local waiting_key=false
 local connections={}; local roster={}; local locked=nil; local selected=nil; local ping=0; local elapsed=1; local ping_elapsed=1
 local was_active=false
@@ -296,7 +325,7 @@ local content=make("ScrollingFrame",{Position=UDim2.fromOffset(198,128),Size=UDi
 local badge=make("TextButton",{Name="MenuButton",Text="Vanta",Position=UDim2.fromOffset(20,44),Size=UDim2.fromOffset(104,32),BackgroundColor3=theme.panel,TextColor3=theme.text,Font=Enum.Font.GothamMedium,TextSize=16,BorderSizePixel=0,AutoButtonColor=false,ZIndex=20},canvas); corner(badge,7)
 local live_status=text(canvas,"",136,44,460,32,14,theme.text)
 live_status.Name="LiveStatus"; live_status.TextStrokeTransparency=.3
-local control={Config=cfg,Version="4.1"}; local bindings={}; local y=0
+local control={Config=cfg,Version="4.2"}; local bindings={}; local y=0
 local recoil_module
 local function recoil_state_key(state)
     if not recoil_module or not recoil_module.Parent then
@@ -320,7 +349,10 @@ local recoil=Core.weapon_adapter(discover_weapons,{
     write=write_weapon
 })
 local spread=Core.weapon_adapter(discover_weapons,{spread=true,write=write_weapon})
-local weapon_controls={noRecoil=recoil,noSpread=spread}
+local fire_rate=Core.weapon_adapter(discover_weapons,{mode="rate",write=write_weapon,multiplier=function() return cfg.fireRateMultiplier end})
+local ammo=Core.weapon_adapter(discover_weapons,{mode="ammo",write=write_weapon})
+local weapon_controls={noRecoil=recoil,noSpread=spread,rapidFire=fire_rate,infiniteAmmo=ammo}
+local weapon_status_names={noRecoil="RecoilStatus",noSpread="SpreadStatus",rapidFire="FireRateStatus",infiniteAmmo="AmmoStatus"}
 local weapon_labels={}; local logged_recoil_error
 local function stop_weapon_controls()
     for key,adapter in pairs(weapon_controls) do
@@ -334,7 +366,7 @@ make("Frame",{Position=UDim2.fromOffset(0,74),Size=UDim2.new(1,0,0,1),Background
 local sidebar=make("Frame",{Position=UDim2.fromOffset(0,75),Size=UDim2.new(0,172,1,-75),BackgroundColor3=Color3.fromRGB(13,10,18),BorderSizePixel=0,ZIndex=20},panel)
 local sidebar_line=make("Frame",{Position=UDim2.fromOffset(176,75),Size=UDim2.new(0,1,1,-75),BackgroundColor3=theme.line,BorderSizePixel=0,ZIndex=21},panel)
 local section_title=text(panel,"Aim",202,88,400,30,21); section_title.Font=Enum.Font.GothamBold
-local build_label=text(panel,"BUILD 2026.11.08.24",0,0,140,18,10,theme.muted); build_label.Font=Enum.Font.RobotoMono
+local build_label=text(panel,"BUILD 2026.11.09.02",0,0,140,18,10,theme.muted); build_label.Font=Enum.Font.RobotoMono
 local search=make("TextBox",{Name="VantaSearch",Text="",PlaceholderText="Find a control...",ClearTextOnFocus=false,Position=UDim2.new(1,-280,0,23),Size=UDim2.fromOffset(192,27),BackgroundColor3=theme.input,TextColor3=theme.text,PlaceholderColor3=theme.muted,Font=Enum.Font.Gotham,TextSize=13,BorderSizePixel=0,ZIndex=24},panel); corner(search,7)
 make("UIPadding",{PaddingLeft=UDim.new(0,12),PaddingRight=UDim.new(0,8)},search)
 local group=make("Frame",{Name="VantaUrbanGroup",Size=UDim2.new(1,-6,0,52),BackgroundColor3=theme.panel,BorderSizePixel=0,ZIndex=22},content); corner(group,9)
@@ -342,7 +374,7 @@ make("UIStroke",{Color=theme.line,Transparency=.35,Thickness=1},group)
 local group_title=text(group,"Aim  −",14,0,500,44,18); group_title.Font=Enum.Font.GothamMedium; group_title.ZIndex=24
 make("Frame",{Position=UDim2.fromOffset(14,44),Size=UDim2.new(1,-28,0,1),BackgroundColor3=theme.line,BorderSizePixel=0,ZIndex=23},group)
 local ui_rows={}; local nav_buttons={}; local current_section="Aim"
-local section_map={["Speed override"]="Movement",["Walk speed / studs per second"]="Movement",["Player ESP"]="ESP",["Show FOV"]="ESP",["ESP names & distances"]="ESP",["ESP visible only"]="ESP",["Prediction"]="Prediction",["Use ping in lead"]="Prediction",["Prediction lead / seconds"]="Prediction",["Hold key"]="Settings",["RightShift menu · F8 stop"]="Settings"}
+local section_map={["Rapid fire"]="Weapons",["Fire rate / multiplier"]="Weapons",["Infinite Ammo"]="Weapons",["Speed override"]="Movement",["Walk speed / studs per second"]="Movement",["Player ESP"]="ESP",["Show FOV"]="ESP",["ESP names & distances"]="ESP",["ESP visible only"]="ESP",["Prediction"]="Prediction",["Use ping in lead"]="Prediction",["Prediction lead / seconds"]="Prediction",["Hold key"]="Settings",["RightShift menu · F8 stop"]="Settings"}
 local function show_section(name,keep_scroll)
     current_section=name; local query=search.Text:lower(); local title=query~="" and "Search" or name
     section_title.Text=title; group_title.Text=title.."  −"; local offset=52
@@ -375,7 +407,7 @@ local function nav_icon(owner,kind)
     end
     return root
 end
-for i,name in ipairs({"Aim","ESP","Movement","Prediction","Settings"}) do
+for i,name in ipairs({"Aim","ESP","Weapons","Movement","Prediction","Settings"}) do
     local b=make("TextButton",{Name="VantaTab_"..name,Text="",AutoButtonColor=false,Position=UDim2.fromOffset(10,90+(i-1)*43),Size=UDim2.fromOffset(156,38),BackgroundColor3=theme.panel,BorderSizePixel=0,ZIndex=22},panel); corner(b,5)
     local symbol=nav_icon(b,name)
     local caption=text(b,name,40,0,112,38,13,theme.muted); caption.ZIndex=24
@@ -579,6 +611,7 @@ function control:Set(key,value)
     cfg[key]=value
     local adapter=weapon_controls[key]
     if adapter then if value then adapter:enable(os.clock()) else adapter:disable() end end
+    if key=="fireRateMultiplier" and cfg.rapidFire then fire_rate:step(os.clock()) end
     if key=="speedEnabled" and not value then stop_speed() end
     if key=="speedEnabled" and value then speed_reason="Waiting for character" end
     error_paused=false; reset_lock(); elapsed=1; refresh_controls(); return true
@@ -600,7 +633,7 @@ local function toggle(caption,key,get,set)
     if weapon_controls[key] then
         r:FindFirstChild("Caption").Size=UDim2.new(1,-110,0,28)
         local label=text(r,"Off",10,29,400,18,11,theme.muted)
-        label.Size=UDim2.new(1,-84,0,18); label.Name=key=="noRecoil" and "RecoilStatus" or "SpreadStatus"
+        label.Size=UDim2.new(1,-84,0,18); label.Name=weapon_status_names[key]
         weapon_labels[key]=label
     end
     if key=="speedEnabled" then
@@ -631,7 +664,9 @@ local function field(caption,key,format)
         if slider.AbsoluteSize.X<=0 then return end
         local range=ranges[key]; local amount=math.max(0,math.min(1,(position.X-slider.AbsolutePosition.X)/slider.AbsoluteSize.X))
         local value=range[1]+(range[2]-range[1])*amount
-        if key~="prediction" then value=math.floor(value+.5) else value=math.floor(value*1000+.5)/1000 end
+        if key=="prediction" then value=math.floor(value*1000+.5)/1000
+        elseif key=="fireRateMultiplier" then value=math.floor(value*10+.5)/10
+        else value=math.floor(value+.5) end
         control:Set(key,value)
     end
     connect(slider.InputBegan,function(event) if event.UserInputType==Enum.UserInputType.MouseButton1 or event.UserInputType==Enum.UserInputType.Touch then dragging=event; move(event.Position) end end)
@@ -641,6 +676,7 @@ local function field(caption,key,format)
 end
 toggle("Aim assist","enabled"); toggle("Player ESP","espEnabled")
 toggle("No recoil","noRecoil"); toggle("No Spread","noSpread"); toggle("Target vehicle occupants","vehicleTargets")
+toggle("Rapid fire","rapidFire"); field("Fire rate / multiplier","fireRateMultiplier","%.1f"); toggle("Infinite Ammo","infiniteAmmo")
 toggle("Speed override","speedEnabled"); field("Walk speed / studs per second","walkSpeed")
 toggle("Hard lock / no smoothing","hardLock"); toggle("Keep target while held","stickyTarget"); toggle("Center FOV on crosshair","centerFov")
 toggle("Team filter","teamCheck",function() return cfg.teamCheck and not cfg.ignoreTeams end,function(value) cfg.teamCheck=value; cfg.ignoreTeams=false; reset_lock() end)
@@ -890,7 +926,7 @@ local function weapon_status(adapter)
     return {enabled=adapter.enabled,states=adapter.count,reason=adapter.reason,mode=adapter.mode,
         weaponConfigs=adapter.configs,clientStates=adapter.clients,writeError=adapter.lastError}
 end
-function control:GetStatus() local count=0; for _ in pairs(roster) do count=count+1 end; return {alive=alive,paused=error_paused,target=locked and locked.Name,players=count,menu=menu_open,reason=last_reason,diagnostics=diagnostics,placeId=game.PlaceId,recoil=weapon_status(recoil),spread=weapon_status(spread),speed={enabled=cfg.speedEnabled,value=cfg.walkSpeed,reason=speed_reason,settings=movement.count}} end
+function control:GetStatus() local count=0; for _ in pairs(roster) do count=count+1 end; return {alive=alive,paused=error_paused,target=locked and locked.Name,players=count,menu=menu_open,reason=last_reason,diagnostics=diagnostics,placeId=game.PlaceId,recoil=weapon_status(recoil),spread=weapon_status(spread),fireRate=weapon_status(fire_rate),ammo=weapon_status(ammo),speed={enabled=cfg.speedEnabled,value=cfg.walkSpeed,reason=speed_reason,settings=movement.count}} end
 refresh_controls(); menu(true)
 print("Vanta Urban "..control.Version.." loaded · Hold E · RightShift menu · F8 stop · Delete unload")
 return control
