@@ -84,9 +84,16 @@ function Core.weapon_adapter(discover,options)
     local spread_only=mode=="spread"
     local bloom_keys={"Hip","Aim","Air","Move","Max","PerShot"}
     local spread_keys={"SpreadRest","Spread"}
-    local self={enabled=false,records={},next_scan=0,reason="Off",count=0,configs=0,clients=0,mode="None",lastError=nil}
+    local self={enabled=false,records={},next_scan=0,reason="Off",count=0,configs=0,clients=0,automatic=0,mode="None",lastError=nil}
+    local automatic_mode
     local write=options.write or function(object,key,value) local ok,err=pcall(rawset,object,key,value); return ok,err end
     local function finite(n) return type(n)=="number" and n==n and math.abs(n)<math.huge end
+    local function fire_mode(value)
+        if type(value)~="string" then return nil end
+        local name=value:lower():gsub("[%s_%-]","")
+        if name=="auto" or name=="automatic" or name=="fullauto" or name=="fullyautomatic" then return "auto" end
+        if name=="semi" or name=="semiauto" or name=="semiautomatic" or name=="single" or name=="singlefire" then return "semi" end
+    end
     local function add(object,fields,kind)
         if self.records[object] or self.count>=128 then return end
         self.records[object]={fields=fields,kind=kind}; self.count=self.count+1
@@ -121,6 +128,22 @@ function Core.weapon_adapter(discover,options)
             local rpm=weapon and rawget(fire,"RPM")
             if finite(rpm) and rpm>0 then
                 add(fire,{{key="RPM",original=rpm,zero=rpm,relative=true}},"weapon")
+                local record=self.records[fire]
+                if not record then return end
+                local function add_mode(key,target,kind)
+                    local value=rawget(fire,key)
+                    if type(value)~=kind then return end
+                    for _,field in ipairs(record.fields) do if field.key==key then return end end
+                    record.fields[#record.fields+1]={key=key,original=value,zero=target,value_kind=kind}
+                end
+                local supported=false
+                for _,key in ipairs({"Automatic","Auto"}) do
+                    if type(rawget(fire,key))=="boolean" then add_mode(key,true,"boolean"); supported=true end
+                end
+                local native_mode=fire_mode(rawget(fire,"Mode"))
+                if native_mode=="semi" and automatic_mode then add_mode("Mode",automatic_mode,"string"); supported=true
+                elseif native_mode=="auto" then supported=true end
+                if supported and not record.automatic then record.automatic=true; self.automatic=self.automatic+1 end
             end
             return
         end
@@ -168,9 +191,22 @@ function Core.weapon_adapter(discover,options)
         if type(discover)~="function" then self.reason="Client table access unavailable"; return end
         local ok,objects=pcall(discover)
         if not ok or type(objects)~="table" then self.reason="Client state scan unavailable"; return end
+        if mode=="rate" and not automatic_mode then
+            -- Reuse a full-auto mode value from another native weapon in this session.
+            for _,object in pairs(objects) do
+                if type(object)=="table" and type(rawget(object,"Recoil"))=="table"
+                    and type(rawget(object,"Bloom"))=="table" and type(rawget(object,"Fire"))=="table" then
+                    local fire=rawget(object,"Fire")
+                    if fire_mode(rawget(fire,"Mode"))=="auto" then automatic_mode=rawget(fire,"Mode"); break end
+                end
+            end
+        end
         for _,object in pairs(objects) do inspect(object) end
         local waiting=mode=="ammo" and "Waiting for native InfiniteAmmo flag" or mode=="rate" and "Waiting for weapon Fire.RPM" or "Waiting for supported weapon state"
         self.reason=self.count>0 and (mode=="ammo" and "Client infinite-ammo flag active" or "Active") or waiting
+        if mode=="rate" and self.count>0 then
+            self.reason=self.automatic>0 and ("Active / "..self.automatic.." automatic profiles") or "Rate active / hold-fire setting unavailable"
+        end
         self.mode=self.clients>0 and (self.configs>0 and "Urban client + weapon data" or "Urban client state") or self.configs>0 and "Urban weapon data" or self.count>0 and "Legacy fields" or "None"
     end
     function self:step(now)
@@ -202,6 +238,7 @@ function Core.weapon_adapter(discover,options)
             end
             if not writable then
                 restore(object,record); self.records[object]=nil; self.count=self.count-1
+                if record.automatic then self.automatic=self.automatic-1 end
                 if record.kind=="weapon" then self.configs=self.configs-1 elseif record.kind=="client" then self.clients=self.clients-1 end
             end
         end
@@ -211,7 +248,7 @@ function Core.weapon_adapter(discover,options)
     end
     function self:disable()
         for object,record in pairs(self.records) do restore(object,record) end
-        self.enabled=false; self.records={}; self.count=0; self.configs=0; self.clients=0; self.mode="None"; self.next_scan=0; self.reason="Off"
+        self.enabled=false; self.records={}; self.count=0; self.configs=0; self.clients=0; self.automatic=0; automatic_mode=nil; self.mode="None"; self.next_scan=0; self.reason="Off"
     end
     function self:enable(now) self.enabled=true; self.lastError=nil; self.next_scan=0; self:step(now or 0) end
     return self
@@ -277,7 +314,7 @@ function Core.movement_adapter(discover,write)
 end
 if DEEPHAT_REFINED_TEST then return Core end
 
--- Vanta Urban 4.2 | standalone client script, native UI, no Drawing dependency.
+-- Vanta Urban 4.3 | standalone client script, native UI, no Drawing dependency.
 local Players=game:GetService("Players")
 local Run=game:GetService("RunService")
 local Input=game:GetService("UserInputService")
@@ -325,7 +362,7 @@ local content=make("ScrollingFrame",{Position=UDim2.fromOffset(198,128),Size=UDi
 local badge=make("TextButton",{Name="MenuButton",Text="Vanta",Position=UDim2.fromOffset(20,44),Size=UDim2.fromOffset(104,32),BackgroundColor3=theme.panel,TextColor3=theme.text,Font=Enum.Font.GothamMedium,TextSize=16,BorderSizePixel=0,AutoButtonColor=false,ZIndex=20},canvas); corner(badge,7)
 local live_status=text(canvas,"",136,44,460,32,14,theme.text)
 live_status.Name="LiveStatus"; live_status.TextStrokeTransparency=.3
-local control={Config=cfg,Version="4.2"}; local bindings={}; local y=0
+local control={Config=cfg,Version="4.3"}; local bindings={}; local y=0
 local recoil_module
 local function recoil_state_key(state)
     if not recoil_module or not recoil_module.Parent then
@@ -366,7 +403,7 @@ make("Frame",{Position=UDim2.fromOffset(0,74),Size=UDim2.new(1,0,0,1),Background
 local sidebar=make("Frame",{Position=UDim2.fromOffset(0,75),Size=UDim2.new(0,172,1,-75),BackgroundColor3=Color3.fromRGB(13,10,18),BorderSizePixel=0,ZIndex=20},panel)
 local sidebar_line=make("Frame",{Position=UDim2.fromOffset(176,75),Size=UDim2.new(0,1,1,-75),BackgroundColor3=theme.line,BorderSizePixel=0,ZIndex=21},panel)
 local section_title=text(panel,"Aim",202,88,400,30,21); section_title.Font=Enum.Font.GothamBold
-local build_label=text(panel,"BUILD 2026.11.09.02",0,0,140,18,10,theme.muted); build_label.Font=Enum.Font.RobotoMono
+local build_label=text(panel,"BUILD 2026.11.09.03",0,0,140,18,10,theme.muted); build_label.Font=Enum.Font.RobotoMono
 local search=make("TextBox",{Name="VantaSearch",Text="",PlaceholderText="Find a control...",ClearTextOnFocus=false,Position=UDim2.new(1,-280,0,23),Size=UDim2.fromOffset(192,27),BackgroundColor3=theme.input,TextColor3=theme.text,PlaceholderColor3=theme.muted,Font=Enum.Font.Gotham,TextSize=13,BorderSizePixel=0,ZIndex=24},panel); corner(search,7)
 make("UIPadding",{PaddingLeft=UDim.new(0,12),PaddingRight=UDim.new(0,8)},search)
 local group=make("Frame",{Name="VantaUrbanGroup",Size=UDim2.new(1,-6,0,52),BackgroundColor3=theme.panel,BorderSizePixel=0,ZIndex=22},content); corner(group,9)
@@ -924,7 +961,7 @@ local stop_event=make("BindableEvent",{Name="Unload"},gui); connect(stop_event.E
 connect(gui.Destroying,function() control:Unload() end)
 local function weapon_status(adapter)
     return {enabled=adapter.enabled,states=adapter.count,reason=adapter.reason,mode=adapter.mode,
-        weaponConfigs=adapter.configs,clientStates=adapter.clients,writeError=adapter.lastError}
+        weaponConfigs=adapter.configs,clientStates=adapter.clients,automaticProfiles=adapter.automatic,writeError=adapter.lastError}
 end
 function control:GetStatus() local count=0; for _ in pairs(roster) do count=count+1 end; return {alive=alive,paused=error_paused,target=locked and locked.Name,players=count,menu=menu_open,reason=last_reason,diagnostics=diagnostics,placeId=game.PlaceId,recoil=weapon_status(recoil),spread=weapon_status(spread),fireRate=weapon_status(fire_rate),ammo=weapon_status(ammo),speed={enabled=cfg.speedEnabled,value=cfg.walkSpeed,reason=speed_reason,settings=movement.count}} end
 refresh_controls(); menu(true)
