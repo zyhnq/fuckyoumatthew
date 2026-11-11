@@ -224,7 +224,8 @@ function Core.release_feedback_code(value)
     if code and code%1==0 and code>=1 and code<=8 then return code end
     if type(value)~="string" then return nil end
     local labels={veryearly=1,early=2,slightlyearly=3,good=4,perfect=5,slightlylate=6,late=7,verylate=8}
-    return labels[value:gsub("<.->",""):lower():gsub("[%s%p]","")]
+    local text=value:gsub("<.->",""):lower():gsub("[%s%p]","")
+    return labels[text:gsub("release$","")]
 end
 function Core.animation_release(scope,deps)
     local state={watched={},sent={},metadata=setmetatable({},{__mode="k"}),profiles=deps.profiles or {},pending={},closed=false,good_trials={},good_streak={},good_exhausted={},metadata_identity=setmetatable({},{__mode="k"}),feedback_runs=setmetatable({},{__mode="k"}),unverified_inherited=setmetatable({},{__mode="k"}),frame_dt=1/60}
@@ -1374,7 +1375,7 @@ local function create_pivot_modules(ctx)
             end,
             feedback=function(scope,callback)
                 local watch={available=false,next_at=0}
-                local native_signal,native_link,label,label_link
+                local native_signal,native_link,remote,remote_link,label,label_link
                 local closed=false
                 local function deliver(value)
                     if closed then return end
@@ -1382,6 +1383,10 @@ local function create_pivot_modules(ctx)
                     local shot=a and Core.bounded(a.ShotStartTime,0,math.huge)
                     local code=Core.release_feedback_code(value)
                     if code and shot then callback(code,shot) end
+                end
+                local function receive(model,_,timing)
+                    local c=current()
+                    if c and c.data and model==c.data.model then deliver(timing) end
                 end
                 function watch:step(now)
                     if closed or now<self.next_at then return end
@@ -1393,11 +1398,19 @@ local function create_pivot_modules(ctx)
                         if native_link then native_link:Disconnect(); native_link=nil end
                         native_signal=signal
                         if signal and type(signal.Connect)=="function" then
-                            native_link=signal:Connect(function(model,_,timing)
-                                local c=current()
-                                if c and c.data and model==c.data.model then deliver(timing) end
-                            end)
+                            native_link=signal:Connect(receive)
                         end
+                    end
+                    local replicated=game:GetService("ReplicatedStorage")
+                    local aero=replicated and replicated:FindFirstChild("Aero")
+                    local remotes=aero and aero:FindFirstChild("AeroRemoteServices")
+                    local interface=remotes and remotes:FindFirstChild("InterfaceService")
+                    local feedback_remote=interface and interface:FindFirstChild("ShowFeedback")
+                    if feedback_remote and not feedback_remote:IsA("RemoteEvent") then feedback_remote=nil end
+                    if feedback_remote~=remote then
+                        if remote_link then remote_link:Disconnect(); remote_link=nil end
+                        remote=feedback_remote
+                        if remote then remote_link=remote.OnClientEvent:Connect(receive) end
                     end
                     local c=current(); local data=c and c.data
                     local root=data and (data.HumanoidRootPart or data.model and data.model:FindFirstChild("HumanoidRootPart"))
@@ -1412,11 +1425,12 @@ local function create_pivot_modules(ctx)
                             label_link=label:GetPropertyChangedSignal("Text"):Connect(function() deliver(observed.Text) end)
                         end
                     end
-                    self.available=native_link~=nil or label_link~=nil
+                    self.available=native_link~=nil or remote_link~=nil or label_link~=nil
                 end
                 scope:defer(function()
                     closed=true
                     if native_link then native_link:Disconnect() end
+                    if remote_link then remote_link:Disconnect() end
                     if label_link then label_link:Disconnect() end
                 end)
                 watch:step(os.clock())
@@ -5374,7 +5388,7 @@ end]])
         local now=os.clock()
         if not force and now<(state.next_history_sample or 0) then return end
         state.next_history_sample=now+2
-        self.farm_decisions=self.farm_decisions or {version=1,build="2026.11.10.01",place=game.PlaceId,rows={}}
+        self.farm_decisions=self.farm_decisions or {version=1,build="2026.11.10.02",place=game.PlaceId,rows={}}
         local ok,c=pcall(local_state); local a=ok and c and c.data and c.data.Attributes or {}
         local court=state.clock_controller and state.clock_controller.CurrentCourt
         local s=self.farm_stats
@@ -5403,7 +5417,7 @@ end]])
             local b=state.bounds
             if b then for _,marker in ipairs(b.markers or {}) do if not marker.Parent or not marker:IsDescendantOf(workspace) then b=nil; break end end end
             local point=b and origin and b.frame:PointToObjectSpace(origin)
-            writefile("vanta_badge_farm_runtime.json",farm_http:JSONEncode({build="2026.11.10.01",status=Engine.farm_status,focused=state.focused,returnReason=state.return_reason,returnAttempts=state.return_attempts,returnError=state.return_error,teleporting=state.teleporting,busy=state.busy,attackDecision=state.attack_decision,retainedShooter=state.contest_shooter and state.contest_shooter.shot,gatherMotion=state.shot_motion and state.shot_motion.kind,stepbackStarted=state.stepback_started,ballCandidates=state.ball_candidates,visibleOpponents=state.visible_opponents,hasPossession=state.has_possession,boundaryReselections=state.boundary_reselections,idle=Engine.farm_idle,inputTransport=move_bridge and "PlayerModule" or "Roblox virtual input",postgame=state.result_seen==true,progressAge=state.health and os.clock()-(state.health.progress_at or state.health.entered),shotClock=state.shot_clock,role=state.role,basketSource=state.basket_source,shotClearance=state.shot_clearance and math.min(999,state.shot_clearance),stats=Engine.farm_stats,
+            writefile("vanta_badge_farm_runtime.json",farm_http:JSONEncode({build="2026.11.10.02",status=Engine.farm_status,focused=state.focused,returnReason=state.return_reason,returnAttempts=state.return_attempts,returnError=state.return_error,teleporting=state.teleporting,busy=state.busy,attackDecision=state.attack_decision,retainedShooter=state.contest_shooter and state.contest_shooter.shot,gatherMotion=state.shot_motion and state.shot_motion.kind,stepbackStarted=state.stepback_started,ballCandidates=state.ball_candidates,visibleOpponents=state.visible_opponents,hasPossession=state.has_possession,boundaryReselections=state.boundary_reselections,idle=Engine.farm_idle,inputTransport=move_bridge and "PlayerModule" or "Roblox virtual input",postgame=state.result_seen==true,progressAge=state.health and os.clock()-(state.health.progress_at or state.health.entered),shotClock=state.shot_clock,role=state.role,basketSource=state.basket_source,shotClearance=state.shot_clearance and math.min(999,state.shot_clearance),stats=Engine.farm_stats,
                 position=origin and {origin.X,origin.Y,origin.Z} or false,bounds=b and point and {source=b.source,x=b.x,z=b.z,localPosition={point.X,point.Y,point.Z}} or false,
                 boundaryBrake=state.boundary_braking==true,guard=state.guard==true,sprint=state.sprinting==true,keys=state.steering_keys or {}}))
         end)
@@ -5565,7 +5579,7 @@ end]])
             farm_session=tostring(os.time())..":"..tostring(os.clock())
             farm_write(true)
             queue([[local ok,c=pcall(function() return game:GetService("HttpService"):JSONDecode(readfile("vanta_badge_farm.json")) end)
-if ok and c.enabled==true and c.session==]]..string.format("%q",farm_session)..[[ then loadstring(game:HttpGet("https://raw.githubusercontent.com/zyhnq/fuckyoumatthew/main/pivot_launcher.lua?v=20261110.01"))() end]])
+if ok and c.enabled==true and c.session==]]..string.format("%q",farm_session)..[[ then loadstring(game:HttpGet("https://raw.githubusercontent.com/zyhnq/fuckyoumatthew/main/pivot_launcher.lua?v=20261110.02"))() end]])
             Engine.farm_status="Starting"; return state
         end,
         step=function(scope,state,s,dt)
@@ -6606,7 +6620,7 @@ do
     local rail_line=frame(shell,20,97,660,1,theme.line)
     local top_line=frame(shell,20,54,660,1,theme.line)
     local logo=label(shell,"VANTA",20,12,140,28,19,theme.text); logo.Font=Enum.Font.GothamBold; logo.TextXAlignment=Enum.TextXAlignment.Left
-    local build_label=label(shell,"BUILD 2026.11.10.01",242,17,150,18,10,theme.muted); build_label.Name="PivotBuild"; build_label.Font=Enum.Font.RobotoMono; build_label.TextWrapped=false
+    local build_label=label(shell,"BUILD 2026.11.10.02",242,17,150,18,10,theme.muted); build_label.Name="PivotBuild"; build_label.Font=Enum.Font.RobotoMono; build_label.TextWrapped=false
     local heading=label(shell,"Practical Basketball",94,14,240,26,11,theme.muted); heading.Font=Enum.Font.GothamMedium
     close.BackgroundColor3=theme.rail; close.TextColor3=theme.muted; close.TextSize=14; corner(close,4)
     local search=make("TextBox",{Text="",PlaceholderText="Find a control...",PlaceholderColor3=theme.muted,Position=UDim2.fromOffset(484,10),Size=UDim2.fromOffset(166,23),
